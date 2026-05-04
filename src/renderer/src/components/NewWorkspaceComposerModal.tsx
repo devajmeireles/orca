@@ -1,21 +1,15 @@
-import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useAppStore } from '@/store'
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle
-} from '@/components/ui/dialog'
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import NewWorkspaceComposerCard from '@/components/NewWorkspaceComposerCard'
 import AgentSettingsDialog from '@/components/agent/AgentSettingsDialog'
 import CreateFromTab from '@/components/new-workspace/CreateFromTab'
+import AnimatedTabPanels from '@/components/new-workspace/AnimatedTabPanels'
 import { useComposerState } from '@/hooks/useComposerState'
 import { AGENT_CATALOG } from '@/lib/agent-catalog'
 import type { LinkedWorkItemSummary } from '@/lib/new-workspace'
 import { shouldSuppressEnterSubmit } from '@/lib/new-workspace-enter-guard'
-import { cn } from '@/lib/utils'
 import type { TuiAgent } from '../../../shared/types'
 
 type ComposerModalData = {
@@ -42,6 +36,36 @@ function ShortcutHint({ children }: { children: React.ReactNode }): React.JSX.El
       {children}
     </span>
   )
+}
+
+function isRestorablePanelFocusTarget(panel: HTMLElement, target: HTMLElement | null): boolean {
+  return Boolean(
+    target &&
+    target.isConnected &&
+    panel.contains(target) &&
+    !target.closest('[aria-hidden="true"]') &&
+    !target.hasAttribute('disabled') &&
+    target.getAttribute('aria-disabled') !== 'true'
+  )
+}
+
+function getComposerPanelFocusTarget(
+  panel: HTMLElement,
+  remembered: HTMLElement | null
+): HTMLElement | null {
+  if (isRestorablePanelFocusTarget(panel, remembered)) {
+    return remembered
+  }
+  for (const selector of [
+    '[data-repo-combobox-root="true"][role="combobox"]',
+    '[data-create-from-search-input="true"]'
+  ]) {
+    const target = panel.querySelector<HTMLElement>(selector)
+    if (isRestorablePanelFocusTarget(panel, target)) {
+      return target
+    }
+  }
+  return null
 }
 
 export default function NewWorkspaceComposerModal(): React.JSX.Element | null {
@@ -115,6 +139,82 @@ function ComposerModalBody({
     onClose()
   }, [onClose])
 
+  // Why: the composer preserves both tab panels across swaps, so users expect
+  // their focus context to survive the round-trip too — switching Quick → Create-from
+  // → Quick should land them back on the Quick field they were last on, not blow
+  // focus back to the top of the form. Track the most recent focused element
+  // inside each panel and restore it on tab activation, falling back to the
+  // panel's RepoCombobox trigger when nothing is remembered yet.
+  const lastFocusedByTabRef = useRef<Record<TabKey, HTMLElement | null>>({
+    quick: null,
+    'create-from': null
+  })
+
+  useEffect(() => {
+    const handler = (event: FocusEvent): void => {
+      const target = event.target
+      if (!(target instanceof HTMLElement)) {
+        return
+      }
+      // Why: Radix popovers (RepoCombobox list, search results) portal outside
+      // the panels, so their focus events resolve to `closest()` → null and
+      // we don't pollute the per-panel memory with transient popover focus.
+      const panel = target.closest<HTMLElement>('[data-composer-panel]')
+      if (!panel) {
+        return
+      }
+      const tab = panel.dataset.composerPanel
+      if (tab === 'quick' || tab === 'create-from') {
+        lastFocusedByTabRef.current[tab] = target
+      }
+    }
+    document.addEventListener('focusin', handler, true)
+    return () => document.removeEventListener('focusin', handler, true)
+  }, [])
+
+  const prevActiveTabRef = useRef<TabKey | null>(null)
+  useEffect(() => {
+    const prev = prevActiveTabRef.current
+    prevActiveTabRef.current = activeTab
+    // Why: skip the initial mount — the dialog's onOpenAutoFocus below handles
+    // that case. This effect only runs for user-driven tab swaps.
+    if (prev === null || prev === activeTab) {
+      return
+    }
+    // Why: when the panel class flips from visible → invisible, Chrome blurs
+    // whatever element was focused inside the leaving panel. Radix Dialog's
+    // FocusScope notices the blur and synchronously focuses the first tabbable
+    // inside the dialog (a tab trigger) on a microtask. A plain synchronous
+    // focus in this effect lands first, then FocusScope clobbers it.
+    // setTimeout(..., 0) schedules our focus as a macrotask, which runs after
+    // FocusScope's microtask restoration settles.
+    let frame = 0
+    const restoreFocus = (): void => {
+      const panel = document.querySelector<HTMLElement>(`[data-composer-panel="${activeTab}"]`)
+      if (!panel) {
+        return
+      }
+      // Why: the Quick panel is remounted via `quickKey` after a Create-from
+      // fallback, and Create-from can hide parts of itself while preserving
+      // DOM. Validate the remembered node before restoring it.
+      const target = getComposerPanelFocusTarget(panel, lastFocusedByTabRef.current[activeTab])
+      target?.focus({ preventScroll: true })
+    }
+    const timer = window.setTimeout(() => {
+      restoreFocus()
+      // Why: Radix popover close-auto-focus and tab panel visibility changes
+      // can run in the same turn as the tab swap. A frame-late restore makes
+      // the active panel win without remounting either tab.
+      frame = window.requestAnimationFrame(restoreFocus)
+    }, 0)
+    return () => {
+      window.clearTimeout(timer)
+      if (frame !== 0) {
+        window.cancelAnimationFrame(frame)
+      }
+    }
+  }, [activeTab])
+
   return (
     <Dialog open onOpenChange={onOpenChange}>
       <DialogContent
@@ -124,21 +224,18 @@ function ComposerModalBody({
         // feel unstable every time the user toggled tabs.
         className="flex flex-col sm:max-w-lg"
         onOpenAutoFocus={(event) => {
-          // Why: Radix's FocusScope fires this once the dialog has mounted and
-          // the DOM is ready. preventDefault stops it from focusing the first
-          // tabbable in the Quick tab (the repo combobox trigger) when the
-          // Create-from tab is active — that tab wants the search input to
-          // own initial focus. The QuickTabBody handles its own focus below
-          // when the Quick tab is active.
-          if (activeTab === 'create-from') {
-            return
-          }
+          // Why: Radix's FocusScope fires this once the dialog has mounted.
+          // preventDefault stops it from focusing whatever first-tabbable it
+          // picks (tab trigger, close button), and we instead focus the
+          // RepoCombobox inside the active panel so both Quick and Create-from
+          // open with the same top-of-form anchor.
           event.preventDefault()
           const content = event.currentTarget as HTMLElement
-          const trigger = content.querySelector<HTMLElement>(
-            '[data-repo-combobox-root="true"][role="combobox"]'
-          )
-          trigger?.focus({ preventScroll: true })
+          const panel = content.querySelector<HTMLElement>(`[data-composer-panel="${activeTab}"]`)
+          getComposerPanelFocusTarget(
+            panel ?? content,
+            lastFocusedByTabRef.current[activeTab]
+          )?.focus({ preventScroll: true })
         }}
       >
         <Tabs
@@ -165,7 +262,7 @@ function ComposerModalBody({
             className="-mt-4 h-8 w-full justify-start gap-6 border-b border-border/60 px-0 pr-8"
           >
             <TabsTrigger value="quick" className="flex-none gap-2 px-0 text-xs font-medium">
-              Form
+              Create
               <ShortcutHint>{tabShortcut.quick}</ShortcutHint>
             </TabsTrigger>
             <TabsTrigger value="create-from" className="flex-none gap-2 px-0 text-xs font-medium">
@@ -176,11 +273,6 @@ function ComposerModalBody({
 
           <DialogHeader className="gap-1 pt-4">
             <DialogTitle className="text-base font-semibold">Create Workspace</DialogTitle>
-            <DialogDescription className="text-xs text-muted-foreground">
-              {activeTab === 'quick'
-                ? 'Pick a repository and agent to spin up a new workspace.'
-                : 'Start from an existing PR, issue, branch, or Linear ticket.'}
-            </DialogDescription>
           </DialogHeader>
 
           <AnimatedTabPanels active={activeTab}>
@@ -321,24 +413,6 @@ function QuickTabBody({
     return () => window.removeEventListener('keydown', onKeyDown, { capture: true })
   }, [active, composerRef, createDisabled, handleCreate, onClose])
 
-  // Why: when the Quick tab becomes active (initial mount, or switched to
-  // from Create-from), focus the repo combobox trigger so the confirmed
-  // selection sits ready and the keyboard flow starts at the top of the
-  // form — matching Dialog's onOpenAutoFocus behavior in the pre-tabs modal.
-  useEffect(() => {
-    if (!active) {
-      return
-    }
-    const root = composerRef.current
-    if (!root) {
-      return
-    }
-    const trigger = root.querySelector<HTMLElement>(
-      '[data-repo-combobox-root="true"][role="combobox"]'
-    )
-    trigger?.focus({ preventScroll: true })
-  }, [active, composerRef])
-
   return (
     <>
       <NewWorkspaceComposerCard
@@ -356,159 +430,3 @@ function QuickTabBody({
 }
 
 type TabKey = 'quick' | 'create-from'
-
-/**
- * Keeps both tab panels mounted so their local state (typed query on
- * Create-from, repo pick / workspace name on Quick) survives a tab swap.
- * Only the active panel is in normal flow; the inactive panel is
- * absolutely positioned + `visibility: hidden` + `pointer-events-none`
- * so it
- *   (a) doesn't contribute to DialogContent's scrollHeight (otherwise the
- *       host dialog grows a scrollbar whenever the inactive panel is
- *       taller than the active one), and
- *   (b) keeps its React subtree mounted (no remount, so input focus,
- *       typed query, and selection survive).
- *
- * The wrapper's height is JS-driven: a ResizeObserver on the active
- * panel's inner node keeps wrapper height in sync with content so the
- * wrapper never clips. On tab change we capture the pre-swap wrapper
- * height and transition to the new active panel's measured height — a
- * FLIP-style animation so the modal resizes smoothly rather than
- * snapping.
- */
-function AnimatedTabPanels({
-  active,
-  children
-}: {
-  active: TabKey
-  children: Record<TabKey, React.ReactNode>
-}): React.JSX.Element {
-  const wrapperRef = useRef<HTMLDivElement | null>(null)
-  const quickRef = useRef<HTMLDivElement | null>(null)
-  const createFromRef = useRef<HTMLDivElement | null>(null)
-  const previousActiveRef = useRef<TabKey>(active)
-  const [wrapperHeight, setWrapperHeight] = useState<number | null>(null)
-  const [isAnimating, setIsAnimating] = useState(false)
-
-  // Why: track the active panel's intrinsic height via ResizeObserver so
-  // the wrapper follows content (Advanced drawer open/close, async search
-  // results landing). When active changes, the FLIP effect below runs
-  // first (capturing the outgoing height), then this observer swings the
-  // wrapper height toward the new active panel's height via the CSS
-  // transition on `height`.
-  //
-  // Why offsetHeight and not getBoundingClientRect().height: Radix's
-  // dialog open animation (`data-[state=open]:zoom-in-95`) scales the
-  // dialog from 0.95 → 1.0 over 200ms. getBoundingClientRect reports the
-  // *visual* (transformed) height, so the very first measurement lands at
-  // ~95 % of the real layout size and pins that into the inline height.
-  // The ResizeObserver never refires because actual layout size didn't
-  // change — only the transform did — so the wrapper stays permanently
-  // ~16 px short and clips the Create Workspace button at the bottom.
-  // offsetHeight returns the un-transformed layout box, which is what the
-  // wrapper should match.
-  useLayoutEffect(() => {
-    const target = active === 'quick' ? quickRef.current : createFromRef.current
-    if (!target) {
-      return
-    }
-    const update = (): void => {
-      const next = target.offsetHeight
-      if (next > 0) {
-        setWrapperHeight(next)
-      }
-    }
-    update()
-    const observer = new ResizeObserver(update)
-    observer.observe(target)
-    return () => observer.disconnect()
-  }, [active])
-
-  // Why: on tab swap, override the observer-driven height for one frame
-  // so the transition starts from the outgoing panel's size. Without this
-  // the wrapper would snap to the new panel's height before the ResizeObserver
-  // could read it.
-  useLayoutEffect(() => {
-    const prev = previousActiveRef.current
-    previousActiveRef.current = active
-    if (prev === active) {
-      return
-    }
-    const wrapper = wrapperRef.current
-    if (!wrapper) {
-      return
-    }
-    // Why: offsetHeight, not getBoundingClientRect — see comment on the
-    // observer effect above. Same transform-scale trap applies to this
-    // FLIP capture if a tab swap happens while any ancestor transform is
-    // still animating.
-    const from = wrapper.offsetHeight
-    if (from > 0) {
-      setWrapperHeight(from)
-      setIsAnimating(true)
-    }
-  }, [active])
-
-  useEffect(() => {
-    const wrapper = wrapperRef.current
-    if (!wrapper || !isAnimating) {
-      return
-    }
-    const onEnd = (event: TransitionEvent): void => {
-      if (event.propertyName !== 'height') {
-        return
-      }
-      setIsAnimating(false)
-    }
-    wrapper.addEventListener('transitionend', onEnd)
-    return () => wrapper.removeEventListener('transitionend', onEnd)
-  }, [isAnimating])
-
-  return (
-    <div
-      ref={wrapperRef}
-      // Why: `overflow: clip` isolates the absolutely-positioned inactive
-      // panel so the wrapper's measured height drives the dialog (not the
-      // stacked panel heights). We avoid plain `overflow: hidden` because
-      // that also clips the 3px focus rings painted by nested inputs
-      // (RepoCombobox, workspace name field, etc.) — the inner panels are
-      // `inset-x-0` so their triggers sit flush against the wrapper edges,
-      // leaving no room for a ring to paint. `overflow-clip-margin` gives
-      // the ring breathing room on every side without re-introducing scroll
-      // containers or letting the inactive panel leak layout.
-      className={cn(
-        'relative overflow-clip',
-        isAnimating && 'transition-[height] duration-200 ease-out'
-      )}
-      style={{
-        ...(wrapperHeight !== null ? { height: wrapperHeight } : null),
-        overflowClipMargin: '8px'
-      }}
-    >
-      <div
-        ref={quickRef}
-        className={cn(
-          'pt-4',
-          active === 'quick'
-            ? 'pointer-events-auto'
-            : 'pointer-events-none invisible absolute inset-x-0 top-0'
-        )}
-        aria-hidden={active !== 'quick'}
-      >
-        {children.quick}
-      </div>
-      <div
-        ref={createFromRef}
-        className={cn(
-          'pt-3',
-          active === 'create-from'
-            ? 'pointer-events-auto'
-            : 'pointer-events-none invisible absolute inset-x-0 top-0'
-        )}
-        aria-hidden={active !== 'create-from'}
-      >
-        {children['create-from']}
-      </div>
-    </div>
-  )
-}

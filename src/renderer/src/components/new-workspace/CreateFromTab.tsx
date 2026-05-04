@@ -2,7 +2,7 @@
 and Linear sub-tabs + their fetch/resolve/launch plumbing so the "Create from…"
 entry point lives in one file. Splitting would scatter debounce/caching logic
 that only these sub-tabs use. */
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 import {
   CircleDot,
@@ -188,30 +188,6 @@ export default function CreateFromTab({
     return () => window.clearTimeout(timer)
   }, [query])
 
-  // Why: auto-focus the search input when this tab becomes visible — but
-  // only when it's actually visible AND the parent tab-panel height
-  // transition has settled. Without the `active` guard, the
-  // AnimatedTabPanels wrapper (which keeps both panels mounted for
-  // state-preservation) would let the search field steal focus from the
-  // Quick tab's repo combobox on modal open. The transition-settle delay
-  // matters because focusing the input fires onFocus → setResultsOpen(true)
-  // → Popover positions against the anchor. If the anchor is still moving
-  // (AnimatedTabPanels animates the wrapper height over ~200ms), Radix
-  // anchors the popover mid-flight and it visibly drifts down as the
-  // layout settles. Waiting past the transition lets Radix place it
-  // against the final input position from the start.
-  useEffect(() => {
-    if (!active) {
-      return
-    }
-    const el = searchInputRef.current
-    if (!el) {
-      return
-    }
-    const timer = window.setTimeout(() => el.focus({ preventScroll: true }), 220)
-    return () => window.clearTimeout(timer)
-  }, [active])
-
   // Why: the results popover is portaled outside this panel, so switching
   // to the Quick tab (via click or the ⌘N hotkey) doesn't unmount or hide
   // it — users would see the CreateFrom dropdown floating over the Quick
@@ -220,6 +196,19 @@ export default function CreateFromTab({
     if (!active) {
       setResultsOpen(false)
     }
+  }, [active])
+
+  // Why: PopoverContent's default `onCloseAutoFocus` restores focus to the
+  // anchor (the search input) when the popover closes. When the parent
+  // switches tabs it closes the popover as a side effect, which would steal
+  // focus away from whatever target the parent's tab-switch focus logic just
+  // focused on the newly-active panel. Track active via a ref so the handler
+  // below can preventDefault the restore only in the tab-swap case without
+  // affecting normal close flows (Escape, row select) where returning focus
+  // to the input is correct.
+  const activeRef = useRef(active)
+  useLayoutEffect(() => {
+    activeRef.current = active
   }, [active])
 
   const selectedRepo = useMemo(
@@ -987,7 +976,7 @@ export default function CreateFromTab({
         )}
         aria-hidden={!showGhRepoPicker}
       >
-        <div className="min-h-0 overflow-hidden">
+        <div className={cn('min-h-0', showGhRepoPicker ? 'overflow-visible' : 'overflow-hidden')}>
           <div className="space-y-1">
             <label className="text-xs font-medium text-muted-foreground">Repository</label>
             <RepoCombobox
@@ -995,7 +984,12 @@ export default function CreateFromTab({
               value={selectedRepoId}
               onValueChange={setSelectedRepoId}
               placeholder="Repository"
-              triggerClassName="h-8 w-full border-input text-xs"
+              // Why: mirror the Quick tab's explicit `focus:` ring. Programmatic
+              // .focus() from the modal's tab-switch restore does not reliably
+              // trigger :focus-visible in Chromium, so without this class the
+              // focused combobox paints no ring and the user can't tell focus
+              // landed after a tab swap.
+              triggerClassName="h-8 w-full border-input text-xs focus:border-ring focus:ring-[3px] focus:ring-ring/50"
               showStandaloneAddButton={false}
             />
           </div>
@@ -1049,6 +1043,7 @@ export default function CreateFromTab({
                     value={selectedLabel ?? query}
                     readOnly={launching}
                     aria-busy={launching}
+                    data-create-from-search-input="true"
                     onChange={(e) => {
                       if (launching) {
                         return
@@ -1169,6 +1164,18 @@ export default function CreateFromTab({
                   // filter results. Without preventDefault the popover
                   // would pull focus to its first child on open.
                   event.preventDefault()
+                }}
+                onCloseAutoFocus={(event) => {
+                  // Why: the parent closes this popover as a side effect of
+                  // tab-switching (⌘N / ⌘⇧N / clicking the other tab), and the
+                  // default focus-restore to the search input would then
+                  // clobber the focus the parent just placed on the newly-
+                  // active panel. Suppress the restore whenever this tab is
+                  // no longer active; normal closes (Escape, row select) still
+                  // get the default return-to-input behavior.
+                  if (!activeRef.current) {
+                    event.preventDefault()
+                  }
                 }}
                 onPointerDownOutside={(event) => {
                   // Why: the search input is the popover's anchor (not its
