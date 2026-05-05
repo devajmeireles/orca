@@ -702,6 +702,26 @@ export default function SmartWorkspaceNameField({
                         !event.ctrlKey &&
                         !event.shiftKey
                       ) {
+                        // Why: when the user types faster than the search
+                        // debounce, `rows`/`commandValue` still reflect the
+                        // previous query — pressing Enter would silently pick
+                        // a stale source row (e.g., a PR from the prior
+                        // letters). Treat results as stale while the search
+                        // is loading or the debounced query hasn't caught up
+                        // to the input value, and commit the typed text
+                        // instead. In Smart/Branches that lines up with the
+                        // use-name / create-branch row the user would have
+                        // wanted; in GitHub/Linear it preserves what they
+                        // typed rather than firing a wrong-source pick.
+                        const trimmed = value.trim()
+                        const stale =
+                          trimmed.length > 0 && (loading || debouncedQuery.trim() !== trimmed)
+                        if (stale) {
+                          event.preventDefault()
+                          onValueChange(trimmed)
+                          setOpen(false)
+                          return
+                        }
                         if (open && rows.length > 0) {
                           const row = rows.find((entry) => entry.value === commandValue)
                           if (row) {
