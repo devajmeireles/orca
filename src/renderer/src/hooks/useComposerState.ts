@@ -367,13 +367,14 @@ export function useComposerState(options: UseComposerStateOptions): UseComposerS
   const [selectedRepoSlug, setSelectedRepoSlug] = useState<{ owner: string; repo: string } | null>(
     null
   )
+  const selectedRepoPath = selectedRepo?.path
   useEffect(() => {
-    if (!selectedRepo) {
+    if (!selectedRepoPath) {
       setSelectedRepoSlug(null)
       return
     }
     let cancelled = false
-    void (window.api.gh.repoSlug({ repoPath: selectedRepo.path }) as Promise<{
+    void (window.api.gh.repoSlug({ repoPath: selectedRepoPath }) as Promise<{
       owner: string
       repo: string
     } | null>)
@@ -391,7 +392,7 @@ export function useComposerState(options: UseComposerStateOptions): UseComposerS
     return () => {
       cancelled = true
     }
-  }, [selectedRepo?.id, selectedRepo?.path])
+  }, [selectedRepoPath])
   const sparsePresetsForRepo = sparsePresetsByRepo[repoId]
   const sparsePresets = sparsePresetsForRepo ?? EMPTY_SPARSE_PRESETS
   const normalizedSparseDirectories = useMemo(
