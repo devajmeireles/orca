@@ -10,7 +10,12 @@ import {
 } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
-import { createManagedCommandMatcher, writeHooksJson, type HooksConfig } from './installer-utils'
+import {
+  createManagedCommandMatcher,
+  wrapPosixHookCommand,
+  writeHooksJson,
+  type HooksConfig
+} from './installer-utils'
 
 let tmpDir: string
 let configPath: string
@@ -140,5 +145,32 @@ describe('createManagedCommandMatcher', () => {
 
   it('does not match hooks for a different agent', () => {
     expect(match('/bin/sh "/path/agent-hooks/gemini-hook.sh"')).toBe(false)
+  })
+
+  it('matches the guarded launcher form so wrapped commands sweep correctly', () => {
+    // Why: wrapPosixHookCommand wraps the launcher in `[ -x ... ] && ... || true`
+    // so a stale entry no-ops instead of returning exit 127. The sweep on
+    // install() must still recognize the guarded form as managed, otherwise
+    // repeated installs would accumulate one guarded + one unguarded entry.
+    expect(
+      match(
+        '[ -x "/Users/alice/Library/Application Support/Orca/agent-hooks/claude-hook.sh" ] && /bin/sh "/Users/alice/Library/Application Support/Orca/agent-hooks/claude-hook.sh" || true'
+      )
+    ).toBe(true)
+  })
+})
+
+describe('wrapPosixHookCommand', () => {
+  it('produces a guarded command that no-ops when the script is missing', () => {
+    const cmd = wrapPosixHookCommand('/does/not/exist.sh')
+    expect(cmd).toBe('[ -x "/does/not/exist.sh" ] && /bin/sh "/does/not/exist.sh" || true')
+  })
+
+  it('preserves spaces in the script path (Library/Application Support case)', () => {
+    // Why: Electron's userData on macOS lives under "Application Support" with
+    // a space. The guard must keep the path quoted so `[ -x ]` and `/bin/sh`
+    // each see one argument.
+    const cmd = wrapPosixHookCommand('/Users/a/Library/Application Support/Orca/agent-hooks/x.sh')
+    expect(cmd).toContain('"/Users/a/Library/Application Support/Orca/agent-hooks/x.sh"')
   })
 })
