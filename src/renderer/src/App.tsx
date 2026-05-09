@@ -982,7 +982,11 @@ function App(): React.JSX.Element {
       className="flex flex-col h-screen w-screen overflow-hidden"
       style={
         {
-          '--collapsed-sidebar-header-width': `${collapsedSidebarHeaderWidth}px`
+          '--collapsed-sidebar-header-width': `${collapsedSidebarHeaderWidth}px`,
+          // Why: consumed by anything that needs to avoid the fixed-position
+          // window-controls overlay on Windows (floating sidebar toggle, right
+          // sidebar header, etc.) without hardcoding 138px in multiple places.
+          '--window-controls-width': isWindows ? '138px' : '0px'
         } as React.CSSProperties
       }
     >
@@ -1095,8 +1099,11 @@ function App(): React.JSX.Element {
                     a few pixels, which reads as layout jitter. */}
                 {workspaceActive && !rightSidebarOpen && (
                   <div
-                    className="absolute top-0 right-0 z-10 flex items-center h-[36px]"
-                    style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
+                    className="absolute top-0 z-10 flex items-center h-[36px]"
+                    style={{
+                      right: 'var(--window-controls-width)',
+                      WebkitAppRegion: 'no-drag'
+                    } as React.CSSProperties}
                   >
                     {rightSidebarToggle}
                   </div>

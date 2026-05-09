@@ -416,7 +416,9 @@
   opacity: 0.75;
 }
 
-:not(.dark) .titlebar-logo {
+/* Why: .dark is toggled on <html> (the :root), so :not(.dark) on a descendant
+   always matches. Scope to :root:not(.dark) to correctly target light mode only. */
+:root:not(.dark) .titlebar-logo {
   filter: invert(1);
 }
 
@@ -463,7 +465,15 @@
    the fixed-position overlay on Windows. */
 .window-controls-titlebar-spacer {
   flex-shrink: 0;
-  width: 138px;
+  width: var(--window-controls-width, 0px);
+}
+
+/* Why: the right sidebar header extends to the window's right edge. On Windows
+   the fixed-position window-controls overlay sits on top of that edge, so we
+   add matching padding-right so the header's close button (pr-1) isn't hidden
+   behind the overlay. --window-controls-width is 0px on non-Windows. */
+.right-sidebar-header-inset {
+  padding-right: var(--window-controls-width, 0px);
 }
 
 .sidebar-toggle {
