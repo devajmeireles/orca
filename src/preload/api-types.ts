@@ -1101,6 +1101,7 @@ export type PreloadApi = {
     onFullscreenChanged: (callback: (isFullScreen: boolean) => void) => () => void
     minimize: () => void
     maximize: () => void
+    isMaximized: () => Promise<boolean>
     onMaximizeChanged: (callback: (isMaximized: boolean) => void) => () => void
     requestClose: () => void
     popupMenu: () => void
@@ -1222,7 +1223,7 @@ export type PreloadApi = {
     listNetworkInterfaces: () => Promise<{
       interfaces: { name: string; address: string }[]
     }>
-    getPairingQR: (args?: { address?: string }) => Promise<
+    getPairingQR: (args?: { address?: string; rotate?: boolean }) => Promise<
       | { available: false }
       | {
           available: true
