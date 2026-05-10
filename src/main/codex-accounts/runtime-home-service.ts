@@ -44,6 +44,7 @@ export class CodexRuntimeHomeService {
   // login (e.g. `codex auth login`) overwrote it — so Orca adopts the file as
   // the new system default instead of restoring a stale snapshot.
   private lastWrittenAuthJson: string | null = null
+  private skipNextReadBackForAccountId: string | null = null
 
   constructor(private readonly store: Store) {
     this.safeMigrateLegacyManagedState()
@@ -57,12 +58,12 @@ export class CodexRuntimeHomeService {
   }
 
   prepareForCodexLaunch(): string {
-    this.safeSyncForCurrentSelection()
+    this.syncForCurrentSelection()
     return this.getRuntimeHomePath()
   }
 
   prepareForRateLimitFetch(): string {
-    this.safeSyncForCurrentSelection()
+    this.syncForCurrentSelection()
     return this.getRuntimeHomePath()
   }
 
@@ -103,8 +104,6 @@ export class CodexRuntimeHomeService {
       return
     }
 
-    this.captureSystemDefaultSnapshot({ force: this.lastSyncedAccountId === null })
-
     const activeAuthPath = join(activeAccount.managedHomePath, 'auth.json')
     if (!existsSync(activeAuthPath)) {
       console.warn(
@@ -118,16 +117,27 @@ export class CodexRuntimeHomeService {
       return
     }
 
+    if (this.lastSyncedAccountId === null) {
+      this.captureSystemDefaultSnapshot({ force: true })
+    }
+
     // Why: Codex CLI refreshes expired OAuth tokens and writes them back to
     // ~/.codex/auth.json. If we detect the runtime file differs from what Orca
     // last wrote, the CLI must have refreshed — so we preserve those tokens
     // back to managed storage before overwriting runtime with managed state.
     if (this.lastSyncedAccountId === activeAccount.id) {
-      this.readBackRefreshedTokens(activeAccount, activeAuthPath, {
-        updateLastWrittenAuthJson: true
-      })
+      if (this.skipNextReadBackForAccountId === activeAccount.id) {
+        this.skipNextReadBackForAccountId = null
+      } else {
+        this.readBackRefreshedTokens(activeAccount, activeAuthPath, {
+          updateLastWrittenAuthJson: true
+        })
+      }
     }
 
+    if (this.lastSyncedAccountId !== activeAccount.id) {
+      this.skipNextReadBackForAccountId = null
+    }
     this.lastSyncedAccountId = activeAccount.id
     this.writeRuntimeAuth(readFileSync(activeAuthPath, 'utf-8'))
   }
@@ -136,8 +146,9 @@ export class CodexRuntimeHomeService {
   // re-auth or add-account. Those flows write fresh tokens to managed storage,
   // so the read-back must be skipped to avoid overwriting them with stale
   // runtime tokens.
-  clearLastWrittenAuthJson(): void {
+  clearLastWrittenAuthJson(accountId = this.store.getSettings().activeCodexManagedAccountId): void {
     this.lastWrittenAuthJson = null
+    this.skipNextReadBackForAccountId = accountId
   }
 
   private readBackRefreshedTokens(
@@ -151,12 +162,8 @@ export class CodexRuntimeHomeService {
         return 'unchanged'
       }
 
-      if (this.lastWrittenAuthJson === null) {
-        return 'unchanged'
-      }
-
       const runtimeContents = readFileSync(runtimeAuthPath, 'utf-8')
-      if (runtimeContents === this.lastWrittenAuthJson) {
+      if (this.lastWrittenAuthJson !== null && runtimeContents === this.lastWrittenAuthJson) {
         return 'unchanged'
       }
 
@@ -552,6 +559,8 @@ export class CodexRuntimeHomeService {
 
     const snapshotPath = this.getSystemDefaultSnapshotPath()
     if (!existsSync(snapshotPath)) {
+      rmSync(this.getRuntimeAuthPath(), { force: true })
+      this.lastWrittenAuthJson = null
       return
     }
 

@@ -187,13 +187,9 @@ describe('ClaudeRuntimeAuthService', () => {
     expect(readFileSync(runtimeCredentialsPath, 'utf-8')).toBe('{"token":"managed"}\n')
   })
 
-  it('falls back to atomic write when the unchanged check cannot read the target', async () => {
-    if (process.platform === 'win32') {
-      return
-    }
-
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+  it('removes runtime credentials when deselecting with a missing system-default snapshot', async () => {
     const runtimeCredentialsPath = join(testState.fakeHomeDir, '.claude', '.credentials.json')
+    writeFileSync(runtimeCredentialsPath, '{"token":"managed"}\n', 'utf-8')
     const managedAuthPath = createManagedClaudeAuth(
       testState.userDataDir,
       'account-1',
@@ -207,6 +203,36 @@ describe('ClaudeRuntimeAuthService', () => {
 
     const { ClaudeRuntimeAuthService } = await import('./runtime-auth-service')
     const service = new ClaudeRuntimeAuthService(store as never)
+
+    settings.activeClaudeManagedAccountId = null
+    await service.syncForCurrentSelection()
+
+    expect(existsSync(runtimeCredentialsPath)).toBe(false)
+    if (process.platform === 'darwin') {
+      expect(testState.activeKeychainCredentials).toBeNull()
+    }
+  })
+
+  it('falls back to atomic write when the unchanged check cannot read the target', async () => {
+    if (process.platform === 'win32') {
+      return
+    }
+
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const runtimeCredentialsPath = join(testState.fakeHomeDir, '.claude', '.credentials.json')
+    const managedAuthPath = createManagedClaudeAuth(
+      testState.userDataDir,
+      'account-1',
+      '{"token":"managed"}\n'
+    )
+    const settings = createSettings({
+      claudeManagedAccounts: [createClaudeAccount('account-1', managedAuthPath)]
+    })
+    const store = createStore(settings)
+
+    const { ClaudeRuntimeAuthService } = await import('./runtime-auth-service')
+    const service = new ClaudeRuntimeAuthService(store as never)
+    settings.activeClaudeManagedAccountId = 'account-1'
     await service.syncForCurrentSelection()
 
     testState.managedKeychainCredentials.set('account-1', '{"token":"rotated"}\n')
@@ -236,13 +262,13 @@ describe('ClaudeRuntimeAuthService', () => {
       '{"token":"managed"}\n'
     )
     const settings = createSettings({
-      claudeManagedAccounts: [createClaudeAccount('account-1', managedAuthPath)],
-      activeClaudeManagedAccountId: 'account-1'
+      claudeManagedAccounts: [createClaudeAccount('account-1', managedAuthPath)]
     })
     const store = createStore(settings)
 
     const { ClaudeRuntimeAuthService } = await import('./runtime-auth-service')
     const service = new ClaudeRuntimeAuthService(store as never)
+    settings.activeClaudeManagedAccountId = 'account-1'
     await service.syncForCurrentSelection()
     chmodSync(runtimeCredentialsPath, 0o644)
     await service.syncForCurrentSelection()
@@ -260,6 +286,33 @@ describe('ClaudeRuntimeAuthService', () => {
       originalCredentials
     )
     const settings = createSettings({
+      claudeManagedAccounts: [createClaudeAccount('account-1', managedAuthPath)]
+    })
+    const store = createStore(settings)
+
+    const { ClaudeRuntimeAuthService } = await import('./runtime-auth-service')
+    const service = new ClaudeRuntimeAuthService(store as never)
+    settings.activeClaudeManagedAccountId = 'account-1'
+    await service.syncForCurrentSelection()
+
+    writeFileSync(runtimeCredentialsPath, refreshedCredentials, 'utf-8')
+    await service.syncForCurrentSelection()
+
+    expect(readManagedCredentialsForTest('account-1', managedAuthPath)).toBe(refreshedCredentials)
+    expect(readFileSync(runtimeCredentialsPath, 'utf-8')).toBe(refreshedCredentials)
+  })
+
+  it('reads back verified same-account credentials on first sync after restart', async () => {
+    const runtimeCredentialsPath = join(testState.fakeHomeDir, '.claude', '.credentials.json')
+    const originalCredentials = createClaudeCredentialsJson('user@example.com', 'original')
+    const refreshedCredentials = createClaudeCredentialsJson('user@example.com', 'refreshed')
+    writeFileSync(runtimeCredentialsPath, refreshedCredentials, 'utf-8')
+    const managedAuthPath = createManagedClaudeAuth(
+      testState.userDataDir,
+      'account-1',
+      originalCredentials
+    )
+    const settings = createSettings({
       claudeManagedAccounts: [createClaudeAccount('account-1', managedAuthPath)],
       activeClaudeManagedAccountId: 'account-1'
     })
@@ -267,9 +320,6 @@ describe('ClaudeRuntimeAuthService', () => {
 
     const { ClaudeRuntimeAuthService } = await import('./runtime-auth-service')
     const service = new ClaudeRuntimeAuthService(store as never)
-    await service.syncForCurrentSelection()
-
-    writeFileSync(runtimeCredentialsPath, refreshedCredentials, 'utf-8')
     await service.syncForCurrentSelection()
 
     expect(readManagedCredentialsForTest('account-1', managedAuthPath)).toBe(refreshedCredentials)
@@ -286,13 +336,13 @@ describe('ClaudeRuntimeAuthService', () => {
       selectedCredentials
     )
     const settings = createSettings({
-      claudeManagedAccounts: [createClaudeAccount('account-1', managedAuthPath)],
-      activeClaudeManagedAccountId: 'account-1'
+      claudeManagedAccounts: [createClaudeAccount('account-1', managedAuthPath)]
     })
     const store = createStore(settings)
 
     const { ClaudeRuntimeAuthService } = await import('./runtime-auth-service')
     const service = new ClaudeRuntimeAuthService(store as never)
+    settings.activeClaudeManagedAccountId = 'account-1'
     await service.syncForCurrentSelection()
 
     writeFileSync(runtimeCredentialsPath, staleCredentials, 'utf-8')
@@ -340,13 +390,13 @@ describe('ClaudeRuntimeAuthService', () => {
       selectedCredentials
     )
     const settings = createSettings({
-      claudeManagedAccounts: [createClaudeAccount('account-1', managedAuthPath)],
-      activeClaudeManagedAccountId: 'account-1'
+      claudeManagedAccounts: [createClaudeAccount('account-1', managedAuthPath)]
     })
     const store = createStore(settings)
 
     const { ClaudeRuntimeAuthService } = await import('./runtime-auth-service')
     const service = new ClaudeRuntimeAuthService(store as never)
+    settings.activeClaudeManagedAccountId = 'account-1'
     await service.syncForCurrentSelection()
 
     writeFileSync(runtimeCredentialsPath, staleCredentials, 'utf-8')
@@ -450,13 +500,13 @@ describe('ClaudeRuntimeAuthService', () => {
       originalCredentials
     )
     const settings = createSettings({
-      claudeManagedAccounts: [createClaudeAccount('account-1', managedAuthPath)],
-      activeClaudeManagedAccountId: 'account-1'
+      claudeManagedAccounts: [createClaudeAccount('account-1', managedAuthPath)]
     })
     const store = createStore(settings)
 
     const { ClaudeRuntimeAuthService } = await import('./runtime-auth-service')
     const service = new ClaudeRuntimeAuthService(store as never)
+    settings.activeClaudeManagedAccountId = 'account-1'
     await service.syncForCurrentSelection()
 
     writeFileSync(runtimeCredentialsPath, refreshedCredentials, 'utf-8')
@@ -484,13 +534,13 @@ describe('ClaudeRuntimeAuthService', () => {
         createClaudeAccount('account-1', managedAuthPath, {
           organizationUuid: 'org-1'
         })
-      ],
-      activeClaudeManagedAccountId: 'account-1'
+      ]
     })
     const store = createStore(settings)
 
     const { ClaudeRuntimeAuthService } = await import('./runtime-auth-service')
     const service = new ClaudeRuntimeAuthService(store as never)
+    settings.activeClaudeManagedAccountId = 'account-1'
     await service.syncForCurrentSelection()
 
     writeFileSync(runtimeCredentialsPath, externalCredentials, 'utf-8')
@@ -515,13 +565,13 @@ describe('ClaudeRuntimeAuthService', () => {
     const settings = createSettings({
       claudeManagedAccounts: [
         createClaudeAccount('account-1', managedAuthPath, { email: 'selected@example.com' })
-      ],
-      activeClaudeManagedAccountId: 'account-1'
+      ]
     })
     const store = createStore(settings)
 
     const { ClaudeRuntimeAuthService } = await import('./runtime-auth-service')
     const service = new ClaudeRuntimeAuthService(store as never)
+    settings.activeClaudeManagedAccountId = 'account-1'
     await service.syncForCurrentSelection()
 
     writeFileSync(runtimeCredentialsPath, staleCredentials, 'utf-8')
@@ -569,6 +619,91 @@ describe('ClaudeRuntimeAuthService', () => {
     expect(readFileSync(runtimeCredentialsPath, 'utf-8')).toBe(account2Credentials)
   })
 
+  it('does not carry the reauth read-back skip across Claude account switches', async () => {
+    const runtimeCredentialsPath = join(testState.fakeHomeDir, '.claude', '.credentials.json')
+    const account1Credentials = createClaudeCredentialsJson('one@example.com', 'one')
+    const account2Credentials = createClaudeCredentialsJson('two@example.com', 'two')
+    const account2RefreshedCredentials = createClaudeCredentialsJson(
+      'two@example.com',
+      'two-refreshed'
+    )
+    const managedAuthPath1 = createManagedClaudeAuth(
+      testState.userDataDir,
+      'account-1',
+      account1Credentials
+    )
+    const managedAuthPath2 = createManagedClaudeAuth(
+      testState.userDataDir,
+      'account-2',
+      account2Credentials
+    )
+    const settings = createSettings({
+      claudeManagedAccounts: [
+        createClaudeAccount('account-1', managedAuthPath1, { email: 'one@example.com' }),
+        createClaudeAccount('account-2', managedAuthPath2, { email: 'two@example.com' })
+      ],
+      activeClaudeManagedAccountId: 'account-1'
+    })
+    const store = createStore(settings)
+
+    const { ClaudeRuntimeAuthService } = await import('./runtime-auth-service')
+    const service = new ClaudeRuntimeAuthService(store as never)
+    await service.syncForCurrentSelection()
+
+    service.clearLastWrittenCredentialsJson()
+    settings.activeClaudeManagedAccountId = 'account-2'
+    await service.syncForCurrentSelection()
+
+    writeFileSync(runtimeCredentialsPath, account2RefreshedCredentials, 'utf-8')
+    await service.syncForCurrentSelection()
+
+    expect(readManagedCredentialsForTest('account-2', managedAuthPath2)).toBe(
+      account2RefreshedCredentials
+    )
+    expect(readFileSync(runtimeCredentialsPath, 'utf-8')).toBe(account2RefreshedCredentials)
+  })
+
+  it('does not apply inactive-account Claude reauth skip to the active account', async () => {
+    const runtimeCredentialsPath = join(testState.fakeHomeDir, '.claude', '.credentials.json')
+    const account1Credentials = createClaudeCredentialsJson('one@example.com', 'one')
+    const account1RefreshedCredentials = createClaudeCredentialsJson(
+      'one@example.com',
+      'one-refreshed'
+    )
+    const account2Credentials = createClaudeCredentialsJson('two@example.com', 'two')
+    const managedAuthPath1 = createManagedClaudeAuth(
+      testState.userDataDir,
+      'account-1',
+      account1Credentials
+    )
+    const managedAuthPath2 = createManagedClaudeAuth(
+      testState.userDataDir,
+      'account-2',
+      account2Credentials
+    )
+    const settings = createSettings({
+      claudeManagedAccounts: [
+        createClaudeAccount('account-1', managedAuthPath1, { email: 'one@example.com' }),
+        createClaudeAccount('account-2', managedAuthPath2, { email: 'two@example.com' })
+      ],
+      activeClaudeManagedAccountId: 'account-1'
+    })
+    const store = createStore(settings)
+
+    const { ClaudeRuntimeAuthService } = await import('./runtime-auth-service')
+    const service = new ClaudeRuntimeAuthService(store as never)
+    await service.syncForCurrentSelection()
+
+    writeFileSync(runtimeCredentialsPath, account1RefreshedCredentials, 'utf-8')
+    service.clearLastWrittenCredentialsJson('account-2')
+    await service.syncForCurrentSelection()
+
+    expect(readManagedCredentialsForTest('account-1', managedAuthPath1)).toBe(
+      account1RefreshedCredentials
+    )
+    expect(readFileSync(runtimeCredentialsPath, 'utf-8')).toBe(account1RefreshedCredentials)
+  })
+
   it('keeps external Claude logout when deselecting managed account', async () => {
     const runtimeCredentialsPath = join(testState.fakeHomeDir, '.claude', '.credentials.json')
     const systemCredentials = createClaudeCredentialsJson('system@example.com', 'system')
@@ -580,13 +715,13 @@ describe('ClaudeRuntimeAuthService', () => {
       managedCredentials
     )
     const settings = createSettings({
-      claudeManagedAccounts: [createClaudeAccount('account-1', managedAuthPath)],
-      activeClaudeManagedAccountId: 'account-1'
+      claudeManagedAccounts: [createClaudeAccount('account-1', managedAuthPath)]
     })
     const store = createStore(settings)
 
     const { ClaudeRuntimeAuthService } = await import('./runtime-auth-service')
     const service = new ClaudeRuntimeAuthService(store as never)
+    settings.activeClaudeManagedAccountId = 'account-1'
     await service.syncForCurrentSelection()
 
     rmSync(runtimeCredentialsPath, { force: true })
@@ -647,13 +782,13 @@ describe('ClaudeRuntimeAuthService', () => {
       managedCredentials
     )
     const settings = createSettings({
-      claudeManagedAccounts: [createClaudeAccount('account-1', managedAuthPath)],
-      activeClaudeManagedAccountId: 'account-1'
+      claudeManagedAccounts: [createClaudeAccount('account-1', managedAuthPath)]
     })
     const store = createStore(settings)
 
     const { ClaudeRuntimeAuthService } = await import('./runtime-auth-service')
     const service = new ClaudeRuntimeAuthService(store as never)
+    settings.activeClaudeManagedAccountId = 'account-1'
     await service.syncForCurrentSelection()
 
     testState.activeKeychainCredentials = externalKeychainCredentials
@@ -746,5 +881,33 @@ describe('ClaudeRuntimeAuthService', () => {
     expect(store.updateSettings).toHaveBeenCalledWith({ activeClaudeManagedAccountId: null })
     expect(preparation.stripAuthEnv).toBe(false)
     expect(preparation.provenance).toBe('system')
+  })
+
+  it('does not clobber fresh Claude credentials after clearLastWrittenCredentialsJson', async () => {
+    const runtimeCredentialsPath = join(testState.fakeHomeDir, '.claude', '.credentials.json')
+    const originalCredentials = createClaudeCredentialsJson('user@example.com', 'original')
+    const reauthedCredentials = createClaudeCredentialsJson('user@example.com', 'reauthed')
+    const managedAuthPath = createManagedClaudeAuth(
+      testState.userDataDir,
+      'account-1',
+      originalCredentials
+    )
+    const settings = createSettings({
+      claudeManagedAccounts: [createClaudeAccount('account-1', managedAuthPath)],
+      activeClaudeManagedAccountId: 'account-1'
+    })
+    const store = createStore(settings)
+
+    const { ClaudeRuntimeAuthService } = await import('./runtime-auth-service')
+    const service = new ClaudeRuntimeAuthService(store as never)
+    await service.syncForCurrentSelection()
+
+    testState.managedKeychainCredentials.set('account-1', reauthedCredentials)
+    writeFileSync(join(managedAuthPath, '.credentials.json'), reauthedCredentials, 'utf-8')
+    service.clearLastWrittenCredentialsJson()
+    await service.syncForCurrentSelection()
+
+    expect(readManagedCredentialsForTest('account-1', managedAuthPath)).toBe(reauthedCredentials)
+    expect(readFileSync(runtimeCredentialsPath, 'utf-8')).toBe(reauthedCredentials)
   })
 })
