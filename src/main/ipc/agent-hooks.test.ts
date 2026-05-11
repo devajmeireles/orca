@@ -1,5 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
+import type * as AgentHookServerModule from '../agent-hooks/server'
+
 // Why: cover the agentStatus:drop IPC handler — it must propagate the
 // renderer dismissal to dropStatusEntry so the on-disk last-status file
 // evicts the entry.
@@ -24,21 +26,18 @@ vi.mock('electron', () => ({
   }
 }))
 
-vi.mock('../agent-hooks/server', () => ({
-  agentHookServer: {
-    dropStatusEntry,
-    getStatusSnapshot
-  },
-  // Why: matches the real isValidPaneKey shape (exactly one ':' with non-empty
-  // halves). The IPC handler imports this validator alongside agentHookServer.
-  isValidPaneKey: (value: unknown): value is string => {
-    if (typeof value !== 'string') {
-      return false
+vi.mock('../agent-hooks/server', async () => {
+  // Why: import the real isValidPaneKey so this test stays in sync with any
+  // tightening of the validator (length cap, character allow-list, etc).
+  const actual = await vi.importActual<typeof AgentHookServerModule>('../agent-hooks/server')
+  return {
+    ...actual,
+    agentHookServer: {
+      dropStatusEntry,
+      getStatusSnapshot
     }
-    const colon = value.indexOf(':')
-    return colon > 0 && colon < value.length - 1 && !value.includes(':', colon + 1)
   }
-}))
+})
 
 vi.mock('../claude/hook-service', () => ({
   claudeHookService: { getStatus: vi.fn(() => ({ agent: 'claude', state: 'absent' })) }

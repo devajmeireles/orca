@@ -1183,9 +1183,14 @@ function getEndpointFileName(): string {
 // restart artifacts stay co-located.
 const LAST_STATUS_FILE_NAME = 'last-status.json'
 
-// Why: bumping this rejects on-disk files written by older shapes — see the
-// "Stale file from a prior Orca version" edge case in the design doc. A
-// mismatched version is treated as a corrupt file (silent empty hydration).
+// Why: starts at 2 (not 1) because pre-merge dev iterations of this branch
+// wrote a v1 shape with no receivedAt / stateStartedAt. Bumping to 2 means a
+// developer who upgrades from an in-flight branch sees an empty hydration
+// once instead of partially-typed legacy entries. New file format; never
+// shipped to users at v1. Bumping this rejects on-disk files written by
+// older shapes — see the "Stale file from a prior Orca version" edge case
+// in the design doc. A mismatched version is treated as a corrupt file
+// (silent empty hydration).
 const LAST_STATUS_FILE_VERSION = 2
 
 // Why: trailing-edge debounce so a burst of hook events from a multi-agent
@@ -1722,6 +1727,10 @@ export class AgentHookServer {
     if (!this.lastStatusFilePath) {
       return
     }
+    // Why: defensive — keeps hydrate idempotent against repeated start() calls;
+    // production callers always have an empty map here, but a future re-start
+    // path must not silently merge prior-session state.
+    lastStatusByPaneKey.clear()
     let raw: string
     try {
       raw = readFileSync(this.lastStatusFilePath, 'utf8')
@@ -1775,14 +1784,23 @@ export class AgentHookServer {
         dropped += 1
       }
     }
+    if (dropped > 0) {
+      console.warn(
+        `[agent-hooks] last-status hydrate dropped ${dropped} entries (kept ${hydrated})`
+      )
+    }
     if (hydrated > 0 && dropped === 0) {
-      // Why: prime lastWrittenJson so an immediate scheduleStatusPersist()
-      // (e.g. from a hook event that arrives before any change) does not
-      // re-write the file with byte-identical contents. Only prime when
-      // hydration was lossless — if entries were dropped during sanitize,
-      // the in-memory map diverges from the on-disk bytes; leaving the
-      // prime null forces the next write to clean up the corrupt entries.
-      this.lastWrittenJson = this.serializeStatusFile()
+      // Why: prime from the raw on-disk bytes (not a re-serialization) so the
+      // dedup is robust against future shape drift in serializeStatusFile.
+      // Only prime when hydration was lossless — if entries were dropped
+      // during sanitize, the in-memory map diverges from the on-disk bytes.
+      this.lastWrittenJson = raw
+    } else if (dropped > 0) {
+      // Why: clean the stale on-disk file now so a user who has not run an
+      // agent in 8+ days does not re-drop the same entries on every cold
+      // boot. Synchronous variant is safe at start time and avoids
+      // unref'd-timer-during-quit edge cases.
+      this.runStatusPersist()
     }
   }
 
