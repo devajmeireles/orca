@@ -15,12 +15,6 @@ import { fetchChangelog } from './updater-changelog'
 type UpdaterHandlerContext = {
   clearBackgroundCheckLaunchPending: () => void
   clearAvailableUpdateContext: () => void
-  // Why: updater-events.ts doesn't import from updater.ts, so the
-  // module-scoped retry flag and 30s/1h-backstop timer handles must reach
-  // these handlers via context callbacks. Mirrors the existing
-  // clearBackgroundCheckLaunchPending pattern.
-  clearTransitionRetryInFlight: () => void
-  clearPendingTransitionRetryTimer: () => void
   getCurrentStatus: () => UpdateStatus
   getKnownReleaseUrl: () => string | undefined
   getPendingInstallVersion: () => string
@@ -40,8 +34,6 @@ type UpdaterHandlerContext = {
 export function registerAutoUpdaterHandlers({
   clearBackgroundCheckLaunchPending,
   clearAvailableUpdateContext,
-  clearTransitionRetryInFlight,
-  clearPendingTransitionRetryTimer,
   getCurrentStatus,
   getKnownReleaseUrl,
   getPendingInstallVersion,
@@ -94,14 +86,7 @@ export function registerAutoUpdaterHandlers({
       )
     ) {
       event.preventDefault()
-      return
     }
-
-    // Why: avoid a stale 30s retry or 1h-backstop firing during shutdown.
-    // onBeforeQuitCleanup in updater.ts only fires from performQuitAndInstall,
-    // not user quit, so the cleanup must live here.
-    clearPendingTransitionRetryTimer()
-    clearTransitionRetryInFlight()
   })
 
   autoUpdater.on('checking-for-update', () => {
@@ -113,12 +98,6 @@ export function registerAutoUpdaterHandlers({
 
   autoUpdater.on('update-available', (info) => {
     clearBackgroundCheckLaunchPending()
-    // Why: success ends the user-visible check cycle. Clearing both the flag
-    // and any pending 30s/1h-backstop timers means a benign failure hours
-    // from now starts a fresh retry cycle, and supersedes a still-pending
-    // 1h backstop on a 30s-retry success.
-    clearTransitionRetryInFlight()
-    clearPendingTransitionRetryTimer()
     // --- synchronous preamble (runs before any await) ---
     const wasUserInitiated = getUserInitiatedCheck()
     setUserInitiatedCheck(false)
@@ -168,10 +147,6 @@ export function registerAutoUpdaterHandlers({
 
   autoUpdater.on('update-not-available', () => {
     clearBackgroundCheckLaunchPending()
-    // Why: end of the user-visible check cycle — see the matching call in
-    // update-available.
-    clearTransitionRetryInFlight()
-    clearPendingTransitionRetryTimer()
     resetMacInstallState()
     const wasUserInitiated = getUserInitiatedCheck()
     setUserInitiatedCheck(false)
@@ -222,22 +197,6 @@ export function registerAutoUpdaterHandlers({
     const message = err?.message ?? 'Unknown error'
     if (getCurrentStatus().state === 'checking') {
       void sendCheckFailureStatus(message, wasUserInitiated || undefined)
-      return
-    }
-    // Why: hard guarantee that every terminal 'error' clears the retry
-    // state, even when status has advanced past 'checking' via a race
-    // (e.g., the post-await guard in 'update-available' fires while an
-    // 'error' arrives in between). Without this, transitionRetryInFlight
-    // could be stranded and silently no-op every subsequent manual click.
-    clearTransitionRetryInFlight()
-    clearPendingTransitionRetryTimer()
-    // Why: the design accepts up to two concurrent checkForUpdates() probes
-    // (30s retry + 1h backstop). If one already produced a good terminal
-    // result, do NOT overwrite it with a late error from the other. The
-    // retry-state cleanup above is unconditional; only the user-visible
-    // status is preserved.
-    const stateNow = getCurrentStatus().state
-    if (stateNow === 'available' || stateNow === 'downloading' || stateNow === 'downloaded') {
       return
     }
     sendErrorStatus(message, wasUserInitiated || undefined)
