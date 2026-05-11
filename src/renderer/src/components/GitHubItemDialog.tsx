@@ -2320,7 +2320,7 @@ function GHCommentComposer({
     } finally {
       setSubmitting(false)
     }
-  }, [autoGrow, body, repoPath, issueNumber, onCommentAdded])
+  }, [autoGrow, body, repoPath, issueNumber, itemType, onCommentAdded])
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
@@ -2555,6 +2555,12 @@ export default function GitHubItemDialog({
       return cachedDetails
     }
     return { ...cachedDetails, comments: [...cachedDetails.comments, ...missing] }
+    // Why: optimisticTick is the rerender signal for cold-open writes — the
+    // memo reads optimisticCommentsRef.current (a ref, no subscription), so
+    // bumping the tick is what forces this memo to re-run. The lint flags it
+    // as "unnecessary" because it's not referenced in the body, but removing
+    // it would silently break the cold-open optimistic-shell path.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cachedEntry, workItem, optimisticTick])
 
   const loading = !!cachedEntry?.pending && !cachedEntry?.details
