@@ -139,8 +139,28 @@ function agentMeta(event: ActivityEvent): string {
   return event.state === 'waiting' ? `${agent} waiting` : `${agent} blocked`
 }
 
-function paneTitleForTab(tab: TerminalTab): string {
-  return tab.customTitle?.trim() || tab.title?.trim() || tab.defaultTitle?.trim() || 'Terminal'
+// Why (label hierarchy): mirrors the per-workspace agents dropdown
+// (DashboardAgentRow / WorktreeCardAgents): user-renamed customTitle wins,
+// then a non-default terminal title (set via OSC by some agent CLIs), then
+// the agent's last prompt — the prompt IS what the agent's working on, so
+// it labels the row far better than the default "Terminal N". Falls back
+// to defaultTitle/Terminal only when nothing else is available.
+function paneTitleForEvent(event: ActivityEvent): string {
+  const tab = event.tab
+  const customTitle = tab.customTitle?.trim()
+  if (customTitle) {
+    return customTitle
+  }
+  const liveTitle = tab.title?.trim()
+  const defaultTitle = tab.defaultTitle?.trim()
+  if (liveTitle && liveTitle !== defaultTitle) {
+    return liveTitle
+  }
+  const prompt = event.entry.prompt.trim()
+  if (prompt) {
+    return prompt
+  }
+  return defaultTitle || liveTitle || 'Terminal'
 }
 
 function buildActivityEvents(args: {
@@ -220,7 +240,7 @@ function buildAgentPaneThreads(events: ActivityEvent[]): AgentPaneThread[] {
     if (!existing) {
       byPaneKey.set(paneKey, {
         paneKey,
-        paneTitle: paneTitleForTab(event.tab),
+        paneTitle: paneTitleForEvent(event),
         worktree: event.worktree,
         repo: event.repo,
         agentType: event.agentType,
@@ -234,7 +254,7 @@ function buildAgentPaneThreads(events: ActivityEvent[]): AgentPaneThread[] {
     existing.unread = existing.unread || event.unread
     if (event.timestamp > existing.latestEvent.timestamp) {
       existing.latestEvent = event
-      existing.paneTitle = paneTitleForTab(event.tab)
+      existing.paneTitle = paneTitleForEvent(event)
       existing.agentType = event.agentType
     }
   }
