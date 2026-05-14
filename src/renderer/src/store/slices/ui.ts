@@ -194,10 +194,11 @@ export type UISlice = {
   acknowledgedAgentsByPaneKey: Record<string, number>
   acknowledgeAgents: (paneKeys: string[]) => void
   unacknowledgeAgents: (paneKeys: string[]) => void
-  activeView: 'terminal' | 'settings' | 'tasks' | 'activity'
-  previousViewBeforeTasks: 'terminal' | 'settings' | 'activity'
-  previousViewBeforeSettings: 'terminal' | 'tasks' | 'activity'
-  previousViewBeforeActivity: 'terminal' | 'settings' | 'tasks'
+  activeView: 'terminal' | 'settings' | 'tasks' | 'activity' | 'automations'
+  previousViewBeforeTasks: 'terminal' | 'settings' | 'activity' | 'automations'
+  previousViewBeforeSettings: 'terminal' | 'tasks' | 'activity' | 'automations'
+  previousViewBeforeActivity: 'terminal' | 'settings' | 'tasks' | 'automations'
+  previousViewBeforeAutomations: 'terminal' | 'settings' | 'tasks' | 'activity'
   setActiveView: (view: UISlice['activeView']) => void
   taskPageData: {
     preselectedRepoId?: string
@@ -229,6 +230,8 @@ export type UISlice = {
   closeTaskPage: () => void
   openActivityPage: () => void
   closeActivityPage: () => void
+  openAutomationsPage: () => void
+  closeAutomationsPage: () => void
   setNewWorkspaceDraft: (draft: NonNullable<UISlice['newWorkspaceDraft']>) => void
   clearNewWorkspaceDraft: () => void
   openSettingsPage: () => void
@@ -408,6 +411,7 @@ export const createUISlice: StateCreator<AppState, [], [], UISlice> = (set, get)
   previousViewBeforeTasks: 'terminal',
   previousViewBeforeSettings: 'terminal',
   previousViewBeforeActivity: 'terminal',
+  previousViewBeforeAutomations: 'terminal',
   setActiveView: (view) => set({ activeView: view }),
   taskPageData: {},
   taskResumeState: undefined,
@@ -508,6 +512,16 @@ export const createUISlice: StateCreator<AppState, [], [], UISlice> = (set, get)
   closeActivityPage: () =>
     set((state) => ({
       activeView: state.previousViewBeforeActivity
+    })),
+  openAutomationsPage: () =>
+    set((state) => ({
+      activeView: 'automations',
+      previousViewBeforeAutomations:
+        state.activeView === 'automations' ? state.previousViewBeforeAutomations : state.activeView
+    })),
+  closeAutomationsPage: () =>
+    set((state) => ({
+      activeView: state.previousViewBeforeAutomations
     })),
   setNewWorkspaceDraft: (draft) => set({ newWorkspaceDraft: draft }),
   clearNewWorkspaceDraft: () => set({ newWorkspaceDraft: null }),

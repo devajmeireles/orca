@@ -283,6 +283,8 @@ export function getDefaultPersistedState(homedir: string): PersistedState {
     workspaceSession: getDefaultWorkspaceSession(),
     sshTargets: [],
     sshRemotePtyLeases: [],
+    automations: [],
+    automationRuns: [],
     onboarding: getDefaultOnboardingState()
   }
 }

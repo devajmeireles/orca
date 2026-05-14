@@ -27,6 +27,7 @@ export {
   ensurePtyDispatcher,
   getEagerPtyBufferHandle,
   registerEagerPtyBuffer,
+  subscribeToPtyExit,
   unregisterPtyDataHandlers
 } from './pty-dispatcher'
 export type {
