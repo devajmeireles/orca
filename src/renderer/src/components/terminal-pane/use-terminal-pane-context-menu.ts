@@ -1,10 +1,17 @@
 import { useEffect, useRef, useState } from 'react'
 import type { ManagedPane, PaneManager } from '@/lib/pane-manager/pane-manager'
+import type { PtyTransport } from './pty-transport'
+import { resolveSplitCwd, type PaneCwdMap } from './resolve-split-cwd'
+import type { TerminalQuickCommand } from '../../../../shared/types'
+import { sendTerminalQuickCommandToPane } from './terminal-quick-command-dispatch'
 
 const CLOSE_ALL_CONTEXT_MENUS_EVENT = 'orca-close-all-context-menus'
 
 type UseTerminalPaneContextMenuDeps = {
   managerRef: React.RefObject<PaneManager | null>
+  paneTransportsRef: React.RefObject<Map<number, PtyTransport>>
+  paneCwdRef: React.RefObject<PaneCwdMap>
+  fallbackCwd: string
   toggleExpandPane: (paneId: number) => void
   onRequestClosePane: (paneId: number) => void
   onSetTitle: (paneId: number) => void
@@ -25,12 +32,16 @@ type TerminalMenuState = {
   onSplitDown: () => void
   onClosePane: () => void
   onClearScreen: () => void
+  onQuickCommand: (command: TerminalQuickCommand) => void
   onToggleExpand: () => void
   onSetTitle: () => void
 }
 
 export function useTerminalPaneContextMenu({
   managerRef,
+  paneTransportsRef,
+  paneCwdRef,
+  fallbackCwd,
   toggleExpandPane,
   onRequestClosePane,
   onSetTitle,
@@ -108,19 +119,34 @@ export function useTerminalPaneContextMenu({
     pane.terminal.focus()
   }
 
-  const onSplitRight = (): void => {
+  // Split-pane CWD inheritance (docs/ssh-split-pane-inherit-cwd.md):
+  // mirror the Cmd+D path — sync split on confirmed OSC 7 cache hit,
+  // otherwise fall back to async resolveSplitCwd.
+  const splitWithInheritedCwd = (direction: 'vertical' | 'horizontal'): void => {
     const pane = resolveMenuPane()
-    if (pane) {
-      managerRef.current?.splitPane(pane.id, 'vertical')
+    if (!pane) {
+      return
     }
+    const cached = paneCwdRef.current.get(pane.id)
+    if (cached?.confirmed && cached.cwd) {
+      managerRef.current?.splitPane(pane.id, direction, { cwd: cached.cwd })
+      return
+    }
+    const ptyId = paneTransportsRef.current.get(pane.id)?.getPtyId() ?? null
+    const paneId = pane.id
+    void (async () => {
+      const cwd = await resolveSplitCwd({
+        paneCwdMap: paneCwdRef.current,
+        sourcePaneId: paneId,
+        sourcePtyId: ptyId,
+        fallbackCwd
+      })
+      managerRef.current?.splitPane(paneId, direction, { cwd })
+    })()
   }
 
-  const onSplitDown = (): void => {
-    const pane = resolveMenuPane()
-    if (pane) {
-      managerRef.current?.splitPane(pane.id, 'horizontal')
-    }
-  }
+  const onSplitRight = (): void => splitWithInheritedCwd('vertical')
+  const onSplitDown = (): void => splitWithInheritedCwd('horizontal')
 
   const onClosePane = (): void => {
     const pane = resolveMenuPane()
@@ -134,6 +160,18 @@ export function useTerminalPaneContextMenu({
     if (pane) {
       pane.terminal.clear()
     }
+  }
+
+  const onQuickCommand = (command: TerminalQuickCommand): void => {
+    const pane = resolveMenuPane()
+    if (!pane) {
+      return
+    }
+    sendTerminalQuickCommandToPane({
+      command,
+      pane,
+      transport: paneTransportsRef.current.get(pane.id)
+    })
   }
 
   const onToggleExpand = (): void => {
@@ -205,6 +243,7 @@ export function useTerminalPaneContextMenu({
     onSplitDown,
     onClosePane,
     onClearScreen,
+    onQuickCommand,
     onToggleExpand,
     onSetTitle: handleSetTitle
   }

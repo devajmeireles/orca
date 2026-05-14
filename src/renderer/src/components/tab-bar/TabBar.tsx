@@ -3,9 +3,9 @@
  * to a file that was already ~398 code lines on main. The per-type render
  * branches share little beyond drag data, so consolidating them would cost
  * more clarity than the ~5 lines of bloat is worth. */
-import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef } from 'react'
+import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { SortableContext } from '@dnd-kit/sortable'
-import { FilePlus, Globe, Plus, TerminalSquare } from 'lucide-react'
+import { FilePlus, Globe, Plus, TerminalSquare, FileText } from 'lucide-react'
 import type {
   BrowserTab as BrowserTabState,
   TerminalTab,
@@ -17,21 +17,31 @@ import type { OpenFile } from '../../store/slices/editor'
 import SortableTab from './SortableTab'
 import EditorFileTab from './EditorFileTab'
 import BrowserTab, { getBrowserTabLabel } from './BrowserTab'
+import { ProjectNotesTab, type ProjectNotesTabState } from './ProjectNotesTab'
 import { QuickLaunchAgentMenuItems } from './QuickLaunchButton'
 import type { DropIndicator } from './drop-indicator'
 import { reconcileTabOrder } from './reconcile-order'
 import type { HoveredTabInsertion, TabDragItemData } from '../tab-group/useTabDragSplit'
 import { resolveTabIndicatorEdges } from '../tab-group/tab-insertion'
 import { getEditorDisplayLabel } from '@/components/editor/editor-labels'
+import { ShellIcon } from './shell-icons'
+import { resolveWindowsShellLaunchTarget } from './windows-shell-launch'
+import { focusTerminalTabSurface } from '@/lib/focus-terminal-tab-surface'
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuShortcut,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
   DropdownMenuTrigger
 } from '@/components/ui/dropdown-menu'
+import type { NoteSummary } from '../../../../shared/notes-types'
 
 const isMac = navigator.userAgent.includes('Mac')
+const isWindows = navigator.userAgent.includes('Windows')
 const NEW_TERMINAL_SHORTCUT = isMac ? '⌘T' : 'Ctrl+T'
 const NEW_BROWSER_SHORTCUT = isMac ? '⌘⇧B' : 'Ctrl+Shift+B'
 const NEW_FILE_SHORTCUT = isMac ? '⌘⇧M' : 'Ctrl+Shift+M'
@@ -47,20 +57,33 @@ type TabBarProps = {
   onCloseOthers: (tabId: string) => void
   onCloseToRight: (tabId: string) => void
   onNewTerminalTab: () => void
+  /** On Windows, opens a new terminal with a specific shell instead of the default. */
+  onNewTerminalWithShell?: (shell: string) => void
   onNewBrowserTab: () => void
+  terminalOnly?: boolean
+  showAgentLaunchItems?: boolean
   onNewFileTab?: () => void
+  onNewNotesTab?: (noteId?: string) => void
+  notesWorktreeId?: string | null
+  /** Whether WSL is installed on this Windows machine. When true, the "+"
+   *  dropdown shows a WSL option under the terminal submenu. */
+  wslAvailable?: boolean
   onSetCustomTitle: (tabId: string, title: string | null) => void
   onSetTabColor: (tabId: string, color: string | null) => void
   onTogglePaneExpand: (tabId: string) => void
   editorFiles?: (OpenFile & { tabId?: string })[]
   browserTabs?: (BrowserTabState & { tabId?: string })[]
+  notesTabs?: ProjectNotesTabState[]
   activeFileId?: string | null
   activeBrowserTabId?: string | null
+  activeNotesTabId?: string | null
   activeTabType?: WorkspaceVisibleTabType
   onActivateFile?: (fileId: string) => void
   onCloseFile?: (fileId: string) => void
   onActivateBrowserTab?: (tabId: string) => void
   onCloseBrowserTab?: (tabId: string) => void
+  onActivateNotesTab?: (tabId: string) => void
+  onCloseNotesTab?: (tabId: string) => void
   onDuplicateBrowserTab?: (tabId: string) => void
   onCloseAllFiles?: () => void
   onPinFile?: (fileId: string, tabId?: string) => void
@@ -86,6 +109,7 @@ type TabItem =
       unifiedTabId: string
       data: BrowserTabState & { tabId?: string }
     }
+  | { type: 'notes'; id: string; unifiedTabId: string; data: ProjectNotesTabState }
 
 function getTabDragLabel(item: TabItem): string {
   if (item.type === 'terminal') {
@@ -93,6 +117,9 @@ function getTabDragLabel(item: TabItem): string {
   }
   if (item.type === 'browser') {
     return getBrowserTabLabel(item.data)
+  }
+  if (item.type === 'notes') {
+    return item.data.label
   }
   return getEditorDisplayLabel(item.data)
 }
@@ -108,33 +135,122 @@ function TabBarInner({
   onCloseOthers,
   onCloseToRight,
   onNewTerminalTab,
+  onNewTerminalWithShell,
   onNewBrowserTab,
+  terminalOnly = false,
+  showAgentLaunchItems = true,
   onNewFileTab,
+  onNewNotesTab,
+  notesWorktreeId,
   onSetCustomTitle,
   onSetTabColor,
   onTogglePaneExpand,
   editorFiles,
   browserTabs,
+  notesTabs,
   activeFileId,
   activeBrowserTabId,
+  activeNotesTabId,
   activeTabType,
   onActivateFile,
   onCloseFile,
   onActivateBrowserTab,
   onCloseBrowserTab,
+  onActivateNotesTab,
+  onCloseNotesTab,
   onDuplicateBrowserTab,
   onCloseAllFiles,
   onPinFile,
   tabBarOrder,
   onCreateSplitGroup,
-  hoveredTabInsertion
+  hoveredTabInsertion,
+  wslAvailable
 }: TabBarProps): React.JSX.Element {
   const gitStatusByWorktree = useAppStore((s) => s.gitStatusByWorktree)
+  const defaultWindowsShell = useAppStore(
+    (s) => s.settings?.terminalWindowsShell ?? 'powershell.exe'
+  )
+  const defaultWindowsPowerShellImplementation = useAppStore(
+    (s) => s.settings?.terminalWindowsPowerShellImplementation ?? 'auto'
+  )
+  const [pwshAvailable, setPwshAvailable] = useState(false)
+  const [projectNotes, setProjectNotes] = useState<NoteSummary[]>([])
+  const [projectNotesLoading, setProjectNotesLoading] = useState(false)
+  const [projectNotesError, setProjectNotesError] = useState<string | null>(null)
+  const [projectNotesMenuOpen, setProjectNotesMenuOpen] = useState(false)
+  useEffect(() => {
+    if (!isWindows) {
+      setPwshAvailable(false)
+      return
+    }
+
+    void window.api.pwsh.isAvailable().then(setPwshAvailable)
+  }, [])
   const resolvedGroupId = groupId ?? worktreeId
+  const targetNotesWorktreeId = notesWorktreeId ?? worktreeId
+
   const statusByRelativePath = useMemo(
     () => buildStatusMap(gitStatusByWorktree[worktreeId] ?? []),
     [worktreeId, gitStatusByWorktree]
   )
+
+  // Why: Electron <webview> elements run in a separate process, so clicking
+  // inside one never dispatches a pointerdown on the renderer document.
+  // Radix DropdownMenu relies on document pointerdown to detect outside
+  // clicks, so it misses webview clicks entirely. Listening for window blur
+  // catches the moment focus leaves the renderer (including into a webview).
+  const [newTabMenuOpen, setNewTabMenuOpen] = useState(false)
+  useEffect(() => {
+    if (!newTabMenuOpen) {
+      return
+    }
+    const dismiss = (): void => setNewTabMenuOpen(false)
+    window.addEventListener('blur', dismiss)
+    return () => window.removeEventListener('blur', dismiss)
+  }, [newTabMenuOpen])
+
+  useEffect(() => {
+    if (!newTabMenuOpen) {
+      setProjectNotesMenuOpen(false)
+      return
+    }
+    const refreshProjectNotes = async (): Promise<void> => {
+      if (!onNewNotesTab) {
+        return
+      }
+      let context: { projectId: string; worktreeId: string } | null = null
+      if (targetNotesWorktreeId) {
+        const state = useAppStore.getState()
+        const worktree = Object.values(state.worktreesByRepo)
+          .flat()
+          .find((candidate) => candidate.id === targetNotesWorktreeId)
+        if (worktree) {
+          const repo = state.repos.find((candidate) => candidate.id === worktree.repoId)
+          context = { projectId: repo?.id ?? worktree.repoId, worktreeId: targetNotesWorktreeId }
+        }
+      }
+      if (!context) {
+        setProjectNotes([])
+        setProjectNotesError(null)
+        return
+      }
+      setProjectNotesLoading(true)
+      setProjectNotesError(null)
+      try {
+        const result = await window.api.notes.list({
+          projectId: context.projectId,
+          worktreeId: context.worktreeId,
+          limit: 100
+        })
+        setProjectNotes(result.notes)
+      } catch (err) {
+        setProjectNotesError(err instanceof Error ? err.message : String(err))
+      } finally {
+        setProjectNotesLoading(false)
+      }
+    }
+    void refreshProjectNotes()
+  }, [newTabMenuOpen, onNewNotesTab, targetNotesWorktreeId])
 
   const terminalMap = useMemo(() => new Map(tabs.map((t) => [t.id, t])), [tabs])
   const editorMap = useMemo(
@@ -145,14 +261,22 @@ function TabBarInner({
     () => new Map((browserTabs ?? []).map((t) => [t.id, t])),
     [browserTabs]
   )
+  const notesMap = useMemo(() => new Map((notesTabs ?? []).map((t) => [t.id, t])), [notesTabs])
 
   const terminalIds = useMemo(() => tabs.map((t) => t.id), [tabs])
   const editorFileIds = useMemo(() => editorFiles?.map((f) => f.tabId ?? f.id) ?? [], [editorFiles])
   const browserTabIds = useMemo(() => browserTabs?.map((tab) => tab.id) ?? [], [browserTabs])
+  const notesTabIds = useMemo(() => notesTabs?.map((tab) => tab.id) ?? [], [notesTabs])
 
   // Build the unified ordered list, reconciling stored order with current items
   const orderedItems = useMemo(() => {
-    const ids = reconcileTabOrder(tabBarOrder, terminalIds, editorFileIds, browserTabIds)
+    const ids = reconcileTabOrder(
+      tabBarOrder,
+      terminalIds,
+      editorFileIds,
+      browserTabIds,
+      notesTabIds
+    )
     const items: TabItem[] = []
     for (const id of ids) {
       const terminal = terminalMap.get(id)
@@ -178,10 +302,25 @@ function TabBarInner({
           unifiedTabId: browserTab.tabId ?? browserTab.id,
           data: browserTab
         })
+        continue
+      }
+      const notesTab = notesMap.get(id)
+      if (notesTab) {
+        items.push({ type: 'notes', id, unifiedTabId: notesTab.id, data: notesTab })
       }
     }
     return items
-  }, [tabBarOrder, terminalIds, editorFileIds, browserTabIds, terminalMap, editorMap, browserMap])
+  }, [
+    tabBarOrder,
+    terminalIds,
+    editorFileIds,
+    browserTabIds,
+    notesTabIds,
+    terminalMap,
+    editorMap,
+    browserMap,
+    notesMap
+  ])
 
   const sortableIds = useMemo(() => orderedItems.map((item) => item.id), [orderedItems])
 
@@ -197,27 +336,6 @@ function TabBarInner({
     }
     return indicators
   }, [activeIndicator, orderedItems])
-
-  const focusTerminalTabSurface = useCallback((tabId: string) => {
-    // Why: creating a terminal from the "+" menu is a two-step focus race:
-    // React must first mount the new TerminalPane/xterm, then Radix closes the
-    // menu. Even after suppressing trigger focus restore, the terminal's hidden
-    // textarea may not exist until the next paint. Double-rAF waits for that
-    // commit so the new tab, not the "+" button, ends up owning keyboard focus.
-    requestAnimationFrame(() => {
-      requestAnimationFrame(() => {
-        const scoped = document.querySelector(
-          `[data-terminal-tab-id="${tabId}"] .xterm-helper-textarea`
-        ) as HTMLElement | null
-        if (scoped) {
-          scoped.focus()
-          return
-        }
-        const fallback = document.querySelector('.xterm-helper-textarea') as HTMLElement | null
-        fallback?.focus()
-      })
-    })
-  }, [])
 
   // Horizontal wheel scrolling for the tab strip
   const tabStripRef = useRef<HTMLDivElement>(null)
@@ -363,7 +481,7 @@ function TabBarInner({
                 <SortableTab
                   key={item.id}
                   tab={item.data}
-                  tabCount={tabs.length}
+                  tabCount={orderedItems.length}
                   hasTabsToRight={index < orderedItems.length - 1}
                   isActive={activeTabType === 'terminal' && item.id === activeTabId}
                   isExpanded={expandedPaneByTabId[item.id] === true}
@@ -401,6 +519,24 @@ function TabBarInner({
                 />
               )
             }
+            if (item.type === 'notes') {
+              return (
+                <ProjectNotesTab
+                  key={item.id}
+                  tab={item.data}
+                  isActive={activeTabType === 'notes' && activeNotesTabId === item.id}
+                  hasTabsToRight={index < orderedItems.length - 1}
+                  onActivate={() => onActivateNotesTab?.(item.id)}
+                  onClose={() => onCloseNotesTab?.(item.id)}
+                  onCloseToRight={() => onCloseToRight(item.id)}
+                  onSplitGroup={(direction, sourceVisibleTabId) =>
+                    onCreateSplitGroup?.(direction, sourceVisibleTabId)
+                  }
+                  dragData={dragData}
+                  dropIndicator={dropIndicatorByVisibleId.get(item.id) ?? null}
+                />
+              )
+            }
             return (
               <EditorFileTab
                 key={item.id}
@@ -423,12 +559,17 @@ function TabBarInner({
           })}
         </div>
       </SortableContext>
-      <DropdownMenu>
+      <DropdownMenu open={newTabMenuOpen} onOpenChange={setNewTabMenuOpen}>
         <DropdownMenuTrigger asChild>
           <button
             className="ml-2 my-auto flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-accent/50 hover:text-foreground"
             style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
             title="New tab"
+            // Why: aria-label matches the tooltip so E2E can locate the "+"
+            // affordance via getByRole('button', { name: 'New tab' }). The
+            // store-only createTab() round-trip that preceded this was a
+            // tautology — it would pass even if the + button had been deleted.
+            aria-label="New tab"
           >
             <Plus className="w-3.5 h-3.5" />
           </button>
@@ -445,29 +586,86 @@ function TabBarInner({
             e.preventDefault()
           }}
         >
-          <DropdownMenuItem
-            onSelect={() => {
-              onNewTerminalTab()
-              const newActiveTabId = useAppStore.getState().activeTabId
-              if (newActiveTabId) {
-                focusTerminalTabSurface(newActiveTabId)
-              }
-            }}
-            className="gap-2 rounded-[7px] px-2 py-1.5 text-[12px] leading-5 font-medium"
-          >
-            <TerminalSquare className="size-4 text-muted-foreground" />
-            New Terminal
-            <DropdownMenuShortcut>{NEW_TERMINAL_SHORTCUT}</DropdownMenuShortcut>
-          </DropdownMenuItem>
-          <DropdownMenuItem
-            onSelect={onNewBrowserTab}
-            className="gap-2 rounded-[7px] px-2 py-1.5 text-[12px] leading-5 font-medium"
-          >
-            <Globe className="size-4 text-muted-foreground" />
-            New Browser Tab
-            <DropdownMenuShortcut>{NEW_BROWSER_SHORTCUT}</DropdownMenuShortcut>
-          </DropdownMenuItem>
-          {onNewFileTab && (
+          {isWindows && onNewTerminalWithShell ? (
+            // Why: previously the Windows path nested shell choices under a
+            // Radix submenu. In practice the submenu frequently failed to open
+            // on hover/click, and even when it worked the two-step expansion
+            // hid the fact that multiple shells were available. Inlining all
+            // shells as flat items — default pinned to the top with the
+            // Ctrl+T hint — matches the "no popouts, show all options at
+            // once" rec. Each entry uses a shell-specific icon (ShellIcon)
+            // so PowerShell / CMD / WSL are distinguishable at a glance.
+            // Labels use "CMD Prompt" instead of "Command Prompt" to keep
+            // each row narrow enough that the shortcut hint fits without
+            // wrapping.
+            (() => {
+              const allShells: {
+                label: string
+                shell: 'powershell.exe' | 'cmd.exe' | 'wsl.exe'
+              }[] = [
+                { label: 'PowerShell', shell: 'powershell.exe' },
+                { label: 'CMD Prompt', shell: 'cmd.exe' },
+                ...(wslAvailable ? ([{ label: 'WSL', shell: 'wsl.exe' }] as const) : [])
+              ]
+              const defaultEntry =
+                allShells.find((s) => s.shell === defaultWindowsShell) ?? allShells[0]
+              const orderedShells = [
+                defaultEntry,
+                ...allShells.filter((s) => s.shell !== defaultEntry.shell)
+              ]
+              return orderedShells.map((entry, idx) => {
+                const isDefault = idx === 0
+                return (
+                  <DropdownMenuItem
+                    key={entry.shell}
+                    onSelect={() => {
+                      // Why: the top-level Windows shell menu models shell
+                      // categories, not concrete executables. When the user
+                      // picked PowerShell 7+ in advanced settings, launching the
+                      // "PowerShell" menu item must preserve that implementation
+                      // instead of forcing inbox powershell.exe.
+                      onNewTerminalWithShell(
+                        resolveWindowsShellLaunchTarget(
+                          entry.shell,
+                          defaultWindowsPowerShellImplementation,
+                          pwshAvailable
+                        )
+                      )
+                    }}
+                    className="gap-2 rounded-[7px] px-2 py-1.5 text-[12px] leading-5 font-medium"
+                  >
+                    <ShellIcon shell={entry.shell} size={14} />
+                    <span className="flex-1">New Terminal: {entry.label}</span>
+                    {isDefault ? (
+                      <DropdownMenuShortcut>{NEW_TERMINAL_SHORTCUT}</DropdownMenuShortcut>
+                    ) : null}
+                  </DropdownMenuItem>
+                )
+              })
+            })()
+          ) : (
+            <DropdownMenuItem
+              onSelect={() => {
+                onNewTerminalTab()
+              }}
+              className="gap-2 rounded-[7px] px-2 py-1.5 text-[12px] leading-5 font-medium"
+            >
+              <TerminalSquare className="size-4 text-muted-foreground" />
+              New Terminal
+              <DropdownMenuShortcut>{NEW_TERMINAL_SHORTCUT}</DropdownMenuShortcut>
+            </DropdownMenuItem>
+          )}
+          {!terminalOnly && (
+            <DropdownMenuItem
+              onSelect={onNewBrowserTab}
+              className="gap-2 rounded-[7px] px-2 py-1.5 text-[12px] leading-5 font-medium"
+            >
+              <Globe className="size-4 text-muted-foreground" />
+              New Browser Tab
+              <DropdownMenuShortcut>{NEW_BROWSER_SHORTCUT}</DropdownMenuShortcut>
+            </DropdownMenuItem>
+          )}
+          {!terminalOnly && onNewFileTab && (
             <DropdownMenuItem
               onSelect={onNewFileTab}
               className="gap-2 rounded-[7px] px-2 py-1.5 text-[12px] leading-5 font-medium"
@@ -477,11 +675,87 @@ function TabBarInner({
               <DropdownMenuShortcut>{NEW_FILE_SHORTCUT}</DropdownMenuShortcut>
             </DropdownMenuItem>
           )}
-          <QuickLaunchAgentMenuItems
-            worktreeId={worktreeId}
-            groupId={resolvedGroupId}
-            onFocusTerminal={focusTerminalTabSurface}
-          />
+          {onNewNotesTab && (
+            <DropdownMenuSub open={projectNotesMenuOpen} onOpenChange={setProjectNotesMenuOpen}>
+              <DropdownMenuSubTrigger
+                className="gap-2 rounded-[7px] px-2 py-1.5 text-[12px] leading-5 font-medium"
+                onPointerEnter={() => setProjectNotesMenuOpen(true)}
+                onFocus={() => setProjectNotesMenuOpen(true)}
+                onClick={() => {
+                  // Why: this row looks like the other creation commands in
+                  // the + menu. Keep hover-to-pick-saved-note, but make a
+                  // direct click create a fresh note instead of only opening
+                  // the submenu.
+                  onNewNotesTab()
+                  setProjectNotesMenuOpen(false)
+                  setNewTabMenuOpen(false)
+                }}
+                onKeyDown={(event) => {
+                  if (event.key !== 'Enter' && event.key !== ' ') {
+                    return
+                  }
+                  event.preventDefault()
+                  onNewNotesTab()
+                  setProjectNotesMenuOpen(false)
+                  setNewTabMenuOpen(false)
+                }}
+              >
+                <FileText className="size-4 text-muted-foreground" />
+                Project Notes
+              </DropdownMenuSubTrigger>
+              <DropdownMenuSubContent className="w-64">
+                <DropdownMenuItem
+                  onSelect={() => onNewNotesTab()}
+                  className="gap-2 rounded-[7px] px-2 py-1.5 text-[12px] leading-5 font-medium"
+                >
+                  <FileText className="size-3.5 text-muted-foreground" />
+                  New Project Note
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                {projectNotesLoading ? (
+                  <DropdownMenuItem disabled className="text-muted-foreground">
+                    Loading notes...
+                  </DropdownMenuItem>
+                ) : projectNotesError ? (
+                  <DropdownMenuItem disabled className="text-destructive">
+                    Failed to load notes
+                  </DropdownMenuItem>
+                ) : projectNotes.length === 0 ? (
+                  <DropdownMenuItem disabled className="text-muted-foreground">
+                    No saved notes
+                  </DropdownMenuItem>
+                ) : (
+                  <div className="max-h-64 overflow-y-auto pr-0.5">
+                    {projectNotes.map((note) => (
+                      <DropdownMenuItem
+                        key={note.id}
+                        onSelect={() => onNewNotesTab(note.id)}
+                        className="items-start gap-2 rounded-[7px] px-2 py-1.5 text-[12px] leading-5"
+                      >
+                        <FileText className="mt-0.5 size-3.5 text-muted-foreground" />
+                        <span className="min-w-0 flex-1">
+                          <span className="block truncate font-medium">{note.title}</span>
+                          <span className="block truncate text-[11px] leading-4 text-muted-foreground">
+                            {note.preview || note.relativePath}
+                          </span>
+                        </span>
+                      </DropdownMenuItem>
+                    ))}
+                  </div>
+                )}
+              </DropdownMenuSubContent>
+            </DropdownMenuSub>
+          )}
+          {showAgentLaunchItems ? (
+            <>
+              <DropdownMenuSeparator />
+              <QuickLaunchAgentMenuItems
+                worktreeId={worktreeId}
+                groupId={resolvedGroupId}
+                onFocusTerminal={focusTerminalTabSurface}
+              />
+            </>
+          ) : null}
         </DropdownMenuContent>
       </DropdownMenu>
     </div>

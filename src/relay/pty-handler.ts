@@ -9,6 +9,7 @@ import {
   getForegroundProcessName,
   listShellProfiles
 } from './pty-shell-utils'
+import { getRelayShellLaunchConfig } from './pty-shell-launch'
 
 // Why: node-pty is a native addon that may not be installed on the remote.
 // Dynamic import keeps the require() lazy so loadPty() returns null gracefully
@@ -34,6 +35,51 @@ type ManagedPty = {
   buffered: string
   /** Timer for SIGKILL fallback after a graceful SIGTERM shutdown. */
   killTimer?: ReturnType<typeof setTimeout>
+  /** True once disposeManagedPty has run. Prevents double-dispose (onExit + an
+   *  explicit shutdown can both fire for the same PTY) and converts post-dispose
+   *  entry-point calls into a clean "not found" error instead of a silent no-op
+   *  (POSIX proc.kill is neutralized inside disposeManagedPty). */
+  disposed?: boolean
+  /** True once external cleanup observers have been notified. Forced cleanup
+   *  paths can run before node-pty emits onExit; this prevents duplicate
+   *  overlay/cache cleanup if onExit arrives later. */
+  exitListenerNotified?: boolean
+  /** Renderer-supplied paneKey from spawn env (ORCA_PANE_KEY). Captured so
+   *  external observers (the relay-hook-server cache) can evict per-pane
+   *  state when this PTY exits. Symmetric with Orca's local pty.ts. */
+  paneKey?: string
+  tabId?: string
+  worktreeId?: string
+}
+
+function disposeManagedPty(managed: ManagedPty): void {
+  if (managed.disposed) {
+    return
+  }
+  managed.disposed = true
+  // Why: clear any pending 5s SIGKILL fallback timer. If graceful-shutdown
+  // armed a killTimer and the child then exited cleanly (firing onExit →
+  // disposeManagedPty), the timer would otherwise fire later and attempt
+  // pty.kill('SIGKILL') on an already-disposed instance. The ptys.has(id)
+  // guard inside the timer short-circuits today, but symmetry is clearer.
+  if (managed.killTimer) {
+    clearTimeout(managed.killTimer)
+    managed.killTimer = undefined
+  }
+  // Why: UnixTerminal.destroy() registers `_socket.once('close', () => this.kill('SIGHUP'))`.
+  // The close event fires asynchronously; by then the child may have exited and
+  // its pid been recycled. On the Linux remote hosts the relay typically runs on,
+  // pid recycling is fast — SIGHUP to a stranger is a real hazard. Neutralize
+  // managed.pty.kill before destroy() runs. Windows exempt: WindowsTerminal.destroy
+  // IS a kill() call via _deferNoArgs — neutralizing it leaks the ConPTY agent.
+  if (process.platform !== 'win32') {
+    ;(managed.pty as unknown as { kill: (sig?: string) => void }).kill = () => {}
+  }
+  try {
+    ;(managed.pty as unknown as { destroy?: () => void }).destroy?.()
+  } catch {
+    /* swallow */
+  }
 }
 const DEFAULT_GRACE_TIME_MS = 5 * 60 * 1000
 export const REPLAY_BUFFER_MAX = 100 * 1024
@@ -49,7 +95,28 @@ const ALLOWED_SIGNALS = new Set([
   'SIGUSR2'
 ])
 
-type SerializedPtyEntry = { id: string; pid: number; cols: number; rows: number; cwd: string }
+type SerializedPtyEntry = {
+  id: string
+  pid: number
+  cols: number
+  rows: number
+  cwd: string
+  paneKey?: string
+  tabId?: string
+  worktreeId?: string
+}
+
+export type PtyExitListener = (event: { id: string; paneKey?: string }) => void
+/** Returns env to merge into the PTY's spawn env. Receives spawn context so
+ *  augmenters that need a per-PTY identity (e.g. OPENCODE_CONFIG_DIR overlay
+ *  paths derived from the renderer's paneKey) can compute it without pulling
+ *  the renderer's env in twice. */
+export type PtyEnvAugmenter = (ctx: {
+  id: string
+  paneKey?: string
+  shell: string
+  env: Record<string, string>
+}) => Record<string, string>
 
 export class PtyHandler {
   private ptys = new Map<string, ManagedPty>()
@@ -57,11 +124,70 @@ export class PtyHandler {
   private dispatcher: RelayDispatcher
   private graceTimeMs: number
   private graceTimer: ReturnType<typeof setTimeout> | null = null
+  // Why: external observers need to drop per-pane state when a PTY exits.
+  // Today the relay composes multiple consumers (hook-server cache eviction
+  // and plugin-overlay dir cleanup) into a single callback at the call site
+  // (see relay.ts setExitListener). A single optional slot is intentional —
+  // callers compose externally rather than us maintaining a listener list.
+  // A throw inside the listener is swallowed so it can never block
+  // disposeManagedPty / map cleanup.
+  private exitListener: PtyExitListener | null = null
+  // Why: env augmenters injected at relay boot (currently the relay-hook
+  // server's ORCA_AGENT_HOOK_* coords). Run on every spawn so every PTY
+  // sees the live hook coordinates without the dispatcher needing to know
+  // about agent hooks.
+  private envAugmenters: PtyEnvAugmenter[] = []
 
   constructor(dispatcher: RelayDispatcher, graceTimeMs = DEFAULT_GRACE_TIME_MS) {
     this.dispatcher = dispatcher
     this.graceTimeMs = graceTimeMs
     this.registerHandlers()
+  }
+
+  /** Subscribe to PTY-exit events. Used by the relay-hook server to evict
+   *  per-paneKey cached payloads when the backing PTY ends. */
+  setExitListener(listener: PtyExitListener | null): void {
+    this.exitListener = listener
+  }
+
+  /** Register an env augmenter whose return value is merged into every spawn
+   *  env *after* `process.env` and the renderer-supplied env. Used by the
+   *  relay-hook server to inject ORCA_AGENT_HOOK_PORT/TOKEN/ENV/VERSION/
+   *  ENDPOINT — values the agent CLI inside the PTY needs to find the local
+   *  hook receiver. See docs/design/agent-status-over-ssh.md §3. */
+  addEnvAugmenter(augmenter: PtyEnvAugmenter): () => void {
+    this.envAugmenters.push(augmenter)
+    return () => {
+      const idx = this.envAugmenters.indexOf(augmenter)
+      if (idx !== -1) {
+        this.envAugmenters.splice(idx, 1)
+      }
+    }
+  }
+
+  /** Build the augmented spawn env. Augmenter values override `process.env`
+   *  and any renderer-supplied env (the augmenter contract — see
+   *  addEnvAugmenter doc-comment). Used by both spawn() and revive() so the
+   *  relationship between process.env, renderer env, and augmenters cannot
+   *  drift between the two paths — revived shells after a relay restart must
+   *  see the fresh ORCA_AGENT_HOOK_* coords just like freshly-spawned ones,
+   *  otherwise agent-status over SSH silently breaks on every revive. */
+  private buildSpawnEnv(
+    rendererEnv: Record<string, string> | undefined,
+    ctx: { id: string; paneKey?: string; shell: string }
+  ): Record<string, string> {
+    const baseEnv = { ...process.env, ...rendererEnv } as Record<string, string>
+    const augmented: Record<string, string> = {}
+    for (const augmenter of this.envAugmenters) {
+      try {
+        Object.assign(augmented, augmenter({ ...ctx, env: baseEnv }))
+      } catch (err) {
+        process.stderr.write(
+          `[pty-handler] env augmenter threw: ${err instanceof Error ? err.message : String(err)}\n`
+        )
+      }
+    }
+    return { ...baseEnv, ...augmented }
   }
 
   /** Wire onData/onExit listeners for a managed PTY and store it. */
@@ -75,15 +201,54 @@ export class PtyHandler {
       this.dispatcher.notify('pty.data', { id: managed.id, data })
     })
     managed.pty.onExit(({ exitCode }: { exitCode: number }) => {
+      if (managed.disposed) {
+        return
+      }
+      // Why: neutralize managed.pty.kill synchronously BEFORE anything else
+      // in this callback. node-pty's UnixTerminal has
+      // `_socket.once('close', () => this.kill('SIGHUP'))` wired at destroy
+      // time, and the master socket can emit 'close' concurrently with this
+      // onExit on natural exit. If 'close' wins, SIGHUP targets the reaped
+      // pid — recycled to an unrelated process on Linux (the typical relay
+      // host). Synchronous neutralization closes that window. Windows is
+      // exempt (WindowsTerminal.destroy uses kill() to close ConPTY).
+      if (process.platform !== 'win32') {
+        ;(managed.pty as unknown as { kill: (sig?: string) => void }).kill = () => {}
+      }
       // Why: If the PTY exits normally (or via SIGTERM), we must clear the
-      // SIGKILL fallback timer to avoid sending SIGKILL to a recycled PID.
+      // SIGKILL fallback timer to avoid firing SIGKILL later.
       if (managed.killTimer) {
         clearTimeout(managed.killTimer)
         managed.killTimer = undefined
       }
       this.dispatcher.notify('pty.exit', { id: managed.id, code: exitCode })
+      this.notifyExitListener(managed)
       this.ptys.delete(managed.id)
+      // Why: release the ptmx fd on the natural-exit path. Without this the
+      // node-pty wrapper's _socket stays alive until GC and the master fd
+      // leaks (see docs/fix-pty-fd-leak.md).
+      disposeManagedPty(managed)
     })
+  }
+
+  private notifyExitListener(managed: ManagedPty): void {
+    if (managed.exitListenerNotified) {
+      return
+    }
+    managed.exitListenerNotified = true
+    // Why: external observers own relay-hook cache eviction and plugin-overlay
+    // cleanup. Natural exits, immediate shutdown, SIGKILL fallback, and relay
+    // process disposal all need the same cleanup even when node-pty never
+    // delivers onExit.
+    if (this.exitListener) {
+      try {
+        this.exitListener({ id: managed.id, paneKey: managed.paneKey })
+      } catch (err) {
+        process.stderr.write(
+          `[pty-handler] exit listener threw: ${err instanceof Error ? err.message : String(err)}\n`
+        )
+      }
+    }
   }
 
   private registerHandlers(): void {
@@ -128,18 +293,42 @@ export class PtyHandler {
     const shell = resolveDefaultShell()
     const id = `pty-${this.nextId++}`
 
+    // Why: server-side augmenter values (ORCA_AGENT_HOOK_* and plugin overlay
+    // dirs) override renderer-supplied env so live remote paths and hook coords
+    // win over local userData paths. The context lets overlay augmenters derive
+    // per-PTY OpenCode/Pi directories from the stable paneKey when present.
+    const paneKey = typeof env?.ORCA_PANE_KEY === 'string' ? env.ORCA_PANE_KEY : undefined
+    const spawnEnv = this.buildSpawnEnv(env, { id, paneKey, shell })
+    const shellLaunch = getRelayShellLaunchConfig(shell, spawnEnv)
+
     // Why: SSH exec channels give the relay a minimal environment without
     // .zprofile/.bash_profile sourced. Spawning a login shell ensures PATH
     // includes Homebrew, nvm, and user-installed CLIs (claude, codex, gh).
-    const term = pty.spawn(shell, ['-l'], {
+    // When overlays are injected, the launch wrapper keeps those paths after
+    // user startup files re-export their defaults.
+    const term = pty.spawn(shell, shellLaunch.args, {
       name: 'xterm-256color',
       cols,
       rows,
       cwd,
-      env: { ...process.env, ...env } as Record<string, string>
+      env: { ...spawnEnv, ...shellLaunch.env }
     })
 
-    const managed: ManagedPty = { id, pty: term, initialCwd: cwd, buffered: '' }
+    // Why: capture the renderer-supplied paneKey on the managed entry so the
+    // exit listener can evict per-pane caches without the relay needing a
+    // separate ptyId→paneKey map. ORCA_PANE_KEY is shaped `${tabId}:${paneId}`
+    // and is bounded by the renderer; the relay treats it as opaque.
+    const tabId = typeof env?.ORCA_TAB_ID === 'string' ? env.ORCA_TAB_ID : undefined
+    const worktreeId = typeof env?.ORCA_WORKTREE_ID === 'string' ? env.ORCA_WORKTREE_ID : undefined
+    const managed: ManagedPty = {
+      id,
+      pty: term,
+      initialCwd: cwd,
+      buffered: '',
+      paneKey,
+      tabId,
+      worktreeId
+    }
     this.wireAndStore(managed)
     if (context?.isStale()) {
       // Why: if the client reconnected while pty.spawn was in flight, the
@@ -147,8 +336,16 @@ export class PtyHandler {
       // immediately so it does not linger as an unreachable remote shell.
       term.kill('SIGTERM')
       managed.killTimer = setTimeout(() => {
-        if (this.ptys.has(id)) {
-          term.kill('SIGKILL')
+        const still = this.ptys.get(id)
+        if (still && !still.disposed) {
+          still.pty.kill('SIGKILL')
+          // Why: stale-spawn cleanup has no client who will ever attach. If
+          // SIGKILL's onExit is missed (kernel edge case, uninterruptible
+          // sleep), the managed entry + ptmx fd would leak forever. Dispose
+          // synchronously so the entry is gone regardless of onExit timing.
+          this.notifyExitListener(still)
+          disposeManagedPty(still)
+          this.ptys.delete(id)
         }
       }, 5000)
     }
@@ -158,7 +355,11 @@ export class PtyHandler {
   private async attach(params: Record<string, unknown>): Promise<{ replay?: string }> {
     const id = params.id as string
     const managed = this.ptys.get(id)
-    if (!managed) {
+    // Why: treat a disposed managed entry the same as "not found" — after
+    // disposeManagedPty has run, managed.pty is torn down and any write/kill
+    // would hit a neutralized no-op on POSIX. The explicit check converts a
+    // silent failure into the existing error callers already handle.
+    if (!managed || managed.disposed) {
       throw new Error(`PTY "${id}" not found`)
     }
 
@@ -187,7 +388,7 @@ export class PtyHandler {
       return
     }
     const managed = this.ptys.get(id)
-    if (managed) {
+    if (managed && !managed.disposed) {
       managed.pty.write(data)
     }
   }
@@ -197,7 +398,7 @@ export class PtyHandler {
     const cols = Math.max(1, Math.min(500, Math.floor(Number(params.cols) || 80)))
     const rows = Math.max(1, Math.min(500, Math.floor(Number(params.rows) || 24)))
     const managed = this.ptys.get(id)
-    if (managed) {
+    if (managed && !managed.disposed) {
       managed.pty.resize(cols, rows)
     }
   }
@@ -212,6 +413,21 @@ export class PtyHandler {
 
     if (immediate) {
       managed.pty.kill('SIGKILL')
+      // Why: SIGKILL has already reaped the child; release the ptmx fd on the
+      // same tick. Deferring to onExit leaves a window where the fd is live
+      // with a dead child. Idempotent via the disposed guard — if onExit fires
+      // later and also calls disposeManagedPty, the second call is a no-op.
+      disposeManagedPty(managed)
+      // Why: mirror the graceful-shutdown killTimer cleanup. If SIGKILL's
+      // onExit never fires (kernel edge case: uninterruptible sleep,
+      // D-state child on a bad NFS mount), the disposed managed entry would
+      // linger in this.ptys forever. Each stranded entry consumes a slot in
+      // the 50-PTY cap and is returned by listProcesses/serialize. Deleting
+      // here makes the map hygiene a hard guarantee, not "hopefully onExit
+      // runs". If onExit DOES fire later, its own `this.ptys.delete(id)` is
+      // a no-op.
+      this.notifyExitListener(managed)
+      this.ptys.delete(id)
     } else {
       managed.pty.kill('SIGTERM')
 
@@ -220,9 +436,23 @@ export class PtyHandler {
       // managed entry would never be cleaned up. The 5-second window gives
       // well-behaved processes time to flush and exit gracefully. The timer is
       // cleared in the onExit handler if the process terminates on its own.
+      // Do NOT call disposeManagedPty here: destroy()-right-after-SIGTERM
+      // collapses the graceful-shutdown window and risks interrupting shell
+      // EXIT traps. Fd release happens via onExit (natural exit) or via the
+      // killTimer → SIGKILL → disposeManagedPty chain below.
       managed.killTimer = setTimeout(() => {
-        if (this.ptys.has(id)) {
-          managed.pty.kill('SIGKILL')
+        const still = this.ptys.get(id)
+        if (still && !still.disposed) {
+          still.pty.kill('SIGKILL')
+          // Why: if SIGKILL's onExit never fires (kernel edge case,
+          // uninterruptible sleep, child wedged on a bad NFS mount), the
+          // fd and map entry would leak forever. Dispose synchronously so
+          // graceful-shutdown's SIGKILL fallback is a hard guarantee, not
+          // "hopefully onExit will run". The disposed guard inside
+          // disposeManagedPty makes a later onExit's dispose a no-op.
+          this.notifyExitListener(still)
+          disposeManagedPty(still)
+          this.ptys.delete(id)
         }
       }, 5000)
     }
@@ -235,7 +465,10 @@ export class PtyHandler {
       throw new Error(`Signal not allowed: ${signal}`)
     }
     const managed = this.ptys.get(id)
-    if (!managed) {
+    // Why: POSIX disposeManagedPty neutralizes managed.pty.kill. Without the
+    // disposed check, a post-dispose sendSignal would silently succeed (no
+    // error, no action). Convert to the existing "not found" error.
+    if (!managed || managed.disposed) {
       throw new Error(`PTY "${id}" not found`)
     }
     managed.pty.kill(signal)
@@ -244,7 +477,7 @@ export class PtyHandler {
   private async getCwd(params: Record<string, unknown>): Promise<string> {
     const id = params.id as string
     const managed = this.ptys.get(id)
-    if (!managed) {
+    if (!managed || managed.disposed) {
       throw new Error(`PTY "${id}" not found`)
     }
     return resolveProcessCwd(managed.pty.pid, managed.initialCwd)
@@ -253,7 +486,7 @@ export class PtyHandler {
   private async getInitialCwd(params: Record<string, unknown>): Promise<string> {
     const id = params.id as string
     const managed = this.ptys.get(id)
-    if (!managed) {
+    if (!managed || managed.disposed) {
       throw new Error(`PTY "${id}" not found`)
     }
     return managed.initialCwd
@@ -262,7 +495,7 @@ export class PtyHandler {
   private async clearBuffer(params: Record<string, unknown>): Promise<void> {
     const id = params.id as string
     const managed = this.ptys.get(id)
-    if (managed) {
+    if (managed && !managed.disposed) {
       managed.pty.clear()
     }
   }
@@ -270,7 +503,7 @@ export class PtyHandler {
   private async hasChildProcesses(params: Record<string, unknown>): Promise<boolean> {
     const id = params.id as string
     const managed = this.ptys.get(id)
-    if (!managed) {
+    if (!managed || managed.disposed) {
       return false
     }
     return await processHasChildren(managed.pty.pid)
@@ -279,7 +512,7 @@ export class PtyHandler {
   private async getForegroundProcess(params: Record<string, unknown>): Promise<string | null> {
     const id = params.id as string
     const managed = this.ptys.get(id)
-    if (!managed) {
+    if (!managed || managed.disposed) {
       return null
     }
     return await getForegroundProcessName(managed.pty.pid)
@@ -303,7 +536,16 @@ export class PtyHandler {
         continue
       }
       const { pid, cols, rows } = managed.pty
-      entries.push({ id, pid, cols, rows, cwd: managed.initialCwd })
+      entries.push({
+        id,
+        pid,
+        cols,
+        rows,
+        cwd: managed.initialCwd,
+        paneKey: managed.paneKey,
+        tabId: managed.tabId,
+        worktreeId: managed.worktreeId
+      })
     }
     return JSON.stringify(entries)
   }
@@ -326,14 +568,43 @@ export class PtyHandler {
       if (!ptyMod) {
         continue
       }
-      const term = ptyMod.spawn(resolveDefaultShell(), ['-l'], {
+      // Why: revive must apply the same hook env as spawn(). The hook-server
+      // coords come from augmenters, while pane identity comes from the
+      // serialized PTY entry because managed hook scripts exit without
+      // ORCA_PANE_KEY.
+      const revivedEnv: Record<string, string> = {}
+      if (entry.paneKey) {
+        revivedEnv.ORCA_PANE_KEY = entry.paneKey
+      }
+      if (entry.tabId) {
+        revivedEnv.ORCA_TAB_ID = entry.tabId
+      }
+      if (entry.worktreeId) {
+        revivedEnv.ORCA_WORKTREE_ID = entry.worktreeId
+      }
+      const shell = resolveDefaultShell()
+      const spawnEnv = this.buildSpawnEnv(revivedEnv, {
+        id: entry.id,
+        paneKey: entry.paneKey,
+        shell
+      })
+      const shellLaunch = getRelayShellLaunchConfig(shell, spawnEnv)
+      const term = ptyMod.spawn(shell, shellLaunch.args, {
         name: 'xterm-256color',
         cols: entry.cols,
         rows: entry.rows,
         cwd: entry.cwd,
-        env: process.env as Record<string, string>
+        env: { ...spawnEnv, ...shellLaunch.env }
       })
-      this.wireAndStore({ id: entry.id, pty: term, initialCwd: entry.cwd, buffered: '' })
+      this.wireAndStore({
+        id: entry.id,
+        pty: term,
+        initialCwd: entry.cwd,
+        buffered: '',
+        paneKey: entry.paneKey,
+        tabId: entry.tabId,
+        worktreeId: entry.worktreeId
+      })
 
       // Why: nextId starts at 1 and is only incremented by spawn(). Revived
       // PTYs carry their original IDs (e.g. "pty-3"), so without this bump the
@@ -371,8 +642,22 @@ export class PtyHandler {
     for (const [, managed] of this.ptys) {
       if (managed.killTimer) {
         clearTimeout(managed.killTimer)
+        managed.killTimer = undefined
       }
-      managed.pty.kill('SIGTERM')
+      // Why: SIGKILL (not SIGTERM) before destroy. The relay process is
+      // exiting; any SIGTERM-ignoring remote shell (editor with unsaved
+      // buffers, a hung child with a bad handler, a process in
+      // uninterruptible sleep) would survive SIGTERM + immediate destroy()
+      // as an orphan on the remote host. SIGKILL is not ignorable and the
+      // ptmx fd release via disposeManagedPty is synchronous, so there is
+      // no graceful-shutdown window to preserve at this point.
+      try {
+        managed.pty.kill('SIGKILL')
+      } catch {
+        /* child may already be dead */
+      }
+      this.notifyExitListener(managed)
+      disposeManagedPty(managed)
     }
     this.ptys.clear()
   }

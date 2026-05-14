@@ -98,25 +98,30 @@ const SHORTCUT_GROUP_DEFINITIONS: ShortcutGroupDefinition[] = [
         action: 'Force Reload',
         searchKeywords: ['shortcut', 'reload', 'refresh', 'force'],
         keys: ({ mod, shift }) => [mod, shift, 'R']
+      },
+      {
+        action: 'Dictation',
+        searchKeywords: ['shortcut', 'dictation', 'voice', 'speech', 'microphone'],
+        keys: ({ mod }) => [mod, 'E']
       }
     ]
   },
   {
-    title: 'Terminal Tabs',
+    title: 'Tabs',
     items: [
       {
-        action: 'New Terminal',
-        searchKeywords: ['shortcut', 'tab', 'terminal'],
+        action: 'New terminal tab',
+        searchKeywords: ['shortcut', 'tab', 'terminal', 'new'],
         keys: ({ mod }) => [mod, 'T']
       },
       {
-        action: 'New Browser Tab',
-        searchKeywords: ['shortcut', 'tab', 'browser'],
+        action: 'New browser tab',
+        searchKeywords: ['shortcut', 'tab', 'browser', 'new'],
         keys: ({ mod, shift }) => [mod, shift, 'B']
       },
       {
-        action: 'New Markdown',
-        searchKeywords: ['shortcut', 'tab', 'markdown', 'file'],
+        action: 'New markdown tab',
+        searchKeywords: ['shortcut', 'tab', 'markdown', 'file', 'new'],
         keys: ({ mod, shift }) => [mod, shift, 'M']
       },
       {
@@ -128,25 +133,40 @@ const SHORTCUT_GROUP_DEFINITIONS: ShortcutGroupDefinition[] = [
         action: 'Reopen closed tab',
         searchKeywords: ['shortcut', 'tab', 'reopen', 'restore', 'closed'],
         keys: ({ mod, shift }) => [mod, shift, 'T']
-      },
+      }
+    ]
+  },
+  {
+    title: 'Tab Navigation',
+    items: [
       {
-        action: 'Next tab',
-        searchKeywords: ['shortcut', 'tab', 'next'],
+        action: 'Next tab (same type)',
+        searchKeywords: ['shortcut', 'tab', 'next', 'switch', 'cycle'],
         keys: ({ mod, shift }) => [mod, shift, ']']
       },
       {
-        action: 'Previous tab',
-        searchKeywords: ['shortcut', 'tab', 'previous'],
+        action: 'Previous tab (same type)',
+        searchKeywords: ['shortcut', 'tab', 'previous', 'switch', 'cycle'],
         keys: ({ mod, shift }) => [mod, shift, '[']
       },
       {
+        action: 'Next tab (all types)',
+        searchKeywords: ['shortcut', 'tab', 'next', 'switch', 'cycle', 'all', 'any'],
+        keys: ({ mod }) => [mod, mod === '⌘' ? '⌥' : 'Alt', ']']
+      },
+      {
+        action: 'Previous tab (all types)',
+        searchKeywords: ['shortcut', 'tab', 'previous', 'switch', 'cycle', 'all', 'any'],
+        keys: ({ mod }) => [mod, mod === '⌘' ? '⌥' : 'Alt', '[']
+      },
+      {
         action: 'Next terminal tab',
-        searchKeywords: ['shortcut', 'tab', 'terminal', 'next'],
+        searchKeywords: ['shortcut', 'tab', 'terminal', 'next', 'switch'],
         keys: () => ['Ctrl', 'PageDown']
       },
       {
         action: 'Previous terminal tab',
-        searchKeywords: ['shortcut', 'tab', 'terminal', 'previous'],
+        searchKeywords: ['shortcut', 'tab', 'terminal', 'previous', 'switch'],
         keys: () => ['Ctrl', 'PageUp']
       }
     ]

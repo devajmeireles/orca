@@ -27,6 +27,7 @@ vi.mock('fs', () => ({
 
 import {
   bulkStageFiles,
+  bulkDiscardChanges,
   bulkUnstageFiles,
   detectConflictOperation,
   discardChanges,
@@ -98,6 +99,7 @@ describe('discardChanges', () => {
 describe('bulk git helpers', () => {
   beforeEach(() => {
     gitExecFileAsyncMock.mockReset()
+    rmMock.mockReset()
   })
 
   it('chunks bulk stage requests to avoid oversized argv payloads', async () => {
@@ -137,6 +139,48 @@ describe('bulk git helpers', () => {
         cwd: '/repo'
       }
     )
+  })
+
+  it('discards tracked and untracked paths in bulk', async () => {
+    gitExecFileAsyncMock
+      .mockResolvedValueOnce({ stdout: 'src/file.ts\0docs/readme.md\0' })
+      .mockResolvedValueOnce({ stdout: '' })
+
+    await bulkDiscardChanges('/repo', ['src/file.ts', 'src/new-file.ts', 'docs', 'scratch'])
+
+    expect(gitExecFileAsyncMock).toHaveBeenNthCalledWith(
+      1,
+      ['ls-files', '-z', '--', 'src/file.ts', 'src/new-file.ts', 'docs', 'scratch'],
+      {
+        cwd: '/repo'
+      }
+    )
+    // Why: a pathspec is tracked if git reports either the exact path or a
+    // tracked descendant, which keeps directory pathspecs on the restore path.
+    expect(gitExecFileAsyncMock).toHaveBeenNthCalledWith(
+      2,
+      ['restore', '--worktree', '--source=HEAD', '--', 'src/file.ts', 'docs'],
+      {
+        cwd: '/repo'
+      }
+    )
+    expect(rmMock).toHaveBeenCalledWith(path.resolve('/repo', 'src', 'new-file.ts'), {
+      force: true,
+      recursive: true
+    })
+    expect(rmMock).toHaveBeenCalledWith(path.resolve('/repo', 'scratch'), {
+      force: true,
+      recursive: true
+    })
+  })
+
+  it('rejects bulk discard paths that traverse outside the worktree', async () => {
+    await expect(bulkDiscardChanges('/repo', ['src/file.ts', '../outside.txt'])).rejects.toThrow(
+      'resolves outside the worktree'
+    )
+
+    expect(gitExecFileAsyncMock).not.toHaveBeenCalled()
+    expect(rmMock).not.toHaveBeenCalled()
   })
 })
 
@@ -278,6 +322,84 @@ describe('getStatus', () => {
     expect(result.entries[0]?.status).toBe('modified')
     expect(result.entries[0]?.conflictKind).toBe('added_by_us')
   })
+
+  it('passes core.quotePath=false and round-trips UTF-8 paths', async () => {
+    readFileMock.mockResolvedValue('gitdir: /repo/.git/worktrees/feature\n')
+    existsSyncMock.mockReturnValue(false)
+    gitExecFileAsyncMock.mockResolvedValueOnce({
+      stdout:
+        '1 .M N... 100644 100644 100644 ce013625030ba8dba906f756967f9e9ca394464a ce013625030ba8dba906f756967f9e9ca394464a docs/日本語/sample.md\n'
+    })
+
+    const result = await getStatus('/repo')
+
+    // Why: without -c core.quotePath=false git would emit
+    // "docs/\346\227\245\346\234\254\350\252\236/sample.md" (octal-escaped,
+    // wrapped in double quotes) and the parser would store that literal
+    // string as entry.path, breaking sidebar display + downstream blob reads.
+    expect(gitExecFileAsyncMock).toHaveBeenCalledWith(
+      [
+        '-c',
+        'core.quotePath=false',
+        'status',
+        '--porcelain=v2',
+        '--branch',
+        '--untracked-files=all'
+      ],
+      { cwd: '/repo' }
+    )
+    expect(result.entries).toEqual([
+      { path: 'docs/日本語/sample.md', status: 'modified', area: 'unstaged' }
+    ])
+  })
+
+  it('parses branch identity from porcelain v2 branch headers', async () => {
+    readFileMock.mockResolvedValue('gitdir: /repo/.git/worktrees/feature\n')
+    existsSyncMock.mockReturnValue(false)
+    gitExecFileAsyncMock.mockResolvedValueOnce({
+      stdout:
+        '# branch.oid abcdef1234567890\n# branch.head feature/prompts\n1 .M N... 100644 100644 100644 ce013625030ba8dba906f756967f9e9ca394464a ce013625030ba8dba906f756967f9e9ca394464a src/app.ts\n'
+    })
+
+    const result = await getStatus('/repo')
+
+    expect(result).toMatchObject({
+      head: 'abcdef1234567890',
+      branch: 'refs/heads/feature/prompts'
+    })
+  })
+
+  it('folds upstream ahead/behind from porcelain v2 into the status result', async () => {
+    readFileMock.mockResolvedValue('gitdir: /repo/.git/worktrees/feature\n')
+    existsSyncMock.mockReturnValue(false)
+    gitExecFileAsyncMock.mockResolvedValueOnce({
+      stdout:
+        '# branch.oid abcdef1234567890\n# branch.head feature/prompts\n# branch.upstream origin/feature/prompts\n# branch.ab +2 -3\n'
+    })
+
+    const result = await getStatus('/repo')
+
+    expect(gitExecFileAsyncMock).toHaveBeenCalledTimes(1)
+    expect(result.upstreamStatus).toEqual({
+      hasUpstream: true,
+      upstreamName: 'origin/feature/prompts',
+      ahead: 2,
+      behind: 3
+    })
+  })
+
+  it('reports no upstream from porcelain v2 status without an extra git call', async () => {
+    readFileMock.mockResolvedValue('gitdir: /repo/.git/worktrees/feature\n')
+    existsSyncMock.mockReturnValue(false)
+    gitExecFileAsyncMock.mockResolvedValueOnce({
+      stdout: '# branch.oid abcdef1234567890\n# branch.head feature/prompts\n'
+    })
+
+    const result = await getStatus('/repo')
+
+    expect(gitExecFileAsyncMock).toHaveBeenCalledTimes(1)
+    expect(result.upstreamStatus).toEqual({ hasUpstream: false, ahead: 0, behind: 0 })
+  })
 })
 
 describe('detectConflictOperation', () => {
@@ -387,5 +509,33 @@ describe('getBranchCompare', () => {
     expect(result.summary.status).toBe('no-merge-base')
     expect(result.summary.errorMessage).toContain('merge base')
     expect(result.entries).toEqual([])
+  })
+
+  it('passes core.quotePath=false to diff --name-status and parses UTF-8 paths', async () => {
+    gitExecFileAsyncMock
+      .mockResolvedValueOnce({ stdout: 'main\n' })
+      .mockResolvedValueOnce({ stdout: 'head-oid\n' })
+      .mockResolvedValueOnce({ stdout: 'base-oid\n' })
+      .mockResolvedValueOnce({ stdout: 'merge-base-oid\n' })
+      .mockResolvedValueOnce({ stdout: 'M\tdocs/日本語/sample.md\n' })
+      .mockResolvedValueOnce({ stdout: '1\n' })
+
+    const result = await getBranchCompare('/repo', 'origin/main')
+
+    expect(gitExecFileAsyncMock).toHaveBeenNthCalledWith(
+      5,
+      [
+        '-c',
+        'core.quotePath=false',
+        'diff',
+        '--name-status',
+        '-M',
+        '-C',
+        'merge-base-oid',
+        'head-oid'
+      ],
+      expect.objectContaining({ cwd: '/repo' })
+    )
+    expect(result.entries).toEqual([{ path: 'docs/日本語/sample.md', status: 'modified' }])
   })
 })

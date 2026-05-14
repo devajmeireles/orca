@@ -8,8 +8,10 @@ import {
   renameSync,
   unlinkSync
 } from 'fs'
+import { homedir } from 'os'
 import { dirname, join } from 'path'
 import { randomUUID } from 'crypto'
+import { grantDirAcl, isPermissionError } from '../win32-utils'
 
 export type HookCommandConfig = {
   type: 'command'
@@ -64,6 +66,28 @@ export function createManagedCommandMatcher(
   }
 }
 
+// Why: prod, dev, and parallel Orca instances must write the same managed
+// settings entry instead of racing between per-userData script paths.
+export function getSharedManagedScriptPath(scriptFileName: string): string {
+  return join(homedir(), '.orca', 'agent-hooks', scriptFileName)
+}
+
+// Why: a stale managed hook entry (left over after the user wiped userData,
+// switched dev↔prod installs, or had a partial install fail) used to fire
+// `/bin/sh "<missing path>"` on every tool call, which exits 127 and surfaces
+// as `PreToolUse hook (failed) error: hook exited with code 127` in the agent
+// transcript. Wrapping the launcher in `if [ -x ... ]; then ...; fi` makes a
+// missing/non-executable script a silent no-op so a broken install never
+// poisons the user's session. Failures inside the script itself are
+// unaffected — only the missing-script case short-circuits.
+export function wrapPosixHookCommand(scriptPath: string): string {
+  // Why: POSIX single-quote escape so $, `, ", and \ in scriptPath are taken
+  // literally — avoids a shell-injection footgun if a future caller passes an
+  // arbitrary path.
+  const quoted = `'${scriptPath.replaceAll("'", "'\\''")}'`
+  return `if [ -x ${quoted} ]; then /bin/sh ${quoted}; fi`
+}
+
 export function removeManagedCommands(
   definitions: HookDefinition[],
   isManagedCommand: (command: string | undefined) => boolean
@@ -82,11 +106,62 @@ export function removeManagedCommands(
   })
 }
 
+// Why: temp+rename so concurrent Orca instances writing this shared path can't
+// produce a torn script that an in-flight `/bin/sh <scriptPath>` would source.
 export function writeManagedScript(scriptPath: string, content: string): void {
-  mkdirSync(dirname(scriptPath), { recursive: true })
-  writeFileSync(scriptPath, content, 'utf-8')
-  if (process.platform !== 'win32') {
-    chmodSync(scriptPath, 0o755)
+  const dir = dirname(scriptPath)
+  mkdirSync(dir, { recursive: true })
+
+  if (existsSync(scriptPath)) {
+    try {
+      if (readFileSync(scriptPath, 'utf-8') === content) {
+        if (process.platform !== 'win32') {
+          chmodSync(scriptPath, 0o755)
+        }
+        return
+      }
+    } catch {
+      // Fall through to the atomic write path.
+    }
+  }
+
+  const tmpPath = join(dir, `.${Date.now()}-${randomUUID()}.tmp`)
+  try {
+    writeScriptWithAclRetry(tmpPath, content)
+    // Why: chmod before rename so the canonical path is never visible in a
+    // non-executable state; wrapPosixHookCommand's `[ -x ]` guard would
+    // silently skip the hook in that window.
+    if (process.platform !== 'win32') {
+      chmodSync(tmpPath, 0o755)
+    }
+    renameSync(tmpPath, scriptPath)
+  } finally {
+    if (existsSync(tmpPath)) {
+      try {
+        unlinkSync(tmpPath)
+      } catch {
+        // best effort
+      }
+    }
+  }
+}
+
+// Why: on Windows, write may fail with EPERM if the target directory has a
+// restrictive DACL. Grant an explicit ACL on EPERM and retry once.
+function writeScriptWithAclRetry(scriptPath: string, content: string): void {
+  try {
+    writeFileSync(scriptPath, content, 'utf-8')
+  } catch (error) {
+    if (isPermissionError(error) && process.platform === 'win32') {
+      try {
+        grantDirAcl(dirname(scriptPath))
+        writeFileSync(scriptPath, content, 'utf-8')
+        return
+      } catch {
+        // icacls failure is not actionable; re-throw the original EPERM
+      }
+    }
+    throw error
   }
 }
 

@@ -1,15 +1,22 @@
 import { homedir } from 'os'
 import { join } from 'path'
-import { app } from 'electron'
+import type { SFTPWrapper } from 'ssh2'
 import type { AgentHookInstallState, AgentHookInstallStatus } from '../../shared/agent-hook-types'
 import {
   createManagedCommandMatcher,
+  getSharedManagedScriptPath,
   readHooksJson,
   removeManagedCommands,
+  wrapPosixHookCommand,
   writeHooksJson,
   writeManagedScript,
   type HookDefinition
 } from '../agent-hooks/installer-utils'
+import {
+  readHooksJsonRemote,
+  writeHooksJsonRemote,
+  writeManagedScriptRemote
+} from '../agent-hooks/installer-utils-remote'
 
 // Why: cursor-agent exposes a declarative hooks.json surface at
 // ~/.cursor/hooks.json (https://cursor.com/docs/hooks) with camelCase event
@@ -47,18 +54,23 @@ function getManagedScriptFileName(): string {
 }
 
 function getManagedScriptPath(): string {
-  return join(app.getPath('userData'), 'agent-hooks', getManagedScriptFileName())
+  return getSharedManagedScriptPath(getManagedScriptFileName())
 }
 
 function getManagedCommand(scriptPath: string): string {
-  return process.platform === 'win32' ? scriptPath : `/bin/sh "${scriptPath}"`
+  return process.platform === 'win32' ? scriptPath : wrapPosixHookCommand(scriptPath)
 }
 
-function getManagedScript(): string {
-  if (process.platform === 'win32') {
+function getManagedScript(target: 'local' | 'posix' = 'local'): string {
+  if (target === 'local' && process.platform === 'win32') {
     return [
       '@echo off',
       'setlocal',
+      // Why: see claude/hook-service.ts for rationale. The endpoint file holds
+      // the live port/token for this Orca install; sourcing it here lets a
+      // surviving PTY reach the current server even though its env points at
+      // the prior Orca's coordinates.
+      'if defined ORCA_AGENT_HOOK_ENDPOINT if exist "%ORCA_AGENT_HOOK_ENDPOINT%" call "%ORCA_AGENT_HOOK_ENDPOINT%" 2>nul',
       'if "%ORCA_AGENT_HOOK_PORT%"=="" exit /b 0',
       'if "%ORCA_AGENT_HOOK_TOKEN%"=="" exit /b 0',
       'if "%ORCA_PANE_KEY%"=="" exit /b 0',
@@ -70,6 +82,12 @@ function getManagedScript(): string {
 
   return [
     '#!/bin/sh',
+    // Why: see claude/hook-service.ts for rationale. Sourcing refreshes
+    // PORT/TOKEN/ENV/VERSION from the current Orca so a surviving PTY keeps
+    // reporting after a restart.
+    'if [ -n "$ORCA_AGENT_HOOK_ENDPOINT" ] && [ -r "$ORCA_AGENT_HOOK_ENDPOINT" ]; then',
+    '  . "$ORCA_AGENT_HOOK_ENDPOINT" 2>/dev/null || :',
+    'fi',
     'if [ -z "$ORCA_AGENT_HOOK_PORT" ] || [ -z "$ORCA_AGENT_HOOK_TOKEN" ] || [ -z "$ORCA_PANE_KEY" ]; then',
     '  exit 0',
     'fi',
@@ -221,6 +239,73 @@ export class CursorHookService {
     writeManagedScript(scriptPath, getManagedScript())
     writeHooksJson(configPath, nextConfig)
     return this.getStatus()
+  }
+
+  // Why: install Orca's managed Cursor hooks on the remote box. Mirrors
+  // ClaudeHookService.installRemote — POSIX-only, uses the same SFTP-backed
+  // primitives, and emits Cursor's documented schema (top-level `command`
+  // on each definition + top-level `version: 1`) so cursor-agent on the
+  // remote actually invokes the script. See docs/design/agent-status-over-ssh.md
+  // §8.
+  async installRemote(sftp: SFTPWrapper, remoteHome: string): Promise<AgentHookInstallStatus> {
+    const remoteConfigPath = `${remoteHome.replace(/\/$/, '')}/.cursor/hooks.json`
+    const remoteScriptPath = `${remoteHome.replace(/\/$/, '')}/.orca/agent-hooks/cursor-hook.sh`
+    try {
+      const config = await readHooksJsonRemote(sftp, remoteConfigPath)
+      if (!config) {
+        return {
+          agent: 'cursor',
+          state: 'error',
+          configPath: remoteConfigPath,
+          managedHooksPresent: false,
+          detail: 'Could not parse remote Cursor hooks.json'
+        }
+      }
+
+      const command = wrapPosixHookCommand(remoteScriptPath)
+      const nextHooks = { ...config.hooks }
+      const isManagedCommand = createManagedCommandMatcher('cursor-hook.sh')
+
+      for (const eventName of CURSOR_EVENTS) {
+        const current = Array.isArray(nextHooks[eventName]) ? nextHooks[eventName] : []
+        // Why: same dual-shape sweep as the local install — repeated
+        // installs converge on a single managed entry.
+        const cleaned = removeManagedCommands(current, isManagedCommand).filter(
+          (definition) => !isManagedCommand(definition.command as string | undefined)
+        )
+        const definition: HookDefinition = { command }
+        nextHooks[eventName] = [...cleaned, definition]
+      }
+
+      const nextConfig: Record<string, unknown> = { ...config, hooks: nextHooks }
+      if (nextConfig.version === undefined) {
+        nextConfig.version = 1
+      }
+
+      // Why: script-then-config order so a partial-failure mid-install at
+      // worst leaves a working script no settings.json points at — see
+      // ClaudeHookService.installRemote.
+      // Why: SSH remotes use POSIX `.sh` hook paths even when Orca itself is
+      // running on Windows; never derive remote script syntax from local OS.
+      await writeManagedScriptRemote(sftp, remoteScriptPath, getManagedScript('posix'))
+      await writeHooksJsonRemote(sftp, remoteConfigPath, nextConfig)
+
+      return {
+        agent: 'cursor',
+        state: 'installed',
+        configPath: remoteConfigPath,
+        managedHooksPresent: true,
+        detail: null
+      }
+    } catch (err) {
+      return {
+        agent: 'cursor',
+        state: 'error',
+        configPath: remoteConfigPath,
+        managedHooksPresent: false,
+        detail: err instanceof Error ? err.message : String(err)
+      }
+    }
   }
 
   remove(): AgentHookInstallStatus {

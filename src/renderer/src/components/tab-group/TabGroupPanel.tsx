@@ -1,4 +1,5 @@
-import { lazy, Suspense, useMemo } from 'react'
+/* eslint-disable max-lines -- Why: this pane shell coordinates terminals, editor tabs, browser slots, and notes tabs so split-group routing stays in one place. */
+import { lazy, Suspense, useEffect, useMemo, useState } from 'react'
 import { useDroppable } from '@dnd-kit/core'
 import { Columns2, Ellipsis, Rows2, X } from 'lucide-react'
 import { useAppStore } from '../../store'
@@ -10,25 +11,30 @@ import {
   DropdownMenuTrigger
 } from '@/components/ui/dropdown-menu'
 import TabBar from '../tab-bar/TabBar'
-import TerminalPane from '../terminal-pane/TerminalPane'
-import { browserSlotAnchorName } from '../browser-pane/browser-pane-slots'
 import { useTabGroupWorkspaceModel } from './useTabGroupWorkspaceModel'
 import TabGroupDropOverlay from './TabGroupDropOverlay'
+import { resolveGroupTabFromVisibleId } from './tab-group-visible-id'
 import {
   getTabPaneBodyDroppableId,
   type HoveredTabInsertion,
   type TabDropZone
 } from './useTabDragSplit'
+import { tabGroupBodyAnchorName } from './tab-group-body-anchor'
+import {
+  getProjectNoteIdFromEntityId,
+  isNewProjectNoteEntityId
+} from '@/lib/open-project-notes-tab'
 
 const EditorPanel = lazy(() => import('../editor/EditorPanel'))
+const ProjectNotesTabContent = lazy(() => import('../notes/ProjectNotesTabContent'))
 
 export default function TabGroupPanel({
   groupId,
   worktreeId,
-  isWorktreeActive,
   isFocused,
   hasSplitGroups,
   touchesRightEdge,
+  touchesLeftEdge,
   reserveClosedExplorerToggleSpace,
   reserveCollapsedSidebarHeaderSpace,
   isTabDragActive = false,
@@ -37,10 +43,10 @@ export default function TabGroupPanel({
 }: {
   groupId: string
   worktreeId: string
-  isWorktreeActive: boolean
   isFocused: boolean
   hasSplitGroups: boolean
   touchesRightEdge: boolean
+  touchesLeftEdge: boolean
   reserveClosedExplorerToggleSpace: boolean
   reserveCollapsedSidebarHeaderSpace: boolean
   isTabDragActive?: boolean
@@ -50,17 +56,14 @@ export default function TabGroupPanel({
   const rightSidebarOpen = useAppStore((state) => state.rightSidebarOpen)
   const sidebarOpen = useAppStore((state) => state.sidebarOpen)
 
+  const [wslAvailable, setWslAvailable] = useState(false)
+  useEffect(() => {
+    void window.api.wsl.isAvailable().then(setWslAvailable)
+  }, [])
+
   const model = useTabGroupWorkspaceModel({ groupId, worktreeId })
-  const {
-    activeTab,
-    browserItems,
-    commands,
-    editorItems,
-    runtimeTerminalTabById,
-    tabBarOrder,
-    terminalTabs,
-    worktreePath
-  } = model
+  const { activeTab, browserItems, commands, editorItems, notesItems, tabBarOrder, terminalTabs } =
+    model
   const { setNodeRef: setBodyDropRef } = useDroppable({
     id: getTabPaneBodyDroppableId(groupId),
     data: {
@@ -70,13 +73,14 @@ export default function TabGroupPanel({
     },
     disabled: !isTabDragActive
   })
-  // Why: browser panes for this worktree are rendered once at the worktree
+  // Why: browser and terminal panes for this worktree are rendered once at the worktree
   // level (BrowserPaneOverlayLayer) and positioned over the owning group's
   // body via CSS anchor positioning. Tagging this body with a per-group
   // `anchor-name` lets the overlay reference it via `position-anchor`;
   // moving a tab between groups only swaps which anchor-name the overlay
-  // targets, never reparenting the `<webview>` (which would reload it).
-  const bodyAnchorName = browserSlotAnchorName(groupId)
+  // targets. Browsers avoid `<webview>` reloads; terminals avoid remounting
+  // xterm and losing alt-screen TUI state.
+  const bodyAnchorName = tabGroupBodyAnchorName(groupId)
   // Why: memoize the style object so the literal isn't recreated on every
   // render. A fresh object every render would make the body `<div>` appear
   // to have a new `style` prop on every parent re-render, which defeats any
@@ -102,42 +106,50 @@ export default function TabGroupPanel({
           commands.closeItem(item.id)
         }
       }}
-      onCloseOthers={(terminalId) => {
-        const item = model.groupTabs.find(
-          (candidate) => candidate.entityId === terminalId && candidate.contentType === 'terminal'
-        )
+      onCloseOthers={(visibleId) => {
+        // Why: TabBar emits this with the entityId for terminals/browsers and
+        // the unifiedTabId for editors (see TabBar's per-type wiring). Match
+        // both so the menu works on every tab kind, not just terminals.
+        const item = resolveGroupTabFromVisibleId(model.groupTabs, visibleId)
         if (item) {
           commands.closeOthers(item.id)
         }
       }}
-      onCloseToRight={(terminalId) => {
-        const item = model.groupTabs.find(
-          (candidate) => candidate.entityId === terminalId && candidate.contentType === 'terminal'
-        )
+      onCloseToRight={(visibleId) => {
+        const item = resolveGroupTabFromVisibleId(model.groupTabs, visibleId)
         if (item) {
           commands.closeToRight(item.id)
         }
       }}
       onNewTerminalTab={commands.newTerminalTab}
+      onNewTerminalWithShell={commands.newTerminalWithShell}
+      wslAvailable={wslAvailable}
       onNewBrowserTab={commands.newBrowserTab}
       onNewFileTab={commands.newFileTab}
+      onNewNotesTab={commands.newNotesTab}
       onSetCustomTitle={commands.setTabCustomTitle}
       onSetTabColor={commands.setTabColor}
       onTogglePaneExpand={() => {}}
       editorFiles={editorItems}
       browserTabs={browserItems}
+      notesTabs={notesItems}
       activeFileId={
-        activeTab?.contentType === 'terminal' || activeTab?.contentType === 'browser'
+        activeTab?.contentType === 'terminal' ||
+        activeTab?.contentType === 'browser' ||
+        activeTab?.contentType === 'notes'
           ? null
           : activeTab?.id
       }
       activeBrowserTabId={activeTab?.contentType === 'browser' ? activeTab.entityId : null}
+      activeNotesTabId={activeTab?.contentType === 'notes' ? activeTab.id : null}
       activeTabType={
         activeTab?.contentType === 'terminal'
           ? 'terminal'
           : activeTab?.contentType === 'browser'
             ? 'browser'
-            : 'editor'
+            : activeTab?.contentType === 'notes'
+              ? 'notes'
+              : 'editor'
       }
       onActivateFile={commands.activateEditor}
       onCloseFile={commands.closeItem}
@@ -145,6 +157,15 @@ export default function TabGroupPanel({
       onCloseBrowserTab={(browserTabId) => {
         const item = model.groupTabs.find(
           (candidate) => candidate.entityId === browserTabId && candidate.contentType === 'browser'
+        )
+        if (item) {
+          commands.closeItem(item.id)
+        }
+      }}
+      onActivateNotesTab={commands.activateNotes}
+      onCloseNotesTab={(notesTabId) => {
+        const item = model.groupTabs.find(
+          (candidate) => candidate.id === notesTabId && candidate.contentType === 'notes'
         )
         if (item) {
           commands.closeItem(item.id)
@@ -190,14 +211,14 @@ export default function TabGroupPanel({
       // because a lone group has nothing to contrast against.
       className={`group/tab-group flex flex-col flex-1 min-w-0 min-h-0 overflow-hidden${
         hasSplitGroups
-          ? // Why: drop only the RIGHT border on the rightmost group. The right
-            // sidebar paints its own `borderLeft` that already extends full
-            // height, so painting our own border-r in that spot stacks a
-            // second 1px line next to it — reading as a 2px-thick bar below
-            // the 8px drag strip (where the sidebar border continues alone
-            // above). The left edge has no such double-up, so the left
-            // border is always kept.
-            ` border-l ${touchesRightEdge ? '' : 'border-r'} border-border border-b ${isFocused ? 'border-b-accent' : 'opacity-95'}`
+          ? // Why: drop the outer borders on the edge-touching groups. The
+            // TabGroupSplitLayout wrapper already paints a full-height
+            // `border-l` at the sidebar seam, and the right sidebar paints
+            // its own `borderLeft` at the right seam — painting our own
+            // border-l/border-r in those spots stacks a second 1px line
+            // next to it, reading as a ~2px bar below the drag strip
+            // (where the sibling border continues alone above).
+            ` ${touchesLeftEdge ? '' : 'border-l'} ${touchesRightEdge ? '' : 'border-r'} border-border border-b ${isFocused ? 'border-b-accent' : 'opacity-95'}`
           : ''
       }`}
       onPointerDown={commands.focusGroup}
@@ -216,7 +237,7 @@ export default function TabGroupPanel({
           this, the empty space after tabs in the center column is dead — the
           user can only drag from the tiny left-sidebar header strip. */}
       <div
-        className="h-[34px] shrink-0 border-b border-border bg-card"
+        className="h-[32px] shrink-0 border-b border-border bg-card"
         style={{ WebkitAppRegion: 'drag' } as React.CSSProperties}
       >
         <div className="flex h-full items-stretch pr-1.5">
@@ -314,14 +335,21 @@ export default function TabGroupPanel({
           </div>
           {/* Why: Electron's native drag hit-test ignores z-index — a no-drag
               element only overrides drag when it's a DOM descendant, not a
-              sibling in another branch. The floating right-sidebar toggle in
-              App.tsx sits in a separate DOM tree, so we need an explicit
-              no-drag child here to punch a hole in the drag surface beneath it
-              and let clicks through to the toggle. */}
+              sibling in another branch. The floating right-sidebar toggle and
+              the fixed-position window-controls overlay on Windows both sit in
+              separate DOM trees, so we need an explicit no-drag child here to
+              punch holes in the drag surface beneath them. The sidebar toggle
+              is 40px (w-10); window controls add --window-controls-width
+              (138px on Windows, 0px elsewhere) on top. */}
           {reserveClosedExplorerToggleSpace && !rightSidebarOpen ? (
             <div
-              className="shrink-0 w-10"
-              style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
+              className="shrink-0"
+              style={
+                {
+                  width: 'calc(40px + var(--window-controls-width, 0px))',
+                  WebkitAppRegion: 'no-drag'
+                } as React.CSSProperties
+              }
             />
           ) : null}
         </div>
@@ -334,41 +362,35 @@ export default function TabGroupPanel({
       >
         {activeDropZone ? <TabGroupDropOverlay zone={activeDropZone} /> : null}
         {model.groupTabs
-          .filter((item) => item.contentType === 'terminal')
-          .map((item) => (
-            <TerminalPane
-              key={`${item.entityId}-${runtimeTerminalTabById.get(item.entityId)?.generation ?? 0}`}
-              tabId={item.entityId}
-              worktreeId={worktreeId}
-              cwd={worktreePath}
-              isActive={
-                isFocused && activeTab?.id === item.id && activeTab.contentType === 'terminal'
-              }
-              // Why: in multi-group splits, the active terminal in each group
-              // must remain visible (display:flex) so the user sees its output,
-              // but only the focused group's terminal should receive keyboard
-              // input. Hidden worktrees stay mounted offscreen, so `isVisible`
-              // must also respect worktree visibility or those detached panes
-              // keep their WebGL renderers alive and exhaust Chromium's context
-              // budget across worktrees.
-              isVisible={
-                isWorktreeActive &&
-                activeTab?.id === item.id &&
-                activeTab.contentType === 'terminal'
-              }
-              onPtyExit={(ptyId) => {
-                if (commands.consumeSuppressedPtyExit(ptyId)) {
-                  return
+          .filter((tab) => tab.contentType === 'notes')
+          .map((notesTab) => (
+            <div
+              key={notesTab.id}
+              className={`absolute inset-0 min-h-0 min-w-0 ${
+                activeTab?.id === notesTab.id ? 'flex' : 'hidden'
+              }`}
+            >
+              <Suspense
+                fallback={
+                  <div className="flex flex-1 items-center justify-center text-sm text-muted-foreground">
+                    Loading notes...
+                  </div>
                 }
-                commands.closeItem(item.id)
-              }}
-              onCloseTab={() => commands.closeItem(item.id)}
-            />
+              >
+                <ProjectNotesTabContent
+                  worktreeId={worktreeId}
+                  tabId={notesTab.id}
+                  noteId={getProjectNoteIdFromEntityId(notesTab.entityId)}
+                  forceNew={isNewProjectNoteEntityId(notesTab.entityId)}
+                />
+              </Suspense>
+            </div>
           ))}
 
         {activeTab &&
           activeTab.contentType !== 'terminal' &&
-          activeTab.contentType !== 'browser' && (
+          activeTab.contentType !== 'browser' &&
+          activeTab.contentType !== 'notes' && (
             <div className="absolute inset-0 flex min-h-0 min-w-0">
               {/* Why: split groups render editor/browser content inside a
                   plain relative pane body instead of the legacy flex column in
@@ -388,12 +410,11 @@ export default function TabGroupPanel({
             </div>
           )}
 
-        {/* Why: browser panes are rendered at the worktree level by
-            BrowserPaneOverlayLayer and absolutely positioned over this body
-            element via the slot registered above. Rendering them per-group
-            here caused moving a browser tab between groups to unmount and
-            remount the pane, reparenting the Electron `<webview>` — which
-            destroys its guest contents and reloads the page. */}
+        {/* Why: terminal/browser panes are rendered at the worktree level by
+            overlay layers and absolutely positioned over this body element
+            via the slot registered above. Rendering them per-group caused
+            split moves to remount xterm or reparent Electron `<webview>`,
+            losing TUI state or reloading the page. */}
       </div>
     </div>
   )

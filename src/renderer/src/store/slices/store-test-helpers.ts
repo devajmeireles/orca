@@ -9,15 +9,18 @@ import type {
 } from '../../../../shared/types'
 import type { OpenFile } from './editor'
 import { createRepoSlice } from './repos'
+import { createSparsePresetsSlice } from './sparse-presets'
 import { createWorktreeSlice } from './worktrees'
 import { createTerminalSlice } from './terminals'
 import { createTabsSlice } from './tabs'
 import { createUISlice } from './ui'
 import { createSettingsSlice } from './settings'
 import { createGitHubSlice } from './github'
+import { createHostedReviewSlice } from './hosted-review'
 import { createLinearSlice } from './linear'
 import { createEditorSlice } from './editor'
 import { createStatsSlice } from './stats'
+import { createMemorySlice } from './memory'
 import { createClaudeUsageSlice } from './claude-usage'
 import { createCodexUsageSlice } from './codex-usage'
 import { createBrowserSlice } from './browser'
@@ -27,6 +30,7 @@ import { createAgentStatusSlice } from './agent-status'
 import { createDiffCommentsSlice } from './diffComments'
 import { createDetectedAgentsSlice } from './detected-agents'
 import { createWorktreeNavHistorySlice } from './worktree-nav-history'
+import { createDictationSlice } from './dictation'
 
 export const TEST_REPO = {
   id: 'repo1',
@@ -39,15 +43,18 @@ export const TEST_REPO = {
 export function createTestStore() {
   return create<AppState>()((...a) => ({
     ...createRepoSlice(...a),
+    ...createSparsePresetsSlice(...a),
     ...createWorktreeSlice(...a),
     ...createTerminalSlice(...a),
     ...createTabsSlice(...a),
     ...createUISlice(...a),
     ...createSettingsSlice(...a),
     ...createGitHubSlice(...a),
+    ...createHostedReviewSlice(...a),
     ...createLinearSlice(...a),
     ...createEditorSlice(...a),
     ...createStatsSlice(...a),
+    ...createMemorySlice(...a),
     ...createClaudeUsageSlice(...a),
     ...createCodexUsageSlice(...a),
     ...createBrowserSlice(...a),
@@ -56,7 +63,8 @@ export function createTestStore() {
     ...createAgentStatusSlice(...a),
     ...createDiffCommentsSlice(...a),
     ...createDetectedAgentsSlice(...a),
-    ...createWorktreeNavHistorySlice(...a)
+    ...createWorktreeNavHistorySlice(...a),
+    ...createDictationSlice(...a)
   }))
 }
 
@@ -87,6 +95,8 @@ export function makeWorktree(
     linkedIssue: null,
     linkedPR: null,
     linkedLinearIssue: null,
+    linkedGitLabMR: null,
+    linkedGitLabIssue: null,
     isArchived: false,
     isUnread: false,
     isPinned: false,

@@ -16,6 +16,7 @@ import {
   DropdownMenuRadioItem
 } from '@/components/ui/dropdown-menu'
 import type { WorktreeCardProperty } from '../../../../shared/types'
+import SidebarFilter from './SidebarFilter'
 
 const GROUP_BY_OPTIONS = [
   { id: 'none', label: 'All' },
@@ -29,14 +30,22 @@ const PROPERTY_OPTIONS: { id: WorktreeCardProperty; label: string }[] = [
   { id: 'ci', label: 'CI checks' },
   { id: 'issue', label: 'Linked issue' },
   { id: 'pr', label: 'Linked PR' },
-  { id: 'comment', label: 'Comment' }
+  { id: 'comment', label: 'Comment' },
+  // Why: toggles the inline "Agent activity" list rendered below each
+  // workspace card body (see WorktreeCard → WorktreeCardAgents). Off hides
+  // the list; there is no alternate surface.
+  { id: 'inline-agents', label: 'Agent activity' }
 ]
 
 const SORT_OPTIONS = [
-  { id: 'name', label: 'Name' },
-  { id: 'smart', label: 'Smart' },
-  { id: 'recent', label: 'Recent' },
-  { id: 'repo', label: 'Repo' }
+  { id: 'name', label: 'Name', description: null },
+  {
+    id: 'smart',
+    label: 'Smart',
+    description: 'Agents that need attention, then most recent activity.'
+  },
+  { id: 'recent', label: 'Recent', description: null },
+  { id: 'repo', label: 'Repo', description: null }
 ] as const
 
 const isMac = navigator.userAgent.includes('Mac')
@@ -53,13 +62,13 @@ const SidebarHeader = React.memo(function SidebarHeader() {
   const setSortBy = useAppStore((s) => s.setSortBy)
   const groupBy = useAppStore((s) => s.groupBy)
   const setGroupBy = useAppStore((s) => s.setGroupBy)
-
   return (
-    <div className="flex h-8 items-center justify-between px-4 mt-1">
-      <span className="text-[10.5px] font-semibold uppercase tracking-[0.12em] text-muted-foreground/80 select-none">
+    <div className="flex h-8 items-center justify-between px-2 gap-2">
+      <span className="px-2 text-[10.5px] font-semibold uppercase tracking-[0.12em] text-muted-foreground/80 select-none">
         Workspaces
       </span>
       <div className="flex items-center gap-1.5 shrink-0">
+        <SidebarFilter />
         <DropdownMenu>
           <Tooltip>
             <TooltipTrigger asChild>
@@ -111,17 +120,30 @@ const SidebarHeader = React.memo(function SidebarHeader() {
               value={sortBy}
               onValueChange={(v) => setSortBy(v as typeof sortBy)}
             >
-              {SORT_OPTIONS.map((opt) => (
-                <DropdownMenuRadioItem
-                  key={opt.id}
-                  value={opt.id}
-                  // Keep the menu open so people can compare sort modes and
-                  // toggle card properties without reopening the same panel.
-                  onSelect={(e) => e.preventDefault()}
-                >
-                  {opt.label}
-                </DropdownMenuRadioItem>
-              ))}
+              {SORT_OPTIONS.map((opt) => {
+                const radioItem = (
+                  <DropdownMenuRadioItem
+                    key={opt.id}
+                    value={opt.id}
+                    // Keep the menu open so people can compare sort modes and
+                    // toggle card properties without reopening the same panel.
+                    onSelect={(e) => e.preventDefault()}
+                  >
+                    {opt.label}
+                  </DropdownMenuRadioItem>
+                )
+                if (!opt.description) {
+                  return radioItem
+                }
+                return (
+                  <Tooltip key={opt.id}>
+                    <TooltipTrigger asChild>{radioItem}</TooltipTrigger>
+                    <TooltipContent side="right" sideOffset={6}>
+                      {opt.description}
+                    </TooltipContent>
+                  </Tooltip>
+                )
+              })}
             </DropdownMenuRadioGroup>
 
             <DropdownMenuSeparator />
@@ -148,7 +170,7 @@ const SidebarHeader = React.memo(function SidebarHeader() {
                 if (!canCreateWorktree) {
                   return
                 }
-                openModal('new-workspace-composer')
+                openModal('new-workspace-composer', { telemetrySource: 'sidebar' })
               }}
               aria-label="New workspace"
               disabled={!canCreateWorktree}

@@ -17,19 +17,30 @@ import type {
 import { gitExecFileAsync, gitExecFileAsyncBuffer } from './runner'
 
 const MAX_GIT_SHOW_BYTES = 10 * 1024 * 1024
+const BULK_CHUNK_SIZE = 100
 
 /**
  * Parse `git status --porcelain=v2` output into structured entries.
  */
 export async function getStatus(worktreePath: string): Promise<GitStatusResult> {
   const entries: GitStatusEntry[] = []
+  let head: string | undefined
+  let branch: string | undefined
+  let upstreamName: string | undefined
+  let upstreamAheadBehind: { ahead: number; behind: number } | null = null
+  let statusSucceeded = false
 
   // Why: detectConflictOperation (4 existsSync + readFile) and git status are
   // independent. Running them concurrently saves one round-trip of I/O latency.
   const conflictPromise = detectConflictOperation(worktreePath)
-  const statusPromise = gitExecFileAsync(['status', '--porcelain=v2', '--untracked-files=all'], {
-    cwd: worktreePath
-  })
+  // Why: -c core.quotePath=false keeps non-ASCII filenames (Japanese, emoji,
+  // etc.) as raw UTF-8 instead of git's default C-style octal escapes wrapped
+  // in double quotes. Without it, the parsed entry.path is unreadable in the
+  // sidebar and downstream `git show :"docs/\346..."` lookups silently miss.
+  const statusPromise = gitExecFileAsync(
+    ['-c', 'core.quotePath=false', 'status', '--porcelain=v2', '--branch', '--untracked-files=all'],
+    { cwd: worktreePath }
+  )
   const conflictOperation = await conflictPromise
 
   try {
@@ -39,6 +50,30 @@ export async function getStatus(worktreePath: string): Promise<GitStatusResult> 
     // avoiding trailing \r characters in parsed paths.
     for (const line of stdout.split(/\r?\n/)) {
       if (!line) {
+        continue
+      }
+
+      if (line.startsWith('# branch.oid ')) {
+        head = line.slice('# branch.oid '.length).trim()
+        continue
+      }
+
+      if (line.startsWith('# branch.head ')) {
+        const branchHead = line.slice('# branch.head '.length).trim()
+        // Why: undefined (not '') for detached/empty so renderer's
+        // `identity.branch ?? worktree.branch` preserves the prior branch
+        // value when git can't report one, instead of overwriting it with ''.
+        branch = branchHead && branchHead !== '(detached)' ? `refs/heads/${branchHead}` : undefined
+        continue
+      }
+
+      if (line.startsWith('# branch.upstream ')) {
+        upstreamName = line.slice('# branch.upstream '.length).trim() || undefined
+        continue
+      }
+
+      if (line.startsWith('# branch.ab ')) {
+        upstreamAheadBehind = parseBranchAheadBehind(line)
         continue
       }
 
@@ -86,11 +121,40 @@ export async function getStatus(worktreePath: string): Promise<GitStatusResult> 
         }
       }
     }
+    statusSucceeded = true
   } catch {
     // Not a git repo or git not available
   }
 
-  return { entries, conflictOperation }
+  return {
+    entries,
+    conflictOperation,
+    head,
+    branch,
+    ...(statusSucceeded
+      ? {
+          upstreamStatus: upstreamName
+            ? {
+                hasUpstream: true,
+                upstreamName,
+                ahead: upstreamAheadBehind?.ahead ?? 0,
+                behind: upstreamAheadBehind?.behind ?? 0
+              }
+            : { hasUpstream: false, ahead: 0, behind: 0 }
+        }
+      : {})
+  }
+}
+
+function parseBranchAheadBehind(line: string): { ahead: number; behind: number } | null {
+  const match = line.match(/^# branch\.ab \+(\d+) -(\d+)$/)
+  if (!match) {
+    return null
+  }
+  return {
+    ahead: Number.parseInt(match[1], 10),
+    behind: Number.parseInt(match[2], 10)
+  }
 }
 
 function parseStatusChar(char: string): GitFileStatus {
@@ -268,7 +332,7 @@ export async function detectConflictOperation(worktreePath: string): Promise<Git
   return 'unknown'
 }
 
-async function resolveGitDir(worktreePath: string): Promise<string> {
+export async function resolveGitDir(worktreePath: string): Promise<string> {
   const dotGitPath = path.join(worktreePath, '.git')
 
   try {
@@ -290,7 +354,8 @@ async function resolveGitDir(worktreePath: string): Promise<string> {
 export async function getDiff(
   worktreePath: string,
   filePath: string,
-  staged: boolean
+  staged: boolean,
+  compareAgainstHead = false
 ): Promise<GitDiffResult> {
   let originalContent = ''
   let modifiedContent = ''
@@ -300,7 +365,9 @@ export async function getDiff(
   try {
     const leftBlob = staged
       ? await readGitBlobAtOidPath(worktreePath, 'HEAD', filePath)
-      : await readUnstagedLeftBlob(worktreePath, filePath)
+      : compareAgainstHead
+        ? await readGitBlobAtOidPath(worktreePath, 'HEAD', filePath)
+        : await readUnstagedLeftBlob(worktreePath, filePath)
     originalContent = leftBlob.content
     originalIsBinary = leftBlob.isBinary
 
@@ -427,8 +494,10 @@ async function loadBranchChanges(
   mergeBase: string,
   headOid: string
 ): Promise<GitBranchChangeEntry[]> {
+  // Why: see core.quotePath=false rationale in getStatus — same reason here so
+  // branch-diff entries render with their real UTF-8 paths.
   const { stdout } = await gitExecFileAsync(
-    ['diff', '--name-status', '-M', '-C', mergeBase, headOid],
+    ['-c', 'core.quotePath=false', 'diff', '--name-status', '-M', '-C', mergeBase, headOid],
     { cwd: worktreePath, maxBuffer: MAX_GIT_SHOW_BYTES }
   )
 
@@ -656,6 +725,34 @@ export async function unstageFile(worktreePath: string, filePath: string): Promi
   await gitExecFileAsync(['restore', '--staged', '--', filePath], { cwd: worktreePath })
 }
 
+export async function commitChanges(
+  worktreePath: string,
+  message: string
+): Promise<{ success: boolean; error?: string }> {
+  try {
+    await gitExecFileAsync(['commit', '-m', message], { cwd: worktreePath })
+    return { success: true }
+  } catch (error) {
+    // Why: surface whichever channel carries the useful message. Pre-commit/GPG
+    // hook failures write to stderr; "nothing to commit, working tree clean"
+    // writes to stdout. Try stderr first, fall back to stdout, then error.message.
+    const readStringField = (field: string): string | null => {
+      if (typeof error === 'object' && error && field in error) {
+        const v = (error as Record<string, unknown>)[field]
+        if (typeof v === 'string' && v.length > 0) {
+          return v
+        }
+      }
+      return null
+    }
+    const errorMessage =
+      readStringField('stderr') ??
+      readStringField('stdout') ??
+      (error instanceof Error ? error.message : 'Commit failed')
+    return { success: false, error: errorMessage }
+  }
+}
+
 /**
  * Discard working tree changes for a file.
  */
@@ -683,6 +780,69 @@ export async function discardChanges(worktreePath: string, filePath: string): Pr
     : rm(resolvedTarget, { force: true, recursive: true }))
 }
 
+function normalizeGitPathForCompare(filePath: string): string {
+  return filePath.replace(/\\/g, '/').replace(/\/+$/, '')
+}
+
+function isTrackedPathSpec(filePath: string, trackedPaths: readonly string[]): boolean {
+  const normalized = normalizeGitPathForCompare(filePath)
+  return trackedPaths.some((trackedPath) => {
+    const normalizedTracked = normalizeGitPathForCompare(trackedPath)
+    return normalizedTracked === normalized || normalizedTracked.startsWith(`${normalized}/`)
+  })
+}
+
+async function listTrackedPathSpecs(
+  worktreePath: string,
+  filePaths: readonly string[]
+): Promise<string[]> {
+  const trackedPaths: string[] = []
+  for (let i = 0; i < filePaths.length; i += BULK_CHUNK_SIZE) {
+    const chunk = filePaths.slice(i, i + BULK_CHUNK_SIZE)
+    const { stdout } = await gitExecFileAsync(['ls-files', '-z', '--', ...chunk], {
+      cwd: worktreePath
+    })
+    trackedPaths.push(...stdout.split('\0').filter(Boolean))
+  }
+  return trackedPaths
+}
+
+/**
+ * Discard working tree changes for many paths in a small number of subprocesses.
+ */
+export async function bulkDiscardChanges(worktreePath: string, filePaths: string[]): Promise<void> {
+  if (filePaths.length === 0) {
+    return
+  }
+
+  const resolvedWorktree = path.resolve(worktreePath)
+  for (const filePath of filePaths) {
+    const resolvedTarget = path.resolve(worktreePath, filePath)
+    if (!isWithinWorktree(path, resolvedWorktree, resolvedTarget)) {
+      throw new Error(`Path "${filePath}" resolves outside the worktree`)
+    }
+  }
+
+  const trackedPathSpecs = await listTrackedPathSpecs(worktreePath, filePaths)
+  const trackedPaths = filePaths.filter((filePath) => isTrackedPathSpec(filePath, trackedPathSpecs))
+  const untrackedPaths = filePaths.filter(
+    (filePath) => !isTrackedPathSpec(filePath, trackedPathSpecs)
+  )
+
+  for (let i = 0; i < trackedPaths.length; i += BULK_CHUNK_SIZE) {
+    const chunk = trackedPaths.slice(i, i + BULK_CHUNK_SIZE)
+    await gitExecFileAsync(['restore', '--worktree', '--source=HEAD', '--', ...chunk], {
+      cwd: worktreePath
+    })
+  }
+
+  await Promise.all(
+    untrackedPaths.map((filePath) =>
+      rm(path.resolve(worktreePath, filePath), { force: true, recursive: true })
+    )
+  )
+}
+
 export function isWithinWorktree(
   pathApi: Pick<typeof path, 'isAbsolute' | 'relative' | 'sep'>,
   resolvedWorktree: string,
@@ -704,9 +864,8 @@ export async function bulkStageFiles(worktreePath: string, filePaths: string[]):
   if (filePaths.length === 0) {
     return
   }
-  const CHUNK_SIZE = 100
-  for (let i = 0; i < filePaths.length; i += CHUNK_SIZE) {
-    const chunk = filePaths.slice(i, i + CHUNK_SIZE)
+  for (let i = 0; i < filePaths.length; i += BULK_CHUNK_SIZE) {
+    const chunk = filePaths.slice(i, i + BULK_CHUNK_SIZE)
     await gitExecFileAsync(['add', '--', ...chunk], { cwd: worktreePath })
   }
 }
@@ -718,9 +877,8 @@ export async function bulkUnstageFiles(worktreePath: string, filePaths: string[]
   if (filePaths.length === 0) {
     return
   }
-  const CHUNK_SIZE = 100
-  for (let i = 0; i < filePaths.length; i += CHUNK_SIZE) {
-    const chunk = filePaths.slice(i, i + CHUNK_SIZE)
+  for (let i = 0; i < filePaths.length; i += BULK_CHUNK_SIZE) {
+    const chunk = filePaths.slice(i, i + BULK_CHUNK_SIZE)
     await gitExecFileAsync(['restore', '--staged', '--', ...chunk], { cwd: worktreePath })
   }
 }

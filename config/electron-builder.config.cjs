@@ -1,7 +1,12 @@
 const { chmodSync, existsSync, readdirSync } = require('node:fs')
-const { join } = require('node:path')
+const { execFileSync } = require('node:child_process')
+const { join, resolve } = require('node:path')
 
 const isMacRelease = process.env.ORCA_MAC_RELEASE === '1'
+const featureWallResources = {
+  from: 'resources/onboarding/feature-wall',
+  to: 'onboarding/feature-wall'
+}
 
 /** @type {import('electron-builder').Configuration} */
 module.exports = {
@@ -14,10 +19,13 @@ module.exports = {
     '!**/.vscode/*',
     '!src/*',
     '!electron.vite.config.{js,ts,mjs,cjs}',
-    '!{.eslintcache,eslint.config.mjs,.prettierignore,.prettierrc.yaml,dev-app-update.yml,CHANGELOG.md,README.md}',
+    '!{.eslintcache,eslint.config.mjs,.prettierignore,.prettierrc.yaml,CHANGELOG.md,README.md}',
     '!{.env,.env.*,.npmrc,pnpm-lock.yaml}',
     '!tsconfig.json',
-    '!config/*'
+    '!config/*',
+    // Why: feature-wall media is copied via extraResources so runtime can read
+    // it from process.resourcesPath; exclude the source copy from app.asar.
+    '!resources/onboarding/feature-wall/**'
   ],
   // Why: the CLI entry-point lives in out/cli/ but imports shared modules
   // from out/shared/ (e.g. runtime-bootstrap). Both directories must be
@@ -31,18 +39,28 @@ module.exports = {
   // integration — dependencies inside the asar archive are invisible to
   // require(). Unpack CLI runtime deps so they resolve from
   // app.asar.unpacked/node_modules/.
+  // Why: sherpa-onnx native bindings (platform-specific subpackages) must be
+  // unpacked because they ship .node addons + .dylib/.so files that cannot be
+  // dlopen()'d from inside the asar archive.
   asarUnpack: [
     'out/cli/**',
     'out/shared/**',
     'out/main/daemon-entry.js',
+    'out/main/computer-sidecar.js',
     'out/main/chunks/**',
     'resources/**',
-    'node_modules/zod/**'
+    'node_modules/zod/**',
+    'node_modules/sherpa-onnx*/**'
   ],
   afterPack: async (context) => {
     const resourcesDir =
       context.electronPlatformName === 'darwin'
-        ? join(context.appOutDir, `${context.packager.appInfo.productFilename}.app`, 'Contents', 'Resources')
+        ? join(
+            context.appOutDir,
+            `${context.packager.appInfo.productFilename}.app`,
+            'Contents',
+            'Resources'
+          )
         : join(context.appOutDir, 'resources')
     if (!existsSync(resourcesDir)) {
       return
@@ -56,6 +74,9 @@ module.exports = {
       // the copied binary to be executable in packaged apps.
       chmodSync(join(resourcesDir, filename), 0o755)
     }
+    if (context.electronPlatformName === 'darwin') {
+      await signMacComputerUseHelper(join(resourcesDir, 'Orca Computer Use.app'), context.packager)
+    }
   },
   win: {
     executableName: 'Orca',
@@ -67,7 +88,12 @@ module.exports = {
       {
         from: 'node_modules/agent-browser/bin/agent-browser-win32-x64.exe',
         to: 'agent-browser-win32-x64.exe'
-      }
+      },
+      {
+        from: 'native/computer-use-windows/runtime.ps1',
+        to: 'computer-use-windows/runtime.ps1'
+      },
+      featureWallResources
     ]
   },
   nsis: {
@@ -81,8 +107,21 @@ module.exports = {
     entitlements: 'resources/build/entitlements.mac.plist',
     entitlementsInherit: 'resources/build/entitlements.mac.plist',
     extendInfo: {
+      NSAppleEventsUsageDescription:
+        'Orca allows terminal-launched developer tools to automate local apps when you request it.',
+      NSBluetoothAlwaysUsageDescription:
+        'Orca allows terminal-launched developer tools to access Bluetooth devices when you request it.',
+      NSBluetoothPeripheralUsageDescription:
+        'Orca allows terminal-launched developer tools to access Bluetooth devices when you request it.',
       NSCameraUsageDescription: "Application requests access to the device's camera.",
+      NSLocationUsageDescription:
+        'Orca allows terminal-launched developer tools to access location when you request it.',
+      NSLocalNetworkUsageDescription:
+        'Orca allows terminal-launched developer tools to discover and connect to local development servers when you request it.',
       NSMicrophoneUsageDescription: "Application requests access to the device's microphone.",
+      NSAudioCaptureUsageDescription:
+        'Orca allows terminal-launched developer tools to capture desktop audio when you request it.',
+      NSBonjourServices: ['_http._tcp', '_https._tcp'],
       NSDocumentsFolderUsageDescription:
         "Application requests access to the user's Documents folder.",
       NSDownloadsFolderUsageDescription:
@@ -102,7 +141,12 @@ module.exports = {
       {
         from: 'node_modules/agent-browser/bin/agent-browser-darwin-${arch}',
         to: 'agent-browser-darwin-${arch}'
-      }
+      },
+      {
+        from: 'native/computer-use-macos/.build/release/Orca Computer Use.app',
+        to: 'Orca Computer Use.app'
+      },
+      featureWallResources
     ],
     target: [
       {
@@ -122,6 +166,9 @@ module.exports = {
     artifactName: 'orca-macos-${arch}.${ext}'
   },
   linux: {
+    // Why: Ubuntu 26 ships GNOME Orca as the `orca` package and /usr/bin/orca.
+    // The Linux installer should not claim those system package/file names.
+    executableName: 'orca-ide',
     extraResources: [
       {
         from: 'resources/linux/bin/orca',
@@ -130,7 +177,12 @@ module.exports = {
       {
         from: 'node_modules/agent-browser/bin/agent-browser-linux-${arch}',
         to: 'agent-browser-linux-${arch}'
-      }
+      },
+      {
+        from: 'native/computer-use-linux/runtime.py',
+        to: 'computer-use-linux/runtime.py'
+      },
+      featureWallResources
     ],
     target: ['AppImage', 'deb'],
     maintainer: 'stablyai',
@@ -138,6 +190,11 @@ module.exports = {
   },
   appImage: {
     artifactName: 'orca-linux.${ext}'
+  },
+  deb: {
+    packageName: 'orca-ide',
+    artifactName: 'orca-ide_${version}_${arch}.${ext}',
+    depends: ['python3', 'python3-gi', 'gir1.2-atspi-2.0', 'at-spi2-core', 'xdotool', 'xclip']
   },
   // Why: must be true so that electron-builder rebuilds native modules
   // (node-pty) for each target architecture when producing dual-arch macOS
@@ -151,4 +208,68 @@ module.exports = {
     repo: 'orca',
     releaseType: 'release'
   }
+}
+
+async function signMacComputerUseHelper(helperAppPath, packager) {
+  if (!existsSync(helperAppPath)) {
+    if (isMacRelease) {
+      throw new Error(`Missing Orca Computer Use helper app at ${helperAppPath}`)
+    }
+    return
+  }
+  const codeSigningInfo =
+    isMacRelease && process.env.CSC_LINK && packager?.codeSigningInfo?.value
+      ? await packager.codeSigningInfo.value
+      : null
+  const identity =
+    process.env.ORCA_COMPUTER_MACOS_SIGN_IDENTITY ??
+    process.env.CSC_NAME ??
+    findInstalledMacSigningIdentity(codeSigningInfo?.keychainFile) ??
+    (isMacRelease ? null : '-')
+  if (!identity) {
+    throw new Error('Missing signing identity for Orca Computer Use helper app')
+  }
+  // Why: TCC grants attach to this nested app's code identity. Sign it before
+  // the outer Orca.app is sealed so production builds preserve that identity.
+  execFileSync('codesign', codesignArgs(identity, helperAppPath), { stdio: 'inherit' })
+  execFileSync('codesign', ['--verify', '--deep', '--strict', helperAppPath], {
+    stdio: 'inherit'
+  })
+}
+
+function codesignArgs(identity, targetPath) {
+  const args = ['--force', '--deep', '--sign', identity]
+  if (isMacRelease) {
+    args.push(
+      '--options',
+      'runtime',
+      '--timestamp',
+      '--entitlements',
+      resolve(__dirname, '../resources/build/entitlements.computer-use.mac.plist')
+    )
+  }
+  args.push(targetPath)
+  return args
+}
+
+function findInstalledMacSigningIdentity(keychainFile) {
+  try {
+    const output = execFileSync(
+      'security',
+      ['find-identity', '-v', '-p', 'codesigning', ...(keychainFile ? [keychainFile] : [])],
+      {
+        encoding: 'utf8'
+      }
+    )
+    const releaseMatch =
+      output.match(/"([^"]*Developer ID Application:[^"]+)"/) ??
+      output.match(/"([^"]*Apple Distribution:[^"]+)"/)
+    if (releaseMatch?.[1]) {
+      return releaseMatch[1]
+    }
+    if (!isMacRelease) {
+      return output.match(/"([^"]*Apple Development:[^"]+)"/)?.[1] ?? null
+    }
+  } catch {}
+  return null
 }

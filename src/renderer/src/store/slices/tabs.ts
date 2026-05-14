@@ -60,7 +60,9 @@ export type TabsSlice = {
     tabId: string
   ) => { closedTabId: string; wasLastTab: boolean; worktreeId: string } | null
   reorderUnifiedTabs: (groupId: string, tabIds: string[]) => void
+  setTabEntityId: (tabId: string, entityId: string) => void
   setTabLabel: (tabId: string, label: string) => void
+  setTabDirty: (tabId: string, isDirty: boolean) => void
   setTabCustomLabel: (tabId: string, label: string | null) => void
   setUnifiedTabColor: (tabId: string, color: string | null) => void
   pinTab: (tabId: string) => void
@@ -227,7 +229,13 @@ function collapseGroupLayout(
 }
 
 function toVisibleTabType(contentType: TabContentType): WorkspaceVisibleTabType {
-  return contentType === 'browser' ? 'browser' : contentType === 'terminal' ? 'terminal' : 'editor'
+  return contentType === 'browser'
+    ? 'browser'
+    : contentType === 'terminal'
+      ? 'terminal'
+      : contentType === 'notes'
+        ? 'notes'
+        : 'editor'
 }
 
 function deriveActiveSurfaceForWorktree(
@@ -430,7 +438,8 @@ export const createTabsSlice: StateCreator<AppState, [], [], TabsSlice> = (set, 
         sortOrder: nextOrder.length,
         createdAt: Date.now(),
         isPreview: init?.isPreview,
-        isPinned: init?.isPinned
+        isPinned: init?.isPinned,
+        isDirty: false
       }
 
       nextOrder = dedupeTabOrder([...nextOrder, created.id])
@@ -727,6 +736,12 @@ export const createTabsSlice: StateCreator<AppState, [], [], TabsSlice> = (set, 
 
   setTabLabel: (tabId, label) =>
     set((state) => patchTab(state.unifiedTabsByWorktree, tabId, { label }) ?? {}),
+
+  setTabEntityId: (tabId, entityId) =>
+    set((state) => patchTab(state.unifiedTabsByWorktree, tabId, { entityId }) ?? {}),
+
+  setTabDirty: (tabId, isDirty) =>
+    set((state) => patchTab(state.unifiedTabsByWorktree, tabId, { isDirty }) ?? {}),
 
   setTabCustomLabel: (tabId, label) =>
     set((state) => patchTab(state.unifiedTabsByWorktree, tabId, { customLabel: label }) ?? {}),
@@ -1285,6 +1300,15 @@ export const createTabsSlice: StateCreator<AppState, [], [], TabsSlice> = (set, 
       if (unifiedTerminalEntityIds.has(tab.id)) {
         return false
       }
+      // Why: this is a one-shot migration filter for tabs not yet promoted
+      // to unifiedTabs — keeping the wake-hint `tab.ptyId` clause is
+      // intentional. tab.ptyId is the preserved sessionId (so wake can
+      // reattach to the same daemon-history dir / relay session); a slept
+      // tab will have `livePtyIds` empty *and* `tab.ptyId` populated, and
+      // we want it included in the migration sweep so reconcile picks it
+      // up. Reconcile fires again post-reattach, so the eventual live PTY
+      // also routes through this branch. Do *not* repurpose this as an
+      // "is this tab alive?" check — those reads must use ptyIdsByTabId.
       const livePtyIds = state.ptyIdsByTabId[tab.id] ?? []
       return livePtyIds.length > 0 || tab.ptyId != null
     })
@@ -1349,6 +1373,12 @@ export const createTabsSlice: StateCreator<AppState, [], [], TabsSlice> = (set, 
       }
       if (tab.contentType === 'browser') {
         return liveBrowserIds.has(tab.entityId)
+      }
+      if (tab.contentType === 'notes') {
+        // Why: project notes are backed by the project notes store, not by
+        // openFiles. Treating them as editor-backed files makes reconcile
+        // prune valid notes tabs and can leave the workspace looking empty.
+        return true
       }
       return liveEditorIds.has(tab.entityId)
     }

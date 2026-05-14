@@ -1,7 +1,8 @@
 import { screen, webContents } from 'electron'
 import {
   normalizeBrowserNavigationUrl,
-  normalizeExternalBrowserUrl
+  normalizeExternalBrowserUrl,
+  redactKagiSessionToken
 } from '../../shared/browser-url'
 import {
   isWindowShortcutModifierChord,
@@ -9,6 +10,7 @@ import {
 } from '../../shared/window-shortcut-policy'
 
 type ResolveRenderer = (browserTabId: string) => Electron.WebContents | null
+type ShouldForwardDictationShortcut = () => boolean
 
 function isTerminalTabSwitchChord(input: Electron.Input): boolean {
   return (
@@ -31,7 +33,10 @@ export function setupGuestContextMenu(args: {
     if (!renderer) {
       return
     }
-    const pageUrl = guest.getURL()
+    // Why: redact Kagi session tokens before the URL leaves main; the renderer
+    // pipes pageUrl into clipboard writes and shell.openExternal, both of which
+    // would otherwise expose the bearer token outside Orca.
+    const pageUrl = redactKagiSessionToken(guest.getURL())
     // Why: params.linkURL is empty when the user right-clicks non-link
     // content. Normalizing an empty string through normalizeBrowserNavigationUrl
     // produces the blank-page constant (a truthy string), which would trick the
@@ -213,8 +218,9 @@ export function setupGuestShortcutForwarding(args: {
   browserTabId: string
   guest: Electron.WebContents
   resolveRenderer: ResolveRenderer
+  shouldForwardDictationShortcut?: ShouldForwardDictationShortcut
 }): () => void {
-  const { browserTabId, guest, resolveRenderer } = args
+  const { browserTabId, guest, resolveRenderer, shouldForwardDictationShortcut } = args
   const handler = (event: Electron.Event, input: Electron.Input): void => {
     if (input.type !== 'keyDown') {
       return
@@ -225,6 +231,12 @@ export function setupGuestShortcutForwarding(args: {
     // which rejects Alt. Every other chord handled further down can reuse
     // the same `action` rather than re-running the full predicate chain.
     const action = resolveWindowShortcutAction(input, process.platform)
+    if (input.isAutoRepeat) {
+      if (action?.type === 'dictationKeyDown' && shouldForwardDictationShortcut?.()) {
+        event.preventDefault()
+      }
+      return
+    }
     if (action?.type === 'worktreeHistoryNavigate') {
       // Why: preventDefault unconditionally — if we cannot resolve the
       // renderer (torn-down tab or teardown race), dropping the keystroke
@@ -235,6 +247,29 @@ export function setupGuestShortcutForwarding(args: {
       event.preventDefault()
       const renderer = resolveRenderer(browserTabId)
       renderer?.send('ui:worktreeHistoryNavigate', action.direction)
+      return
+    }
+
+    if (action?.type === 'toggleFloatingTerminal') {
+      event.preventDefault()
+      const renderer = resolveRenderer(browserTabId)
+      renderer?.send('ui:toggleFloatingTerminal')
+      return
+    }
+
+    // Why: Cmd/Ctrl+Alt+[ / ] cycles across every tab type. Handled before
+    // the generic modifier-chord gate below because that gate rejects Alt.
+    // Mirrors the Alt-exempt branch pattern used for worktreeHistoryNavigate.
+    const isPrimaryMod =
+      process.platform === 'darwin' ? input.meta && !input.control : input.control && !input.meta
+    if (
+      isPrimaryMod &&
+      input.alt &&
+      (input.code === 'BracketRight' || input.code === 'BracketLeft')
+    ) {
+      event.preventDefault()
+      const renderer = resolveRenderer(browserTabId)
+      renderer?.send('ui:switchTabAcrossAllTypes', input.code === 'BracketRight' ? 1 : -1)
       return
     }
 
@@ -264,12 +299,10 @@ export function setupGuestShortcutForwarding(args: {
     if (input.code === 'KeyB' && input.shift) {
       renderer.send('ui:newBrowserTab')
     } else if (input.code === 'KeyT' && !input.shift) {
-      // Why: once focus is inside a browser guest, Cmd/Ctrl+T should extend
-      // the current browser workspace with another internal page instead of
-      // creating a sibling Orca terminal tab. The renderer still decides
-      // whether that means "new page in this workspace" or "new workspace"
-      // based on the current active surface.
-      renderer.send('ui:newBrowserTab')
+      // Why: Cmd/Ctrl+T always opens a new terminal in the central pane,
+      // even when focus is inside a browser guest. Cmd/Ctrl+Shift+B is the
+      // dedicated shortcut for new browser tabs.
+      renderer.send('ui:newTerminalTab')
     } else if (input.code === 'KeyL' && !input.shift) {
       // Why: the address bar lives in the renderer chrome, not the guest
       // page. Forward Cmd/Ctrl+L out of the guest so the active BrowserPane
@@ -305,6 +338,11 @@ export function setupGuestShortcutForwarding(args: {
       renderer.send('ui:openNewWorkspace')
     } else if (action?.type === 'jumpToWorktreeIndex') {
       renderer.send('ui:jumpToWorktreeIndex', action.index)
+    } else if (action?.type === 'dictationKeyDown') {
+      if (!shouldForwardDictationShortcut?.()) {
+        return
+      }
+      renderer.send('ui:dictationKeyDown')
     } else {
       return
     }

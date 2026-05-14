@@ -6,11 +6,21 @@ import {
   readFileSync,
   readdirSync,
   rmSync,
-  writeFileSync
+  statSync,
+  writeFileSync,
+  chmodSync
 } from 'fs'
-import { tmpdir } from 'os'
+import { homedir, tmpdir } from 'os'
 import { join } from 'path'
-import { createManagedCommandMatcher, writeHooksJson, type HooksConfig } from './installer-utils'
+import { spawnSync } from 'child_process'
+import {
+  createManagedCommandMatcher,
+  getSharedManagedScriptPath,
+  wrapPosixHookCommand,
+  writeManagedScript,
+  writeHooksJson,
+  type HooksConfig
+} from './installer-utils'
 
 let tmpDir: string
 let configPath: string
@@ -141,4 +151,106 @@ describe('createManagedCommandMatcher', () => {
   it('does not match hooks for a different agent', () => {
     expect(match('/bin/sh "/path/agent-hooks/gemini-hook.sh"')).toBe(false)
   })
+
+  it('matches the guarded launcher form so wrapped commands sweep correctly', () => {
+    // Why: wrapPosixHookCommand wraps the launcher in `if [ -x ... ]; then ...; fi`
+    // so a stale entry no-ops instead of returning exit 127. The sweep on
+    // install() must still recognize the guarded form as managed, otherwise
+    // repeated installs would accumulate one guarded + one unguarded entry.
+    expect(
+      match(
+        'if [ -x "/Users/alice/Library/Application Support/Orca/agent-hooks/claude-hook.sh" ]; then /bin/sh "/Users/alice/Library/Application Support/Orca/agent-hooks/claude-hook.sh"; fi'
+      )
+    ).toBe(true)
+  })
+
+  it('matches the legacy per-userData script path AND the new shared ~/.orca path', () => {
+    // Why: install() must sweep old per-userData commands when migrating to
+    // the shared ~/.orca script path, or stale launchers keep failing.
+    expect(
+      match("/bin/sh '/Users/alice/Library/Application Support/orca/agent-hooks/claude-hook.sh'")
+    ).toBe(true)
+    expect(match("/bin/sh '/Users/alice/.orca/agent-hooks/claude-hook.sh'")).toBe(true)
+  })
+})
+
+describe('getSharedManagedScriptPath', () => {
+  it("returns ~/.orca/agent-hooks/<scriptFileName> rooted at the user's home", () => {
+    expect(getSharedManagedScriptPath('claude-hook.sh')).toBe(
+      join(homedir(), '.orca', 'agent-hooks', 'claude-hook.sh')
+    )
+  })
+
+  it('does not depend on Electron app.getPath, so two Orca instances resolve to the same path', () => {
+    // Why: using userData here would reintroduce dev/prod settings thrash.
+    const a = getSharedManagedScriptPath('claude-hook.sh')
+    const b = getSharedManagedScriptPath('claude-hook.sh')
+    expect(a).toBe(b)
+  })
+})
+
+describe('writeManagedScript', () => {
+  it.skipIf(process.platform === 'win32')(
+    'repairs executable bits even when script content is unchanged',
+    () => {
+      const scriptPath = join(tmpDir, 'agent-hooks', 'claude-hook.sh')
+
+      writeManagedScript(scriptPath, '#!/bin/sh\nexit 0\n')
+      chmodSync(scriptPath, 0o644)
+
+      writeManagedScript(scriptPath, '#!/bin/sh\nexit 0\n')
+
+      expect(statSync(scriptPath).mode & 0o111).not.toBe(0)
+    }
+  )
+})
+
+describe('wrapPosixHookCommand', () => {
+  it('produces a guarded command that no-ops when the script is missing', () => {
+    const cmd = wrapPosixHookCommand('/does/not/exist.sh')
+    expect(cmd).toBe("if [ -x '/does/not/exist.sh' ]; then /bin/sh '/does/not/exist.sh'; fi")
+  })
+
+  it('preserves spaces in the script path (Library/Application Support case)', () => {
+    // Why: Electron's userData on macOS lives under "Application Support" with
+    // a space. The guard must keep the path quoted so `[ -x ]` and `/bin/sh`
+    // each see one argument.
+    const cmd = wrapPosixHookCommand('/Users/a/Library/Application Support/Orca/agent-hooks/x.sh')
+    expect(cmd).toContain("'/Users/a/Library/Application Support/Orca/agent-hooks/x.sh'")
+  })
+
+  it('escapes embedded single quotes so the wrapped command stays well-formed', () => {
+    // Why: POSIX single-quote escape renders ' as '\''. Verify a path with an
+    // embedded quote does not break out of the quoting and instead reaches
+    // /bin/sh as a single argument.
+    const cmd = wrapPosixHookCommand("/path/with'quote/x.sh")
+    expect(cmd).toBe(
+      "if [ -x '/path/with'\\''quote/x.sh' ]; then /bin/sh '/path/with'\\''quote/x.sh'; fi"
+    )
+  })
+
+  it.skipIf(process.platform === 'win32')(
+    'returns exit code 0 when the script does not exist (no-op)',
+    () => {
+      const cmd = wrapPosixHookCommand('/does/not/exist.sh')
+      const result = spawnSync('/bin/sh', ['-c', cmd])
+      expect(result.status).toBe(0)
+    }
+  )
+
+  // Why: commit 4d618795 explicitly switched from `&& ... || true` (which
+  // swallowed non-zero exits) to `if ... then ... fi` (which preserves the
+  // script's exit code). This test guards against a future regression that
+  // re-introduces the swallowing form.
+  it.skipIf(process.platform === 'win32')(
+    'propagates the script exit code when the script runs and fails',
+    () => {
+      const scriptPath = join(tmpDir, 'fails.sh')
+      writeFileSync(scriptPath, '#!/bin/sh\nexit 7\n', 'utf-8')
+      chmodSync(scriptPath, 0o755)
+      const cmd = wrapPosixHookCommand(scriptPath)
+      const result = spawnSync('/bin/sh', ['-c', cmd])
+      expect(result.status).toBe(7)
+    }
+  )
 })
