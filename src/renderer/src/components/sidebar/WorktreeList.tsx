@@ -232,9 +232,9 @@ function getVirtualRowKey(element: Element): string | null {
 
 function estimateRenderRowSize(row: RenderRow | undefined): number {
   if (row?.type === 'lineage-group') {
-    return 104 + Math.max(0, row.rows.length - 1) * 96
+    return 100 + Math.max(0, row.rows.length - 1) * 96
   }
-  return 120
+  return 116
 }
 
 function getVirtualRowTransform(start: number): string {
