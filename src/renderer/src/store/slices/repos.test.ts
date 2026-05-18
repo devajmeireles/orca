@@ -2,11 +2,20 @@ import { describe, expect, it, vi, beforeEach } from 'vitest'
 import { createTestStore, makeWorktree } from './store-test-helpers'
 import { workItemsCacheKey } from './github'
 import type { Repo } from '../../../../shared/types'
+import { getDefaultOnboardingState, getDefaultSettings } from '../../../../shared/constants'
 import {
   createCompatibleRuntimeStatusResponseIfNeeded,
   type RuntimeEnvironmentCallRequest
 } from '../../runtime/runtime-compatibility-test-fixture'
 import { clearRuntimeCompatibilityCacheForTests } from '../../runtime/runtime-rpc-client'
+
+const worktreeActivation = vi.hoisted(() => ({
+  activateAndRevealWorktree: vi.fn()
+}))
+
+vi.mock('../../lib/worktree-activation', () => ({
+  activateAndRevealWorktree: worktreeActivation.activateAndRevealWorktree
+}))
 
 const localRepo: Repo = {
   id: 'local-repo',
@@ -32,6 +41,7 @@ const reposUpdate = vi.fn()
 const reposReorder = vi.fn()
 const worktreesList = vi.fn()
 const onboardingGet = vi.fn()
+const onboardingUpdate = vi.fn()
 const ptyKill = vi.fn()
 const runtimeEnvironmentCall = vi.fn()
 const runtimeEnvironmentTransportCall = vi.fn()
@@ -46,6 +56,8 @@ beforeEach(() => {
   reposReorder.mockReset()
   worktreesList.mockReset()
   onboardingGet.mockReset()
+  onboardingUpdate.mockReset()
+  worktreeActivation.activateAndRevealWorktree.mockReset()
   ptyKill.mockReset()
   runtimeEnvironmentCall.mockReset()
   runtimeEnvironmentTransportCall.mockReset()
@@ -66,7 +78,8 @@ beforeEach(() => {
         list: worktreesList
       },
       onboarding: {
-        get: onboardingGet
+        get: onboardingGet,
+        update: onboardingUpdate
       },
       pty: { kill: ptyKill },
       runtimeEnvironments: { call: runtimeEnvironmentTransportCall }
@@ -176,6 +189,58 @@ describe('repo slice runtime routing', () => {
 
     expect(reposPickFolder).not.toHaveBeenCalled()
     expect(runtimeEnvironmentCall).not.toHaveBeenCalled()
+  })
+
+  it('only seeds the onboarding default agent for the first dismissed-onboarding folder', async () => {
+    const firstFolderRepo = {
+      ...localRepo,
+      id: 'folder-1',
+      path: '/first',
+      displayName: 'First'
+    }
+    const secondFolderRepo = {
+      ...localRepo,
+      id: 'folder-2',
+      path: '/second',
+      displayName: 'Second'
+    }
+    reposAdd
+      .mockResolvedValueOnce({ repo: firstFolderRepo })
+      .mockResolvedValueOnce({ repo: secondFolderRepo })
+    worktreesList.mockImplementation(({ repoId }: { repoId: string }) => [
+      makeWorktree({ id: `${repoId}::/folder`, repoId })
+    ])
+    onboardingGet.mockResolvedValue({ ...getDefaultOnboardingState(), outcome: 'dismissed' })
+    const store = createTestStore()
+    store.setState({
+      settings: {
+        ...getDefaultSettings('/tmp/orca-workspaces'),
+        defaultTuiAgent: 'codex'
+      }
+    })
+
+    await store.getState().addNonGitFolder('/first')
+    await store.getState().addNonGitFolder('/second')
+
+    expect(worktreeActivation.activateAndRevealWorktree).toHaveBeenNthCalledWith(
+      1,
+      'folder-1::/folder',
+      {
+        startup: {
+          command: 'codex',
+          telemetry: {
+            agent_kind: 'codex',
+            launch_source: 'onboarding',
+            request_kind: 'new'
+          }
+        }
+      }
+    )
+    expect(worktreeActivation.activateAndRevealWorktree).toHaveBeenNthCalledWith(
+      2,
+      'folder-2::/folder',
+      undefined
+    )
   })
 
   it('removes repos through the active remote runtime environment', async () => {

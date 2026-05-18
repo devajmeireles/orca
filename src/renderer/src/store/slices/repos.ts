@@ -155,6 +155,7 @@ export const createRepoSlice: StateCreator<AppState, [], [], RepoSlice> = (set, 
 
   addNonGitFolder: async (path) => {
     try {
+      const hadProjectBeforeAdd = get().repos.length > 0
       const repo = await get().addRepoPath(path, 'folder')
       if (!repo) {
         return null
@@ -173,7 +174,11 @@ export const createRepoSlice: StateCreator<AppState, [], [], RepoSlice> = (set, 
         // Why: a new user can dismiss the wizard, then immediately add their
         // first folder from Landing. That path skips onboarding's completeRepo
         // hook, so carry the selected default agent into the first terminal here.
-        const startup = buildDismissedOnboardingFolderAgentStartup(get().settings, onboarding)
+        const startup = buildDismissedOnboardingFolderAgentStartup(
+          get().settings,
+          onboarding,
+          hadProjectBeforeAdd
+        )
         activateAndRevealWorktree(folderWorktree.id, startup ? { startup } : undefined)
       }
       return repo

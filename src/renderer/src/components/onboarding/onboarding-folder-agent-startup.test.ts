@@ -4,7 +4,7 @@ import {
   buildDismissedOnboardingFolderAgentStartup,
   buildOnboardingFolderAgentStartup,
   shouldSeedFolderAgentAfterDismissedOnboarding
-} from './onboarding-folder-agent-startup'
+} from '@/lib/onboarding-folder-agent-startup'
 
 describe('buildOnboardingFolderAgentStartup', () => {
   it('queues the persisted default agent with onboarding telemetry', () => {
@@ -43,20 +43,38 @@ describe('buildOnboardingFolderAgentStartup', () => {
 
   it('seeds after a dismissed onboarding run before any project was added', () => {
     expect(
-      shouldSeedFolderAgentAfterDismissedOnboarding({
-        ...getDefaultOnboardingState(),
-        outcome: 'dismissed'
-      })
+      shouldSeedFolderAgentAfterDismissedOnboarding(
+        {
+          ...getDefaultOnboardingState(),
+          outcome: 'dismissed'
+        },
+        false
+      )
     ).toBe(true)
+  })
+
+  it('does not seed after another project was already added outside onboarding', () => {
+    expect(
+      shouldSeedFolderAgentAfterDismissedOnboarding(
+        {
+          ...getDefaultOnboardingState(),
+          outcome: 'dismissed'
+        },
+        true
+      )
+    ).toBe(false)
   })
 
   it('does not seed after onboarding already added a project', () => {
     expect(
-      shouldSeedFolderAgentAfterDismissedOnboarding({
-        ...getDefaultOnboardingState(),
-        outcome: 'dismissed',
-        checklist: { ...getDefaultOnboardingState().checklist, addedFolder: true }
-      })
+      shouldSeedFolderAgentAfterDismissedOnboarding(
+        {
+          ...getDefaultOnboardingState(),
+          outcome: 'dismissed',
+          checklist: { ...getDefaultOnboardingState().checklist, addedFolder: true }
+        },
+        false
+      )
     ).toBe(false)
   })
 
@@ -68,7 +86,8 @@ describe('buildOnboardingFolderAgentStartup', () => {
           defaultTuiAgent: 'codex',
           agentCmdOverrides: { codex: 'echo onboarding-folder-agent' }
         },
-        { ...getDefaultOnboardingState(), outcome: 'dismissed' }
+        { ...getDefaultOnboardingState(), outcome: 'dismissed' },
+        false
       )
     ).toEqual({
       command: 'echo onboarding-folder-agent',

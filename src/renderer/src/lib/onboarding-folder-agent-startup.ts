@@ -47,10 +47,12 @@ export function buildOnboardingFolderAgentStartup(
 }
 
 export function shouldSeedFolderAgentAfterDismissedOnboarding(
-  onboarding: OnboardingState | null
+  onboarding: OnboardingState | null,
+  hasExistingProject: boolean
 ): boolean {
   return (
     onboarding?.outcome === 'dismissed' &&
+    !hasExistingProject &&
     !onboarding.checklist.addedRepo &&
     !onboarding.checklist.addedFolder
   )
@@ -58,9 +60,10 @@ export function shouldSeedFolderAgentAfterDismissedOnboarding(
 
 export function buildDismissedOnboardingFolderAgentStartup(
   settings: GlobalSettings | null,
-  onboarding: OnboardingState | null
+  onboarding: OnboardingState | null,
+  hasExistingProject: boolean
 ): OnboardingFolderAgentStartup | undefined {
-  if (!shouldSeedFolderAgentAfterDismissedOnboarding(onboarding)) {
+  if (!shouldSeedFolderAgentAfterDismissedOnboarding(onboarding, hasExistingProject)) {
     return undefined
   }
   return buildOnboardingFolderAgentStartup(settings)
