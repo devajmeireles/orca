@@ -4,6 +4,7 @@ import { getRepoIdFromWorktreeId } from '../../../shared/worktree-id'
 
 type WorktreeHydrationResult = {
   canHydrateSession: boolean
+  repoIdsReadyForSessionHydration: string[]
 }
 
 type SessionHydrationDeferInput = {
@@ -50,13 +51,19 @@ export function shouldDeferSessionHydrationUntilWorktreesLoaded({
   }
 
   const sshRepoIds = new Set(repos.filter((repo) => repo.connectionId).map((repo) => repo.id))
+  const repoIdsReadyForSessionHydration = new Set(worktreeHydration.repoIdsReadyForSessionHydration)
   for (const worktreeId of collectSessionWorktreeIds(session)) {
     if (worktreeId === FLOATING_TERMINAL_WORKTREE_ID) {
       continue
     }
+    const repoId = getRepoIdFromWorktreeId(worktreeId)
+    if (sshRepoIds.has(repoId)) {
+      continue
+    }
     // Why: local workspaces are validated from the fetched worktree list. If
-    // that list is degraded, hydrating would classify saved workspaces as gone.
-    if (!sshRepoIds.has(getRepoIdFromWorktreeId(worktreeId))) {
+    // that repo's list is degraded, hydrating would classify saved workspaces
+    // as gone. Unrelated empty repos must not block a valid saved workspace.
+    if (!repoIdsReadyForSessionHydration.has(repoId)) {
       return true
     }
   }

@@ -1631,6 +1631,33 @@ describe('fetchAllWorktrees hydration-time purge (design §4.4)', () => {
     })
   })
 
+  it('reports repo-specific session hydration readiness when an unrelated repo is empty', async () => {
+    const store = createTestStore()
+    const wtA = makeWorktree({ id: 'repoA::/a/wt1', repoId: 'repoA', path: '/a/wt1' })
+
+    mockApi.worktrees.list.mockImplementation(async ({ repoId }: { repoId: string }) =>
+      repoId === 'repoA' ? [wtA] : []
+    )
+
+    store.setState({
+      repos: [repoA, repoB],
+      tabsByWorktree: {
+        'repoA::/a/wt1': [{ id: 'tab-A', worktreeId: 'repoA::/a/wt1' }]
+      }
+    } as unknown as Partial<AppState>)
+
+    const result = await store.getState().fetchAllWorktrees()
+
+    expect(result).toEqual({
+      canHydrateSession: false,
+      repoIdsReadyForSessionHydration: ['repoA']
+    })
+    expect(store.getState().hasHydratedWorktreePurge).toBe(false)
+    expect(store.getState().tabsByWorktree).toEqual({
+      'repoA::/a/wt1': [{ id: 'tab-A', worktreeId: 'repoA::/a/wt1' }]
+    })
+  })
+
   it('fires the purge once when every repo returns successfully with ≥1 worktree', async () => {
     const store = createTestStore()
     const wtA = makeWorktree({ id: 'repoA::/a/wt1', repoId: 'repoA', path: '/a/wt1' })

@@ -440,7 +440,10 @@ export const createWorktreeSlice: StateCreator<AppState, [], [], WorktreeSlice> 
     // double-probe the IPC for the per-repo success signal.
     if (get().hasHydratedWorktreePurge) {
       await Promise.all(repos.map((r) => get().fetchWorktrees(r.id)))
-      return { canHydrateSession: true }
+      return {
+        canHydrateSession: true,
+        repoIdsReadyForSessionHydration: repos.map((repo) => repo.id)
+      }
     }
 
     // Why: users upgrading from a pre-fix build may have persisted
@@ -485,11 +488,14 @@ export const createWorktreeSlice: StateCreator<AppState, [], [], WorktreeSlice> 
       })
     )
 
+    const repoIdsReadyForSessionHydration = results
+      .filter((r) => r.hasWorktreesForSession)
+      .map((r) => r.repoId)
     const canHydrateSession = results.every((r) => r.hasWorktreesForSession)
     const allSucceeded = results.length > 0 && results.every((r) => r.ok)
     if (!allSucceeded) {
       // Defer; try again on the next fetchAllWorktrees call.
-      return { canHydrateSession }
+      return { canHydrateSession, repoIdsReadyForSessionHydration }
     }
     const validIds = new Set<string>()
     for (const list of Object.values(get().worktreesByRepo)) {
@@ -506,7 +512,10 @@ export const createWorktreeSlice: StateCreator<AppState, [], [], WorktreeSlice> 
       get().purgeWorktreeTerminalState(stale)
     }
     set({ hasHydratedWorktreePurge: true })
-    return { canHydrateSession: true }
+    return {
+      canHydrateSession: true,
+      repoIdsReadyForSessionHydration: repos.map((repo) => repo.id)
+    }
   },
 
   fetchWorktreeLineage: async () => {

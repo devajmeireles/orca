@@ -32,6 +32,11 @@ function makeSession(overrides: Partial<WorkspaceSessionState> = {}): WorkspaceS
 }
 
 describe('shouldDeferSessionHydrationUntilWorktreesLoaded', () => {
+  const completeHydration = {
+    canHydrateSession: true,
+    repoIdsReadyForSessionHydration: ['repo-local']
+  }
+
   it('allows hydration after worktree lists are complete', () => {
     const session = makeSession({
       activeWorktreeId: 'repo-local::/repos/local/wt',
@@ -42,7 +47,7 @@ describe('shouldDeferSessionHydrationUntilWorktreesLoaded', () => {
       shouldDeferSessionHydrationUntilWorktreesLoaded({
         repos: [localRepo],
         session,
-        worktreeHydration: { canHydrateSession: true }
+        worktreeHydration: completeHydration
       })
     ).toBe(false)
   })
@@ -57,7 +62,10 @@ describe('shouldDeferSessionHydrationUntilWorktreesLoaded', () => {
       shouldDeferSessionHydrationUntilWorktreesLoaded({
         repos: [localRepo],
         session,
-        worktreeHydration: { canHydrateSession: false }
+        worktreeHydration: {
+          canHydrateSession: false,
+          repoIdsReadyForSessionHydration: []
+        }
       })
     ).toBe(true)
   })
@@ -73,9 +81,39 @@ describe('shouldDeferSessionHydrationUntilWorktreesLoaded', () => {
       shouldDeferSessionHydrationUntilWorktreesLoaded({
         repos: [localRepo],
         session,
-        worktreeHydration: { canHydrateSession: false }
+        worktreeHydration: {
+          canHydrateSession: false,
+          repoIdsReadyForSessionHydration: []
+        }
       })
     ).toBe(true)
+  })
+
+  it('allows hydration when only an unrelated local repo has incomplete worktrees', () => {
+    const session = makeSession({
+      activeWorktreeId: 'repo-local::/repos/local/wt',
+      tabsByWorktree: { 'repo-local::/repos/local/wt': [] }
+    })
+
+    expect(
+      shouldDeferSessionHydrationUntilWorktreesLoaded({
+        repos: [
+          localRepo,
+          {
+            id: 'repo-empty',
+            path: '/repos/empty',
+            displayName: 'empty',
+            badgeColor: '#222',
+            addedAt: 0
+          }
+        ],
+        session,
+        worktreeHydration: {
+          canHydrateSession: false,
+          repoIdsReadyForSessionHydration: ['repo-local']
+        }
+      })
+    ).toBe(false)
   })
 
   it('allows incomplete startup lists for SSH and floating terminal session state', () => {
@@ -91,7 +129,10 @@ describe('shouldDeferSessionHydrationUntilWorktreesLoaded', () => {
       shouldDeferSessionHydrationUntilWorktreesLoaded({
         repos: [sshRepo],
         session,
-        worktreeHydration: { canHydrateSession: false }
+        worktreeHydration: {
+          canHydrateSession: false,
+          repoIdsReadyForSessionHydration: []
+        }
       })
     ).toBe(false)
   })

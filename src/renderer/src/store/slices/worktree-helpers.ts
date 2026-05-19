@@ -22,6 +22,7 @@ export type WorktreeDeleteState = {
 
 export type FetchAllWorktreesResult = {
   canHydrateSession: boolean
+  repoIdsReadyForSessionHydration: string[]
 }
 
 export type WorktreeSlice = {

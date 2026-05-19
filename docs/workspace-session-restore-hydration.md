@@ -82,6 +82,7 @@ This matches the report better than a native crash: the app could restart, but t
 ```ts
 type FetchAllWorktreesResult = {
   canHydrateSession: boolean
+  repoIdsReadyForSessionHydration: string[]
 }
 ```
 
@@ -90,7 +91,7 @@ The result separates two questions that used to be conflated:
 - Can the hydration-time stale-state purge run?
 - Is the current worktree map complete enough to validate a persisted session?
 
-Startup now reads the persisted session after UI hydration, then asks `shouldDeferSessionHydrationUntilWorktreesLoaded` whether local session state would be validated against incomplete worktree data. If so, startup throws into the existing session-restore failure path.
+Startup now reads the persisted session after UI hydration, then asks `shouldDeferSessionHydrationUntilWorktreesLoaded` whether local session state would be validated against incomplete worktree data for the repo IDs referenced by that session. If so, startup throws into the existing session-restore failure path.
 
 That failure path intentionally:
 
@@ -116,7 +117,7 @@ The regression tests cover:
 - local workspace session state defers when worktree hydration is incomplete;
 - local editor/browser/tab state keyed by worktree ID also defers;
 - SSH-backed workspaces and the floating terminal can still hydrate during incomplete local worktree startup;
-- `fetchAllWorktrees` reports `canHydrateSession=false` when every repo returns empty during initial hydration;
+- `fetchAllWorktrees` reports which repo IDs have worktree lists ready for session validation so unrelated empty repos do not block restore;
 - existing purge behavior still defers stale-state cleanup until worktree lists are authoritative.
 
 ## Non-Goals
