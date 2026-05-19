@@ -13,7 +13,7 @@ import {
 } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
-import { AgentHookServer, _internals } from './server'
+import { AgentHookServer, agentHookServer, _internals } from './server'
 import {
   AGENT_STATUS_MAX_FIELD_LENGTH,
   parseAgentStatusPayload
@@ -2089,6 +2089,76 @@ describe('Cursor hook normalization', () => {
     )
     expect(result?.payload.state).toBe('working')
     expect(result?.payload.lastAssistantMessage).toBe('Done — wrote the README.')
+  })
+
+  it('late afterAgentResponse after stop keeps Cursor done instead of resurrecting working', () => {
+    const submit = _internals.normalizeHookPayload(
+      'cursor',
+      buildBody({ hook_event_name: 'beforeSubmitPrompt', prompt: 'add tests' }),
+      'production'
+    )
+    expect(submit).not.toBeNull()
+    if (!submit) {
+      throw new Error('expected Cursor beforeSubmitPrompt to normalize')
+    }
+    agentHookServer.ingestRemote(
+      {
+        paneKey: submit.paneKey,
+        tabId: submit.tabId,
+        worktreeId: submit.worktreeId,
+        payload: submit.payload
+      },
+      'conn-1'
+    )
+
+    const stop = _internals.normalizeHookPayload(
+      'cursor',
+      buildBody({ hook_event_name: 'stop', status: 'completed' }),
+      'production'
+    )
+    expect(stop).not.toBeNull()
+    if (!stop) {
+      throw new Error('expected Cursor stop to normalize')
+    }
+    agentHookServer.ingestRemote(
+      {
+        paneKey: stop.paneKey,
+        tabId: stop.tabId,
+        worktreeId: stop.worktreeId,
+        payload: stop.payload
+      },
+      'conn-1'
+    )
+
+    const response = _internals.normalizeHookPayload(
+      'cursor',
+      buildBody({ hook_event_name: 'afterAgentResponse', text: 'All set.' }),
+      'production'
+    )
+    expect(response?.payload.state).toBe('done')
+    expect(response?.payload.lastAssistantMessage).toBe('All set.')
+    if (!response) {
+      throw new Error('expected Cursor afterAgentResponse to normalize')
+    }
+
+    agentHookServer.ingestRemote(
+      {
+        paneKey: response.paneKey,
+        tabId: response.tabId,
+        worktreeId: response.worktreeId,
+        payload: response.payload
+      },
+      'conn-1'
+    )
+    expect(agentHookServer.getStatusSnapshot()).toEqual([
+      expect.objectContaining({
+        paneKey: PANE,
+        state: 'done',
+        agentType: 'cursor',
+        prompt: 'add tests',
+        lastAssistantMessage: 'All set.'
+      })
+    ])
   })
 
   it('beforeSubmitPrompt clears the cached tool state from a prior turn', () => {

@@ -1528,19 +1528,25 @@ function normalizeCursorEvent(
   paneKey: string,
   hookPayload: Record<string, unknown>
 ): ParsedAgentStatusPayload | null {
+  // Why: Cursor can emit the final response text after `stop`; that should
+  // enrich the completed row, not resurrect the agent as working.
+  const previousStatus = state.lastStatusByPaneKey.get(paneKey)?.payload
   const stateName =
     eventName === 'beforeSubmitPrompt' ||
     eventName === 'sessionStart' ||
     eventName === 'preToolUse' ||
     eventName === 'postToolUse' ||
-    eventName === 'postToolUseFailure' ||
-    eventName === 'afterAgentResponse'
+    eventName === 'postToolUseFailure'
       ? 'working'
-      : eventName === 'stop' || eventName === 'sessionEnd'
-        ? 'done'
-        : eventName === 'beforeShellExecution' || eventName === 'beforeMCPExecution'
-          ? 'waiting'
-          : null
+      : eventName === 'afterAgentResponse'
+        ? previousStatus?.state === 'done' && previousStatus.agentType === 'cursor'
+          ? 'done'
+          : 'working'
+        : eventName === 'stop' || eventName === 'sessionEnd'
+          ? 'done'
+          : eventName === 'beforeShellExecution' || eventName === 'beforeMCPExecution'
+            ? 'waiting'
+            : null
 
   if (!stateName) {
     return null
