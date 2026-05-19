@@ -2102,6 +2102,31 @@ describe('connectPanePty', () => {
     expect(pane.terminal.write).toHaveBeenCalledWith('Arabic: السلام عليكم\r\n')
   })
 
+  it('keeps panes on WebGL for terminal UI drawing glyphs', async () => {
+    const { connectPanePty } = await import('./pty-connection')
+    const transport = createMockTransport()
+    const capturedDataCallback: { current: ((data: string) => void) | null } = { current: null }
+    transport.connect.mockImplementation(async ({ callbacks }: { callbacks: ConnectCallbacks }) => {
+      capturedDataCallback.current = callbacks.onData ?? null
+      return 'pty-id'
+    })
+    transportFactoryQueue.push(transport)
+
+    const pane = createPane(1)
+    const manager = createManager(1)
+    const deps = createDeps()
+
+    connectPanePty(pane as never, manager as never, deps as never)
+    await flushAsyncTicks(6)
+
+    capturedDataCallback.current?.('⠋ Working ├─ file.ts █ progress \uE0B0 prompt\r\n')
+
+    expect(manager.markPaneHasComplexScriptOutput).not.toHaveBeenCalled()
+    expect(pane.terminal.write).toHaveBeenCalledWith(
+      '⠋ Working ├─ file.ts █ progress \uE0B0 prompt\r\n'
+    )
+  })
+
   it('reattaches via daemon sessionId when an in-session PTY is live', async () => {
     const { connectPanePty } = await import('./pty-connection')
     const transport = createMockTransport()

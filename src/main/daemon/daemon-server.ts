@@ -226,6 +226,7 @@ export class DaemonServer {
               // pending data so the final PTY bytes cannot be overtaken under
               // stream backpressure.
               this.streamDataBatcher.enqueueExit(clientId, p.sessionId, code)
+              this.streamDataBatcher.clearSessionInput(clientId, p.sessionId)
             }
           }
         })
@@ -239,8 +240,10 @@ export class DaemonServer {
 
       case 'write':
         try {
+          this.streamDataBatcher.markInput(clientId, request.payload.sessionId)
           this.host.write(request.payload.sessionId, request.payload.data)
         } catch (err) {
+          this.streamDataBatcher.clearSessionInput(clientId, request.payload.sessionId)
           if (err instanceof SessionNotFoundError) {
             this.sendExitEvent(client, request.payload.sessionId, -1)
           }
