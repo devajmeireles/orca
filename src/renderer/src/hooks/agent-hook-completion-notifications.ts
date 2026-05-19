@@ -12,6 +12,27 @@ type CoordinatorEntry = {
 }
 
 const coordinatorsByPaneKey = new Map<string, CoordinatorEntry>()
+const paneKeysRequiringFreshWorking = new Set<string>()
+let wasAgentTaskCompleteNotificationEnabled = isAgentTaskCompleteNotificationEnabled()
+let requireFreshWorkingForNewCoordinators = !wasAgentTaskCompleteNotificationEnabled
+
+function isAgentTaskCompleteNotificationEnabled(): boolean {
+  const notifications = useAppStore.getState().settings?.notifications
+  return notifications?.enabled !== false && notifications?.agentTaskComplete !== false
+}
+
+export function syncAgentHookCompletionNotificationSettings(): boolean {
+  const enabled = isAgentTaskCompleteNotificationEnabled()
+  if (!enabled || (!wasAgentTaskCompleteNotificationEnabled && enabled)) {
+    requireFreshWorkingForNewCoordinators = true
+    for (const [paneKey, entry] of coordinatorsByPaneKey) {
+      paneKeysRequiringFreshWorking.add(paneKey)
+      entry.coordinator.resetCompletionState({ requireFreshWorking: true })
+    }
+  }
+  wasAgentTaskCompleteNotificationEnabled = enabled
+  return enabled
+}
 
 function getPtyIdForPaneKey(paneKey: string): string | null {
   const parsed = parsePaneKey(paneKey)
@@ -57,6 +78,15 @@ export function observeAgentHookCompletionForNotification({
   if (!paneHasLivePty(paneKey)) {
     coordinatorsByPaneKey.get(paneKey)?.coordinator.dispose()
     coordinatorsByPaneKey.delete(paneKey)
+    paneKeysRequiringFreshWorking.delete(paneKey)
+    return
+  }
+
+  if (!syncAgentHookCompletionNotificationSettings()) {
+    paneKeysRequiringFreshWorking.add(paneKey)
+    coordinatorsByPaneKey
+      .get(paneKey)
+      ?.coordinator.resetCompletionState({ requireFreshWorking: true })
     return
   }
 
@@ -68,9 +98,18 @@ export function observeAgentHookCompletionForNotification({
       coordinator: createCoordinator(paneKey, worktreeId)
     }
     coordinatorsByPaneKey.set(paneKey, entry)
+    if (requireFreshWorkingForNewCoordinators) {
+      paneKeysRequiringFreshWorking.add(paneKey)
+    }
+  }
+  if (paneKeysRequiringFreshWorking.has(paneKey)) {
+    entry.coordinator.resetCompletionState({ requireFreshWorking: true })
   }
 
   entry.coordinator.observeHookStatus(payload)
+  if (payload.state === 'working') {
+    paneKeysRequiringFreshWorking.delete(paneKey)
+  }
 }
 
 export function resetAgentHookCompletionNotificationCoordinators(): void {
@@ -78,4 +117,7 @@ export function resetAgentHookCompletionNotificationCoordinators(): void {
     entry.coordinator.dispose()
   }
   coordinatorsByPaneKey.clear()
+  paneKeysRequiringFreshWorking.clear()
+  wasAgentTaskCompleteNotificationEnabled = isAgentTaskCompleteNotificationEnabled()
+  requireFreshWorkingForNewCoordinators = !wasAgentTaskCompleteNotificationEnabled
 }

@@ -16,7 +16,7 @@ function findEndpointEnvFile(root: string): string | null {
   const entries = readdirSync(root, { withFileTypes: true })
   for (const entry of entries) {
     const fullPath = path.join(root, entry.name)
-    if (entry.isFile() && entry.name === 'endpoint.env') {
+    if (entry.isFile() && (entry.name === 'endpoint.env' || entry.name === 'endpoint.cmd')) {
       return fullPath
     }
     if (entry.isDirectory()) {
@@ -61,7 +61,7 @@ export async function readHookEndpoint(app: ElectronApplication): Promise<HookEn
   const hookRoot = path.join(userDataPath, 'agent-hooks')
   const endpointPath = findEndpointEnvFile(hookRoot)
   if (!endpointPath) {
-    throw new Error(`Agent hook endpoint.env not found under ${hookRoot}`)
+    throw new Error(`Agent hook endpoint file not found under ${hookRoot}`)
   }
   return parseEndpointEnv(readFileSync(endpointPath, 'utf8'))
 }

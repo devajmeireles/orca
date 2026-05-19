@@ -69,7 +69,8 @@ import {
 } from '@/runtime/web-runtime-session'
 import {
   observeAgentHookCompletionForNotification,
-  resetAgentHookCompletionNotificationCoordinators
+  resetAgentHookCompletionNotificationCoordinators,
+  syncAgentHookCompletionNotificationSettings
 } from './agent-hook-completion-notifications'
 
 export { resolveZoomTarget } from './resolve-zoom-target'
@@ -1942,7 +1943,12 @@ export function useIpcEvents(): void {
     // can be safely ignored instead of buffered against partially hydrated
     // renderer state.
     requestAgentStatusSnapshotIfReady()
-    unsubs.push(useAppStore.subscribe(() => requestAgentStatusSnapshotIfReady()))
+    unsubs.push(
+      useAppStore.subscribe(() => {
+        requestAgentStatusSnapshotIfReady()
+        syncAgentHookCompletionNotificationSettings()
+      })
+    )
 
     let mobileStateHydrated = isRuntimeEnvironmentActive()
     type PendingMobileStateEvent =
