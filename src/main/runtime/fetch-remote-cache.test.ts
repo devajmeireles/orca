@@ -218,4 +218,50 @@ describe('OrcaRuntimeService.fetchRemoteWithCache', () => {
       [['fetch', 'origin'], { cwd: '/repo/h' }]
     ])
   })
+
+  it('queues an exact base refresh behind an in-flight full remote fetch', async () => {
+    let resolveFullFetch!: () => void
+    let resolveBaseFetch!: () => void
+    const pendingFullFetch = new Promise<{ stdout: string; stderr: string }>((resolve) => {
+      resolveFullFetch = () => resolve({ stdout: '', stderr: '' })
+    })
+    const pendingBaseFetch = new Promise<{ stdout: string; stderr: string }>((resolve) => {
+      resolveBaseFetch = () => resolve({ stdout: '', stderr: '' })
+    })
+    mockFetchResults([pendingFullFetch, pendingBaseFetch])
+    const runtime = new OrcaRuntimeService(null)
+    const base = {
+      remote: 'origin',
+      branch: 'main',
+      ref: 'refs/remotes/origin/main',
+      base: 'origin/main'
+    }
+
+    const fullFetch = runtime.getOrStartRemoteFetch('/repo/i', 'origin')
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(fetchCallCount()).toBe(1)
+
+    const baseRefresh = runtime.getOrStartRemoteTrackingBaseRefresh('/repo/i', base)
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(fetchCallCount()).toBe(1)
+
+    resolveFullFetch()
+    await vi.waitFor(() => expect(fetchCallCount()).toBe(2))
+    resolveBaseFetch()
+
+    await expect(Promise.all([fullFetch, baseRefresh])).resolves.toEqual([
+      { ok: true },
+      { ok: true }
+    ])
+    const fetchCalls = gitExecFileAsyncMock.mock.calls.filter(
+      ([argv]) => Array.isArray(argv) && argv[0] === 'fetch'
+    )
+    expect(fetchCalls).toEqual([
+      [['fetch', 'origin'], { cwd: '/repo/i' }],
+      [
+        ['fetch', '--no-tags', 'origin', '+refs/heads/main:refs/remotes/origin/main'],
+        { cwd: '/repo/i' }
+      ]
+    ])
+  })
 })

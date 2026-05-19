@@ -6038,11 +6038,6 @@ export class OrcaRuntimeService {
     base: RemoteTrackingBase
   ): Promise<RemoteFetchResult> {
     const remoteKey = await this.getCanonicalFetchKey(repoPath, base.remote)
-    const existingRemoteFetch = this.fetchInflight.get(remoteKey)
-    if (existingRemoteFetch) {
-      return existingRemoteFetch
-    }
-
     const key = await this.getCanonicalFetchKey(repoPath, `base:${base.remote}:${base.branch}`)
     const existing = this.fetchInflight.get(key)
     if (existing) {
