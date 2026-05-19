@@ -1,13 +1,11 @@
 import type { ElectronApplication } from '@stablyai/playwright-test'
 import { existsSync, readdirSync, readFileSync } from 'fs'
 import path from 'path'
-
-type HookEndpoint = {
-  port: string
-  token: string
-  env: string
-  version: string
-}
+import {
+  isAgentHookEndpointFileName,
+  parseAgentHookEndpointFile,
+  type AgentHookEndpoint
+} from '../../../src/shared/agent-hook-endpoint-file'
 
 function findEndpointEnvFile(root: string): string | null {
   if (!existsSync(root)) {
@@ -16,7 +14,7 @@ function findEndpointEnvFile(root: string): string | null {
   const entries = readdirSync(root, { withFileTypes: true })
   for (const entry of entries) {
     const fullPath = path.join(root, entry.name)
-    if (entry.isFile() && (entry.name === 'endpoint.env' || entry.name === 'endpoint.cmd')) {
+    if (entry.isFile() && isAgentHookEndpointFileName(entry.name)) {
       return fullPath
     }
     if (entry.isDirectory()) {
@@ -29,45 +27,18 @@ function findEndpointEnvFile(root: string): string | null {
   return null
 }
 
-function parseEndpointEnv(contents: string): HookEndpoint {
-  const values = Object.fromEntries(
-    contents
-      .split(/\r?\n/)
-      .map((line) => line.trim())
-      .filter(Boolean)
-      .map((line) => {
-        const [key, ...rest] = line.replace(/^set\s+/, '').split('=')
-        return [key, rest.join('=')]
-      })
-  )
-  if (
-    !values.ORCA_AGENT_HOOK_PORT ||
-    !values.ORCA_AGENT_HOOK_TOKEN ||
-    !values.ORCA_AGENT_HOOK_ENV ||
-    !values.ORCA_AGENT_HOOK_VERSION
-  ) {
-    throw new Error('Agent hook endpoint file is missing required fields')
-  }
-  return {
-    port: values.ORCA_AGENT_HOOK_PORT,
-    token: values.ORCA_AGENT_HOOK_TOKEN,
-    env: values.ORCA_AGENT_HOOK_ENV,
-    version: values.ORCA_AGENT_HOOK_VERSION
-  }
-}
-
-export async function readHookEndpoint(app: ElectronApplication): Promise<HookEndpoint> {
+export async function readHookEndpoint(app: ElectronApplication): Promise<AgentHookEndpoint> {
   const userDataPath = await app.evaluate(({ app: electronApp }) => electronApp.getPath('userData'))
   const hookRoot = path.join(userDataPath, 'agent-hooks')
   const endpointPath = findEndpointEnvFile(hookRoot)
   if (!endpointPath) {
     throw new Error(`Agent hook endpoint file not found under ${hookRoot}`)
   }
-  return parseEndpointEnv(readFileSync(endpointPath, 'utf8'))
+  return parseAgentHookEndpointFile(readFileSync(endpointPath, 'utf8'))
 }
 
 export async function emitCodexHookStatus(
-  endpoint: HookEndpoint,
+  endpoint: AgentHookEndpoint,
   status: {
     paneKey: string
     worktreeId: string
