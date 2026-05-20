@@ -1,7 +1,11 @@
 /* oxlint-disable max-lines */
 import type { PaneManager, ManagedPane } from '@/lib/pane-manager/pane-manager'
 import type { IDisposable } from '@xterm/xterm'
-import { isGeminiTerminalTitle, isClaudeAgent } from '@/lib/agent-status'
+import {
+  detectAgentStatusFromTitle,
+  isGeminiTerminalTitle,
+  isClaudeAgent
+} from '@/lib/agent-status'
 import { scheduleRuntimeGraphSync } from '@/runtime/sync-runtime-graph'
 import { useAppStore } from '@/store'
 import { toast } from 'sonner'
@@ -256,6 +260,15 @@ export function connectPanePty(
   // Double-firing with a concurrent BEL is handled by the 5 s per-worktree
   // dedupe in main/ipc/notifications.ts.
   const onAgentBecameIdle = (title: string): void => {
+    if (detectAgentStatusFromTitle(title) === 'idle') {
+      // Why: re-entry should persist only neutral target ids from this
+      // existing completion signal, never the terminal title or output.
+      useAppStore.getState().recordContinuingActivationCue({
+        kind: 'agent_ready_for_review',
+        worktreeId: deps.worktreeId,
+        tabId: deps.tabId
+      })
+    }
     // Why: only start the prompt-cache countdown for Claude agents — other
     // agents have different (or no) prompt-caching semantics and showing a
     // timer for them would be misleading.

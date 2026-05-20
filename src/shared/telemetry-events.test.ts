@@ -139,6 +139,53 @@ describe('settings_changed schema', () => {
   })
 })
 
+describe('continuing_activation_candidate schemas', () => {
+  const eventNames = [
+    'continuing_activation_candidate_shown',
+    'continuing_activation_candidate_clicked',
+    'continuing_activation_candidate_dismissed',
+    'continuing_activation_candidate_landed'
+  ] as const
+
+  it('accepts only low-cardinality candidate kind and surface', () => {
+    for (const name of eventNames) {
+      const parsed = eventSchemas[name].safeParse({
+        candidate_kind: 'agent_needs_input',
+        surface: 'sidebar_next_action'
+      })
+      expect(parsed.success).toBe(true)
+    }
+  })
+
+  it('rejects candidate ids and content-bearing fields via .strict()', () => {
+    for (const name of eventNames) {
+      const parsed = eventSchemas[name].safeParse({
+        candidate_kind: 'agent_ready_for_review',
+        surface: 'sidebar_next_action',
+        candidate_id: 'agent_ready_for_review:tab-1:1700000000000',
+        path: '/Users/alice/private-repo',
+        title: 'permission needed for deploy'
+      })
+      expect(parsed.success).toBe(false)
+    }
+  })
+
+  it('rejects unknown enum values', () => {
+    expect(
+      eventSchemas.continuing_activation_candidate_shown.safeParse({
+        candidate_kind: 'setup_retry',
+        surface: 'sidebar_next_action'
+      }).success
+    ).toBe(false)
+    expect(
+      eventSchemas.continuing_activation_candidate_shown.safeParse({
+        candidate_kind: 'agent_needs_input',
+        surface: 'toast'
+      }).success
+    ).toBe(false)
+  })
+})
+
 describe('commonPropsSchema', () => {
   it('round-trips a realistic payload', () => {
     const parsed = commonPropsSchema.safeParse({

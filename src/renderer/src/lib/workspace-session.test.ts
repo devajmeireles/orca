@@ -139,4 +139,30 @@ describe('buildWorkspaceSessionPayload', () => {
     expect(payload.activeFileIdByWorktree).toEqual({})
     expect(payload.activeTabTypeByWorktree).toEqual({ 'wt-2': 'terminal' })
   })
+
+  it('persists continuing activation cues as local ids and timestamps only', () => {
+    const payload = buildWorkspaceSessionPayload(
+      createSnapshot({
+        continuingActivationCues: {
+          'agent_ready_for_review:tab-1': {
+            id: 'agent_ready_for_review:tab-1',
+            kind: 'agent_ready_for_review',
+            worktreeId: 'wt-1',
+            tabId: 'tab-1',
+            createdAt: 1_700_000_000_000
+          }
+        }
+      })
+    )
+
+    expect(payload.continuingActivationCues).toEqual({
+      'agent_ready_for_review:tab-1': {
+        id: 'agent_ready_for_review:tab-1',
+        kind: 'agent_ready_for_review',
+        worktreeId: 'wt-1',
+        tabId: 'tab-1',
+        createdAt: 1_700_000_000_000
+      }
+    })
+  })
 })

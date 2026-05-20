@@ -25,6 +25,7 @@ type StoreState = {
   removeDeferredSshSessionId: ReturnType<typeof vi.fn>
   consumePendingColdRestore: ReturnType<typeof vi.fn>
   consumePendingSnapshot: ReturnType<typeof vi.fn>
+  recordContinuingActivationCue: ReturnType<typeof vi.fn>
 }
 
 type ConnectCallbacks = {
@@ -227,6 +228,7 @@ describe('connectPanePty', () => {
       removeDeferredSshSessionId: vi.fn(),
       consumePendingColdRestore: vi.fn(() => null),
       consumePendingSnapshot: vi.fn(() => null),
+      recordContinuingActivationCue: vi.fn(),
       removeAgentStatus: vi.fn()
     } as StoreState
     ;(globalThis as unknown as { window: unknown }).window = {
@@ -1001,6 +1003,11 @@ describe('connectPanePty', () => {
 
     idleHandler('* Claude done')
 
+    expect(mockStoreState.recordContinuingActivationCue).toHaveBeenCalledWith({
+      kind: 'agent_ready_for_review',
+      worktreeId: 'wt-1',
+      tabId: 'tab-1'
+    })
     expect(deps.markWorktreeUnread).not.toHaveBeenCalled()
     expect(deps.markTerminalTabUnread).not.toHaveBeenCalled()
     expect(window.api.notifications.dispatch).toHaveBeenCalledWith(

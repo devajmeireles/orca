@@ -31,6 +31,7 @@ type WorkspaceSessionSnapshot = Pick<
   | 'repos'
   | 'worktreesByRepo'
   | 'lastKnownRelayPtyIdByTabId'
+  | 'continuingActivationCues'
 >
 
 /** Build the editor-file portion of the workspace session for persistence.
@@ -216,6 +217,7 @@ export function buildWorkspaceSessionPayload(
     activeGroupIdByWorktree: snapshot.activeGroupIdByWorktree,
     activeConnectionIdsAtShutdown: connectedTargetIds.length > 0 ? connectedTargetIds : undefined,
     remoteSessionIdsByTabId:
-      Object.keys(remoteSessionIdsByTabId).length > 0 ? remoteSessionIdsByTabId : undefined
+      Object.keys(remoteSessionIdsByTabId).length > 0 ? remoteSessionIdsByTabId : undefined,
+    continuingActivationCues: snapshot.continuingActivationCues
   }
 }

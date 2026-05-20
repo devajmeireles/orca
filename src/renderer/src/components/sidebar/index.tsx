@@ -4,6 +4,7 @@ import { TooltipProvider } from '@/components/ui/tooltip'
 import { useSidebarResize } from '@/hooks/useSidebarResize'
 import SidebarHeader from './SidebarHeader'
 import SidebarNav from './SidebarNav'
+import ContinuingActivationCard from './ContinuingActivationCard'
 import WorktreeList from './WorktreeList'
 import SidebarToolbar from './SidebarToolbar'
 import WorktreeMetaDialog from './WorktreeMetaDialog'
@@ -48,6 +49,7 @@ function Sidebar(): React.JSX.Element {
       >
         {/* Fixed controls */}
         <SidebarNav />
+        <ContinuingActivationCard />
         <SidebarHeader />
 
         <WorktreeList />

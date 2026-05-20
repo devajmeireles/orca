@@ -99,6 +99,17 @@ export type LaunchSource = z.infer<typeof launchSourceSchema>
 export const requestKindSchema = z.enum(['new', 'resume', 'followup'])
 export type RequestKind = z.infer<typeof requestKindSchema>
 
+export const continuingActivationCandidateKindSchema = z.enum([
+  'agent_needs_input',
+  'agent_ready_for_review'
+])
+export type ContinuingActivationCandidateKind = z.infer<
+  typeof continuingActivationCandidateKindSchema
+>
+
+export const continuingActivationSurfaceSchema = z.enum(['sidebar_next_action'])
+export type ContinuingActivationSurface = z.infer<typeof continuingActivationSurfaceSchema>
+
 // `env_var` is deliberately absent — env-var and CI paths override consent at
 // runtime only (see consent.ts); they never mutate `optedIn` and therefore
 // never fire a `telemetry_opted_in/out` event. If a future path explicitly
@@ -185,6 +196,13 @@ const settingsChangedSchema = z
 const telemetryOptedInSchema = z.object({ via: optInViaSchema }).strict()
 const telemetryOptedOutSchema = z.object({ via: optInViaSchema }).strict()
 
+const continuingActivationCandidateSchema = z
+  .object({
+    candidate_kind: continuingActivationCandidateKindSchema,
+    surface: continuingActivationSurfaceSchema
+  })
+  .strict()
+
 // ── Event registry: the one record the validator consumes ───────────────
 //
 // The validator does `eventSchemas[name].safeParse(props)`. `EventMap` is
@@ -210,7 +228,12 @@ export const eventSchemas = {
   settings_changed: settingsChangedSchema,
 
   telemetry_opted_in: telemetryOptedInSchema,
-  telemetry_opted_out: telemetryOptedOutSchema
+  telemetry_opted_out: telemetryOptedOutSchema,
+
+  continuing_activation_candidate_shown: continuingActivationCandidateSchema,
+  continuing_activation_candidate_clicked: continuingActivationCandidateSchema,
+  continuing_activation_candidate_dismissed: continuingActivationCandidateSchema,
+  continuing_activation_candidate_landed: continuingActivationCandidateSchema
 } as const
 
 export type EventMap = { [N in keyof typeof eventSchemas]: z.infer<(typeof eventSchemas)[N]> }

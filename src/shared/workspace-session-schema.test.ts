@@ -45,9 +45,40 @@ describe('parseWorkspaceSession', () => {
           ptyIdsByLeafId: { 'pane:1': 'daemon-session-A' }
         }
       },
-      activeWorktreeIdsOnShutdown: ['repo1::/path/wt1']
+      activeWorktreeIdsOnShutdown: ['repo1::/path/wt1'],
+      continuingActivationCues: {
+        'agent_ready_for_review:tab1': {
+          id: 'agent_ready_for_review:tab1',
+          kind: 'agent_ready_for_review',
+          worktreeId: 'repo1::/path/wt1',
+          tabId: 'tab1',
+          createdAt: 1_700_000_000_100
+        }
+      }
     })
     expect(result.ok).toBe(true)
+  })
+
+  it('rejects continuing activation cue content fields', () => {
+    const result = parseWorkspaceSession({
+      activeRepoId: null,
+      activeWorktreeId: null,
+      activeTabId: null,
+      tabsByWorktree: {},
+      terminalLayoutsByTabId: {},
+      continuingActivationCues: {
+        'agent_ready_for_review:tab1': {
+          id: 'agent_ready_for_review:tab1',
+          kind: 'agent_ready_for_review',
+          worktreeId: 'wt1',
+          tabId: 'tab1',
+          createdAt: 1_700_000_000_100,
+          title: 'permission needed in /Users/alice/private',
+          path: '/Users/alice/private'
+        }
+      }
+    })
+    expect(result.ok).toBe(false)
   })
 
   it('rejects a session where ptyId is a number (schema drift)', () => {

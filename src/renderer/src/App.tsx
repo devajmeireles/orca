@@ -95,6 +95,7 @@ function App(): React.JSX.Element {
       hydrateTabsSession: s.hydrateTabsSession,
       hydrateEditorSession: s.hydrateEditorSession,
       hydrateBrowserSession: s.hydrateBrowserSession,
+      hydrateContinuingActivationSession: s.hydrateContinuingActivationSession,
       fetchBrowserSessionProfiles: s.fetchBrowserSessionProfiles,
       reconnectPersistedTerminals: s.reconnectPersistedTerminals,
       setDeferredSshReconnectTargets: s.setDeferredSshReconnectTargets,
@@ -105,7 +106,8 @@ function App(): React.JSX.Element {
       toggleRightSidebar: s.toggleRightSidebar,
       setRightSidebarOpen: s.setRightSidebarOpen,
       setRightSidebarTab: s.setRightSidebarTab,
-      updateSettings: s.updateSettings
+      updateSettings: s.updateSettings,
+      clearContinuingActivationCuesForTarget: s.clearContinuingActivationCuesForTarget
     }))
   )
 
@@ -232,6 +234,7 @@ function App(): React.JSX.Element {
           actions.hydrateTabsSession(session)
           actions.hydrateEditorSession(session)
           actions.hydrateBrowserSession(session)
+          actions.hydrateContinuingActivationSession(session)
           await actions.fetchBrowserSessionProfiles()
 
           // Why: SSH connections must be re-established BEFORE terminal
@@ -342,13 +345,16 @@ function App(): React.JSX.Element {
             dismissedUpdateVersion: null,
             lastUpdateCheckAt: null
           })
-          actions.hydrateWorkspaceSession({
+          const emptySession = {
             activeRepoId: null,
             activeWorktreeId: null,
             activeTabId: null,
             tabsByWorktree: {},
-            terminalLayoutsByTabId: {}
-          })
+            terminalLayoutsByTabId: {},
+            continuingActivationCues: {}
+          }
+          actions.hydrateWorkspaceSession(emptySession)
+          actions.hydrateContinuingActivationSession(emptySession)
           // Why: hydrateWorkspaceSession no longer sets workspaceSessionReady.
           // The error path has no worktrees to reconnect, but must still flip
           // the flag so auto-tab-creation and session writes are unblocked.
@@ -525,6 +531,32 @@ function App(): React.JSX.Element {
   const effectiveActiveTabExpanded = effectiveActiveTabId
     ? (expandedPaneByTabId[effectiveActiveTabId] ?? false)
     : false
+
+  useEffect(() => {
+    const clearViewedContinuingActivationCue = (): void => {
+      if (activeView !== 'terminal' || !activeWorktreeId || !effectiveActiveTabId) {
+        return
+      }
+      if (document.visibilityState !== 'visible' || !document.hasFocus()) {
+        return
+      }
+      // Why: review cues are local breadcrumbs; landing on the tab by any path
+      // should satisfy them so they do not reappear after a manual visit.
+      actions.clearContinuingActivationCuesForTarget({
+        worktreeId: activeWorktreeId,
+        tabId: effectiveActiveTabId
+      })
+    }
+
+    clearViewedContinuingActivationCue()
+    window.addEventListener('focus', clearViewedContinuingActivationCue)
+    document.addEventListener('visibilitychange', clearViewedContinuingActivationCue)
+    return () => {
+      window.removeEventListener('focus', clearViewedContinuingActivationCue)
+      document.removeEventListener('visibilitychange', clearViewedContinuingActivationCue)
+    }
+  }, [activeView, activeWorktreeId, effectiveActiveTabId, actions])
+
   const showTitlebarExpandButton =
     activeView === 'terminal' &&
     activeWorktreeId !== null &&

@@ -182,6 +182,19 @@ const browserHistoryEntrySchema = z.object({
   visitCount: z.number()
 })
 
+// ─── Continuing activation ──────────────────────────────────────────
+
+const continuingActivationCueSchema = z
+  .object({
+    id: z.string(),
+    kind: z.literal('agent_ready_for_review'),
+    worktreeId: z.string(),
+    tabId: z.string(),
+    createdAt: z.number(),
+    dismissedAt: z.number().optional()
+  })
+  .strict()
+
 // ─── Workspace session ──────────────────────────────────────────────
 
 export const workspaceSessionStateSchema: z.ZodType<WorkspaceSessionState> = z.object({
@@ -204,7 +217,8 @@ export const workspaceSessionStateSchema: z.ZodType<WorkspaceSessionState> = z.o
   tabGroupLayouts: z.record(z.string(), tabGroupLayoutNodeSchema).optional(),
   activeGroupIdByWorktree: z.record(z.string(), z.string()).optional(),
   activeConnectionIdsAtShutdown: z.array(z.string()).optional(),
-  remoteSessionIdsByTabId: z.record(z.string(), z.string()).optional()
+  remoteSessionIdsByTabId: z.record(z.string(), z.string()).optional(),
+  continuingActivationCues: z.record(z.string(), continuingActivationCueSchema).optional()
 })
 
 export type ParsedWorkspaceSession =
