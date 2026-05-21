@@ -105,11 +105,21 @@ export function registerNotificationHandlers(store: Store, runtime?: OrcaRuntime
       _event,
       args: NotificationDispatchRequest
     ): NotificationDispatchResult | Promise<NotificationDispatchResult> => {
-      // Why: mobile push is independent of desktop notification guards.
-      // The user's phone should receive the notification even when the desktop
-      // window is focused (suppressWhenFocused), Electron notifications aren't
-      // supported, or the desktop is in cooldown. The mobile client decides
-      // independently whether to show based on its own app state.
+      const settings = store.getSettings().notifications
+      if (!settings.enabled) {
+        return { delivered: false, reason: 'disabled' }
+      }
+
+      if (
+        (args.source === 'agent-task-complete' && !settings.agentTaskComplete) ||
+        (args.source === 'terminal-bell' && !settings.terminalBell)
+      ) {
+        return { delivered: false, reason: 'source-disabled' }
+      }
+
+      // Why: global/source notification switches are user intent across every
+      // notification surface; desktop-only guards below should not suppress
+      // mobile clients that decide visibility from their own app state.
       if (runtime) {
         const opts = buildNotificationOptions(args)
         runtime.dispatchMobileNotification({
@@ -122,18 +132,6 @@ export function registerNotificationHandlers(store: Store, runtime?: OrcaRuntime
 
       if (!Notification.isSupported()) {
         return { delivered: false, reason: 'not-supported' }
-      }
-
-      const settings = store.getSettings().notifications
-      if (!settings.enabled) {
-        return { delivered: false, reason: 'disabled' }
-      }
-
-      if (
-        (args.source === 'agent-task-complete' && !settings.agentTaskComplete) ||
-        (args.source === 'terminal-bell' && !settings.terminalBell)
-      ) {
-        return { delivered: false, reason: 'source-disabled' }
       }
 
       const browserWindow =

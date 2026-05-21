@@ -247,6 +247,31 @@ describe('registerNotificationHandlers', () => {
     expect(notificationCtorMock).not.toHaveBeenCalled()
   })
 
+  it('does not dispatch mobile notifications when notifications are disabled in settings', () => {
+    const dispatchMobileNotification = vi.fn()
+    registerNotificationHandlers(
+      {
+        getSettings: () => ({
+          notifications: {
+            enabled: false,
+            agentTaskComplete: true,
+            terminalBell: true,
+            suppressWhenFocused: true
+          }
+        })
+      } as never,
+      { dispatchMobileNotification } as never
+    )
+
+    const handler = getDispatchHandler()
+    expect(handler({}, { source: 'agent-task-complete', worktreeId: 'repo::wt1' })).toEqual({
+      delivered: false,
+      reason: 'disabled'
+    })
+    expect(dispatchMobileNotification).not.toHaveBeenCalled()
+    expect(notificationCtorMock).not.toHaveBeenCalled()
+  })
+
   it('suppresses active-worktree notifications while Orca is focused', () => {
     getAllWindowsMock.mockReturnValue([
       {
@@ -733,6 +758,56 @@ describe('registerNotificationHandlers', () => {
       delivered: false,
       reason: 'source-disabled'
     })
+  })
+
+  it('does not dispatch mobile notifications when the specific source toggle is off', () => {
+    const dispatchMobileNotification = vi.fn()
+    registerNotificationHandlers(
+      {
+        getSettings: () => ({
+          notifications: {
+            enabled: true,
+            agentTaskComplete: false,
+            terminalBell: true,
+            suppressWhenFocused: true
+          }
+        })
+      } as never,
+      { dispatchMobileNotification } as never
+    )
+
+    const handler = getDispatchHandler()
+    expect(handler({}, { source: 'agent-task-complete', worktreeId: 'repo::wt1' })).toEqual({
+      delivered: false,
+      reason: 'source-disabled'
+    })
+    expect(dispatchMobileNotification).not.toHaveBeenCalled()
+    expect(notificationCtorMock).not.toHaveBeenCalled()
+  })
+
+  it('does not dispatch mobile terminal-bell notifications when terminal bell is off', () => {
+    const dispatchMobileNotification = vi.fn()
+    registerNotificationHandlers(
+      {
+        getSettings: () => ({
+          notifications: {
+            enabled: true,
+            agentTaskComplete: true,
+            terminalBell: false,
+            suppressWhenFocused: true
+          }
+        })
+      } as never,
+      { dispatchMobileNotification } as never
+    )
+
+    const handler = getDispatchHandler()
+    expect(handler({}, { source: 'terminal-bell', worktreeId: 'repo::wt1' })).toEqual({
+      delivered: false,
+      reason: 'source-disabled'
+    })
+    expect(dispatchMobileNotification).not.toHaveBeenCalled()
+    expect(notificationCtorMock).not.toHaveBeenCalled()
   })
 
   it('deduplicates repeated notifications for the same worktree', () => {
