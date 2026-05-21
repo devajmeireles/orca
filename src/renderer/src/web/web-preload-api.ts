@@ -109,9 +109,34 @@ function createWebPreloadApi(): Partial<PreloadApi> {
     ui: createWebUiApi(),
     crashReports: {
       getLatestPending: () => Promise.resolve(null),
+      getLatestReport: () => Promise.resolve(null),
       dismiss: () => Promise.resolve(null),
-      copyLatestDiagnostics: () => Promise.resolve({ ok: false, error: 'Unavailable on web.' }),
-      submit: () => Promise.resolve({ ok: false, status: null, error: 'Unavailable on web.' })
+      submit: () =>
+        Promise.resolve({
+          ok: false,
+          status: null,
+          error: 'Unavailable on web.'
+        }),
+      copyLatestDiagnostics: () => Promise.resolve({ ok: false, error: 'Unavailable on web.' })
+    },
+    diagnostics: {
+      getStatus: () =>
+        Promise.resolve({
+          localFileEnabled: false,
+          otlpEnabled: false,
+          bundleEnabled: false,
+          otlpStatus: 'Unavailable on web',
+          traceFilePath: '',
+          traceFamilySize: 0
+        }),
+      openTraceFolder: () => Promise.resolve(),
+      clearTraces: () => Promise.resolve(),
+      collectBundle: () => Promise.reject(new Error('Diagnostic bundles are unavailable on web.')),
+      openBundlePreview: () =>
+        Promise.reject(new Error('Diagnostic bundles are unavailable on web.')),
+      discardBundlePreview: () => Promise.resolve(),
+      uploadBundle: () => Promise.reject(new Error('Diagnostic bundles are unavailable on web.')),
+      deleteBundle: () => Promise.reject(new Error('Diagnostic bundles are unavailable on web.'))
     },
     session: {
       get: () => Promise.resolve(getStoredWorkspaceSession()),
