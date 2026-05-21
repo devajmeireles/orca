@@ -63,6 +63,7 @@ import {
   ONBOARDING_FINAL_STEP
 } from '../shared/constants'
 import { parseWorkspaceSession } from '../shared/workspace-session-schema'
+import { toRelaySshPtyId } from './providers/ssh-pty-id'
 import {
   isTerminalLeafId,
   makePaneKey,
@@ -178,8 +179,14 @@ function normalizeGroupBy(groupBy: unknown): PersistedState['ui']['groupBy'] {
   return getDefaultUIState().groupBy
 }
 
-function normalizeSortBy(sortBy: unknown): 'name' | 'smart' | 'recent' | 'repo' {
-  if (sortBy === 'smart' || sortBy === 'recent' || sortBy === 'repo' || sortBy === 'name') {
+function normalizeSortBy(sortBy: unknown): PersistedState['ui']['sortBy'] {
+  if (
+    sortBy === 'smart' ||
+    sortBy === 'recent' ||
+    sortBy === 'repo' ||
+    sortBy === 'name' ||
+    sortBy === 'manual'
+  ) {
     return sortBy
   }
   return getDefaultUIState().sortBy
@@ -234,10 +241,36 @@ function normalizeAutomationSessionReuse(automation: Automation): Automation {
   }
 }
 
+type LegacySshTarget = SshTarget & {
+  remoteWorkspaceSyncEnabled?: unknown
+  remoteWorkspaceSyncGracePeriodSeconds?: unknown
+}
+
 // Why: old persisted targets predate configHost. Default to label-based lookup
 // so imported SSH aliases keep resolving through ssh -G after upgrade.
 function normalizeSshTarget(t: SshTarget): SshTarget {
-  return { ...t, configHost: t.configHost ?? t.label ?? t.host }
+  const target = { ...(t as LegacySshTarget) }
+  const legacySyncEnabled = target.remoteWorkspaceSyncEnabled
+  const currentGracePeriodSeconds = target.relayGracePeriodSeconds
+  const legacyGracePeriodSeconds = target.remoteWorkspaceSyncGracePeriodSeconds
+  // Why: remote workspace sync now follows the SSH relay lifecycle, so the
+  // retired per-target sync opt-out and grace-period fields stop at disk load.
+  delete target.remoteWorkspaceSyncEnabled
+  delete target.remoteWorkspaceSyncGracePeriodSeconds
+  delete target.relayGracePeriodSeconds
+  const relayGracePeriodSeconds =
+    currentGracePeriodSeconds ??
+    (legacySyncEnabled === true && typeof legacyGracePeriodSeconds === 'number'
+      ? legacyGracePeriodSeconds
+      : undefined)
+  const normalized: SshTarget = {
+    ...target,
+    configHost: target.configHost ?? target.label ?? target.host
+  }
+  if (relayGracePeriodSeconds !== undefined) {
+    normalized.relayGracePeriodSeconds = relayGracePeriodSeconds
+  }
+  return normalized
 }
 
 // Why: shared by load-time merge and the IPC update handler so the same
@@ -1309,13 +1342,14 @@ export class Store {
           : true
         const floatingTerminalCwdMigrated =
           parsed.settings?.floatingTerminalCwdMigratedToAppWorkspace === true
-        // Why: the old inherited floating cwd was '~', which works for shells
-        // but not for app-managed markdown files. Migrate only once so users
-        // can still explicitly choose '~' after this release.
+        // Why: an earlier migration wrote '' for the default app-owned notes
+        // directory. Floating terminals should still open at home by default;
+        // markdown notes resolve their app-owned directory through a separate IPC.
         const migratedFloatingTerminalCwd = floatingTerminalCwdMigrated
-          ? (parsed.settings?.floatingTerminalCwd ?? defaults.settings.floatingTerminalCwd)
-          : parsed.settings?.floatingTerminalCwd === undefined ||
-              parsed.settings.floatingTerminalCwd === '~'
+          ? !parsed.settings?.floatingTerminalCwd
+            ? defaults.settings.floatingTerminalCwd
+            : parsed.settings.floatingTerminalCwd
+          : parsed.settings?.floatingTerminalCwd === undefined
             ? defaults.settings.floatingTerminalCwd
             : parsed.settings.floatingTerminalCwd
         const normalizedFloatingTerminalTrustedCwds = normalizeFloatingWorkspaceTrustedCwds(
@@ -2574,6 +2608,18 @@ export class Store {
     return !leases?.some((lease) => lease.state === 'terminated' || lease.state === 'expired')
   }
 
+  private getRelayPtyIdForSshLeaseComparison(targetId: string, ptyId: string): string {
+    try {
+      return toRelaySshPtyId(targetId, ptyId)
+    } catch {
+      return ptyId
+    }
+  }
+
+  private getRelayPtyIdForSshLeaseStorage(targetId: string, ptyId: string): string {
+    return toRelaySshPtyId(targetId, ptyId)
+  }
+
   private sshRemotePtyLeaseMatchesBinding(
     lease: SshRemotePtyLease,
     binding: {
@@ -2584,7 +2630,8 @@ export class Store {
       leafId?: string
     }
   ): boolean {
-    if (lease.ptyId !== binding.ptyId) {
+    const bindingPtyId = this.getRelayPtyIdForSshLeaseComparison(lease.targetId, binding.ptyId)
+    if (lease.ptyId !== bindingPtyId) {
       return false
     }
     // Why: remote PTY ids are scoped to a relay target. Workspace PTY bindings
@@ -2628,7 +2675,8 @@ export class Store {
       leafId?: string
     }
   ): boolean {
-    if (lease.targetId !== binding.targetId || lease.ptyId !== binding.ptyId) {
+    const bindingPtyId = this.getRelayPtyIdForSshLeaseComparison(binding.targetId, binding.ptyId)
+    if (lease.targetId !== binding.targetId || lease.ptyId !== bindingPtyId) {
       return false
     }
     // Why: target removal is destructive. Legacy/contextless leases should
@@ -2807,6 +2855,12 @@ export class Store {
     if (normalizedLease.leafId !== undefined && !isTerminalLeafId(normalizedLease.leafId)) {
       delete normalizedLease.leafId
     }
+    // Why: app-facing SSH PTY ids are globally scoped; durable relay leases
+    // stay target-local so reconnect can call relay pty.attach with raw ids.
+    normalizedLease.ptyId = this.getRelayPtyIdForSshLeaseStorage(
+      normalizedLease.targetId,
+      normalizedLease.ptyId
+    )
     const now = Date.now()
     const existingIndex = this.state.sshRemotePtyLeases.findIndex(
       (entry) =>
@@ -2853,8 +2907,9 @@ export class Store {
   }
 
   markSshRemotePtyLease(targetId: string, ptyId: string, state: SshRemotePtyLease['state']): void {
+    const relayPtyId = this.getRelayPtyIdForSshLeaseStorage(targetId, ptyId)
     const lease = this.state.sshRemotePtyLeases?.find(
-      (entry) => entry.targetId === targetId && entry.ptyId === ptyId
+      (entry) => entry.targetId === targetId && entry.ptyId === relayPtyId
     )
     if (!lease || lease.state === state) {
       return
@@ -2871,13 +2926,14 @@ export class Store {
   }
 
   removeSshRemotePtyLease(targetId: string, ptyId: string): void {
+    const relayPtyId = this.getRelayPtyIdForSshLeaseStorage(targetId, ptyId)
     const leases = (this.state.sshRemotePtyLeases ?? []).filter(
-      (lease) => lease.targetId === targetId && lease.ptyId === ptyId
+      (lease) => lease.targetId === targetId && lease.ptyId === relayPtyId
     )
     const before = this.state.sshRemotePtyLeases?.length ?? 0
     this.clearSshRemotePtyBindingsForLeases(targetId, leases)
     this.state.sshRemotePtyLeases = (this.state.sshRemotePtyLeases ?? []).filter(
-      (lease) => lease.targetId !== targetId || lease.ptyId !== ptyId
+      (lease) => lease.targetId !== targetId || lease.ptyId !== relayPtyId
     )
     if (this.state.sshRemotePtyLeases.length !== before) {
       this.flush()

@@ -269,6 +269,8 @@ import { DEFAULT_REPO_BADGE_COLOR, getDefaultVoiceSettings } from '../../shared/
 import { listRepoWorktrees } from '../repo-worktrees'
 import { createWorktreeSymlinks } from '../ipc/worktree-symlinks'
 import {
+  cleanupUnusedWorktreePushTargetRemote,
+  cleanupUnusedWorktreePushTargetRemoteSsh,
   createRemoteWorktree,
   configureCreatedWorktreePushTarget,
   prepareWorktreePushTarget
@@ -289,7 +291,10 @@ import {
   shouldSetDisplayName,
   areWorktreePathsEqual
 } from '../ipc/worktree-logic'
-import { canSafelyRemoveOrphanedWorktreeDirectory } from '../worktree-removal-safety'
+import {
+  canSafelyRemoveOrphanedWorktreeDirectory,
+  getRegisteredDeletableWorktree
+} from '../worktree-removal-safety'
 import { invalidateAuthorizedRootsCache } from '../ipc/filesystem-auth'
 import { HeadlessEmulator } from '../daemon/headless-emulator'
 import { killAllProcessesForWorktree } from './worktree-teardown'
@@ -579,6 +584,32 @@ async function resolveCreateBranchName(
   }
   await gitExecFileAsync(['check-ref-format', '--branch', branchNameOverride], { cwd: repoPath })
   return branchNameOverride
+}
+
+function normalizeLocalBranchName(branchName: string | undefined): string {
+  return branchName?.replace(/^refs\/heads\//, '') ?? ''
+}
+
+async function canCheckoutExistingLocalBranch(
+  repoPath: string,
+  branchName: string,
+  baseBranch: string
+): Promise<boolean> {
+  if (normalizeLocalBranchName(baseBranch) !== branchName) {
+    return false
+  }
+  try {
+    await gitExecFileAsync(
+      ['rev-parse', '--verify', '--quiet', `refs/heads/${branchName}^{commit}`],
+      {
+        cwd: repoPath
+      }
+    )
+  } catch {
+    return false
+  }
+  const worktrees = await listWorktrees(repoPath)
+  return !worktrees.some((worktree) => normalizeLocalBranchName(worktree.branch) === branchName)
 }
 
 type ResolvedWorktree = Worktree & {
@@ -2958,6 +2989,7 @@ export class OrcaRuntimeService {
       pty.connected = false
       pty.lastExitCode = exitCode
       this.resolvePtyExitWaiters(pty, ptyId)
+      this.pruneDisconnectedPtyTranscript(pty)
     }
 
     for (const leaf of this.leaves.values()) {
@@ -4185,49 +4217,27 @@ export class OrcaRuntimeService {
     }
   }
 
-  async readTerminal(handle: string, opts: { cursor?: number } = {}): Promise<RuntimeTerminalRead> {
+  async readTerminal(
+    handle: string,
+    opts: { cursor?: number; limit?: number } = {}
+  ): Promise<RuntimeTerminalRead> {
     const pty = this.getLivePtyForHandle(handle)
     if (pty) {
       return this.readPtyTerminal(handle, pty.pty, opts)
     }
 
     const { leaf } = this.getLiveLeafForHandle(handle)
-    const allLines = buildTailLines(leaf.tailBuffer, leaf.tailPartialLine)
-
-    let tail: string[]
-    let truncated: boolean
-
-    if (typeof opts.cursor === 'number' && opts.cursor >= 0) {
-      // Why: the buffer only retains the last MAX_TAIL_LINES lines. If the
-      // caller's cursor points to lines that were already evicted, we can only
-      // return what's still in memory and mark truncated=true to signal the gap.
-      const bufferStart = leaf.tailLinesTotal - leaf.tailBuffer.length
-      const sliceFrom = Math.max(0, opts.cursor - bufferStart)
-      // Why: cursor-based reads return only completed lines, excluding the
-      // trailing partial line. Including the partial would cause duplication:
-      // the consumer sees "hel" now, then "hello\n" on the next read after
-      // the line completes — same content delivered twice.
-      tail = leaf.tailBuffer.slice(sliceFrom)
-      truncated = opts.cursor < bufferStart
-    } else {
-      tail = allLines
-      // Why: Orca does not have a truthful main-owned screen model yet,
-      // especially for hidden panes. Focused v1 therefore returns the bounded
-      // tail lines directly instead of duplicating the same text in a fake
-      // screen field that would waste agent tokens.
-      truncated = leaf.tailTruncated
-    }
-
-    return {
+    const read = readTerminalTail({
       handle,
       status: getTerminalState(leaf),
-      tail,
-      truncated,
-      // Why: cursors advance by completed lines only. If we count the current
-      // partial line here, later reads can skip continued output on that same
-      // line because no new complete line was emitted yet.
-      nextCursor: String(leaf.tailLinesTotal)
-    }
+      completedLines: leaf.tailBuffer,
+      partialLine: leaf.tailPartialLine,
+      completedLineCount: leaf.tailLinesTotal,
+      bufferTruncated: leaf.tailTruncated,
+      cursor: opts.cursor,
+      limit: opts.limit
+    })
+    return read
   }
 
   async sendTerminal(
@@ -5165,17 +5175,25 @@ export class OrcaRuntimeService {
   async getRepoPRForBranch(
     repoSelector: string,
     branch: string,
-    linkedPRNumber?: number | null
+    linkedPRNumber?: number | null,
+    fallbackPRNumber?: number | null
   ): Promise<Awaited<ReturnType<typeof getPRForBranch>>> {
     const repo = await this.resolveRepoSelector(repoSelector)
     this.assertHostIntegrationRepoIsLocal(repo, 'repo_pr')
-    return getPRForBranch(repo.path, branch, linkedPRNumber ?? null)
+    return getPRForBranch(
+      repo.path,
+      branch,
+      linkedPRNumber ?? null,
+      null,
+      linkedPRNumber == null ? (fallbackPRNumber ?? null) : null
+    )
   }
 
   async getHostedReviewForBranch(args: {
     repoSelector: string
     branch: string
     linkedGitHubPR?: number | null
+    fallbackGitHubPR?: number | null
     linkedGitLabMR?: number | null
     linkedBitbucketPR?: number | null
     linkedAzureDevOpsPR?: number | null
@@ -5187,6 +5205,7 @@ export class OrcaRuntimeService {
       repoPath: repo.path,
       branch: args.branch,
       linkedGitHubPR: args.linkedGitHubPR ?? null,
+      fallbackGitHubPR: args.linkedGitHubPR == null ? (args.fallbackGitHubPR ?? null) : null,
       linkedGitLabMR: args.linkedGitLabMR ?? null,
       linkedBitbucketPR: args.linkedBitbucketPR ?? null,
       linkedAzureDevOpsPR: args.linkedAzureDevOpsPR ?? null,
@@ -5220,6 +5239,7 @@ export class OrcaRuntimeService {
       ahead: args.ahead,
       behind: args.behind,
       linkedGitHubPR: args.linkedGitHubPR ?? null,
+      fallbackGitHubPR: args.linkedGitHubPR == null ? (args.fallbackGitHubPR ?? null) : null,
       linkedGitLabMR: args.linkedGitLabMR ?? null,
       linkedBitbucketPR: args.linkedBitbucketPR ?? null,
       linkedAzureDevOpsPR: args.linkedAzureDevOpsPR ?? null,
@@ -5871,9 +5891,12 @@ export class OrcaRuntimeService {
     linkedIssue?: number | null
     linkedPR?: number | null
     linkedLinearIssue?: string
+    linkedGitLabMR?: number | null
+    linkedGitLabIssue?: number | null
     comment?: string
     displayName?: string
     workspaceStatus?: string
+    manualOrder?: number
     sparseCheckout?: { directories: string[]; presetId?: string }
     pushTarget?: GitPushTarget
     runHooks?: boolean
@@ -5921,23 +5944,32 @@ export class OrcaRuntimeService {
       )
     }
 
-    const branchConflictKind = await getBranchConflictKind(repo.path, branchName, baseBranch)
+    const checkoutExistingBranch = await canCheckoutExistingLocalBranch(
+      repo.path,
+      branchName,
+      baseBranch
+    )
+    const branchConflictKind = checkoutExistingBranch
+      ? null
+      : await getBranchConflictKind(repo.path, branchName, baseBranch)
     if (branchConflictKind) {
       throw new Error(
         `Branch "${branchName}" already exists ${branchConflictKind === 'local' ? 'locally' : 'on a remote'}.`
       )
     }
 
-    let existingPR: Awaited<ReturnType<typeof getPRForBranch>> | null = null
-    try {
-      existingPR = await getPRForBranch(repo.path, branchName)
-    } catch {
-      // Why: worktree creation should not hard-fail on transient GitHub reachability
-      // issues because git state is still the source of truth for whether the
-      // worktree can be created locally.
-    }
-    if (existingPR) {
-      throw new Error(`Branch "${branchName}" already has PR #${existingPR.number}.`)
+    if (!checkoutExistingBranch) {
+      let existingPR: Awaited<ReturnType<typeof getPRForBranch>> | null = null
+      try {
+        existingPR = await getPRForBranch(repo.path, branchName)
+      } catch {
+        // Why: worktree creation should not hard-fail on transient GitHub reachability
+        // issues because git state is still the source of truth for whether the
+        // worktree can be created locally.
+      }
+      if (existingPR) {
+        throw new Error(`Branch "${branchName}" already has PR #${existingPR.number}.`)
+      }
     }
 
     let worktreePath = computeWorktreePath(sanitizedName, repo.path, settings)
@@ -5989,25 +6021,53 @@ export class OrcaRuntimeService {
       // Why: fork-PR worktrees created through a remote runtime need the same
       // upstream target setup as local desktop creates, or Push would publish
       // to the wrong remote after the client/server split.
-      preparedPushTarget = await prepareWorktreePushTarget(repo.path, args.pushTarget)
+      preparedPushTarget = await prepareWorktreePushTarget(
+        repo.path,
+        args.pushTarget,
+        this.store,
+        repo.id
+      )
     }
 
-    await (sparseDirectories.length > 0
-      ? addSparseWorktree(
-          repo.path,
-          worktreePath,
-          branchName,
-          sparseDirectories,
-          baseBranch,
-          settings.refreshLocalBaseRefOnWorktreeCreate
-        )
-      : addWorktree(
-          repo.path,
-          worktreePath,
-          branchName,
-          baseBranch,
-          settings.refreshLocalBaseRefOnWorktreeCreate
-        ))
+    const existingBranchOption = { checkoutExistingBranch }
+    if (sparseDirectories.length > 0) {
+      await (checkoutExistingBranch
+        ? addSparseWorktree(
+            repo.path,
+            worktreePath,
+            branchName,
+            sparseDirectories,
+            baseBranch,
+            settings.refreshLocalBaseRefOnWorktreeCreate,
+            existingBranchOption
+          )
+        : addSparseWorktree(
+            repo.path,
+            worktreePath,
+            branchName,
+            sparseDirectories,
+            baseBranch,
+            settings.refreshLocalBaseRefOnWorktreeCreate
+          ))
+    } else {
+      await (checkoutExistingBranch
+        ? addWorktree(
+            repo.path,
+            worktreePath,
+            branchName,
+            baseBranch,
+            settings.refreshLocalBaseRefOnWorktreeCreate,
+            false,
+            existingBranchOption
+          )
+        : addWorktree(
+            repo.path,
+            worktreePath,
+            branchName,
+            baseBranch,
+            settings.refreshLocalBaseRefOnWorktreeCreate
+          ))
+    }
 
     let configuredPushTarget: GitPushTarget | undefined
     if (preparedPushTarget) {
@@ -6044,6 +6104,7 @@ export class OrcaRuntimeService {
       createdAt: now,
       ...displayNameMeta,
       baseRef: baseBranch,
+      ...(checkoutExistingBranch ? { preserveBranchOnDelete: true } : {}),
       ...(configuredPushTarget ? { pushTarget: configuredPushTarget } : {}),
       ...(sparseDirectories.length > 0
         ? {
@@ -6057,8 +6118,13 @@ export class OrcaRuntimeService {
       ...(args.linkedLinearIssue !== undefined
         ? { linkedLinearIssue: args.linkedLinearIssue }
         : {}),
+      ...(args.linkedGitLabMR !== undefined ? { linkedGitLabMR: args.linkedGitLabMR } : {}),
+      ...(args.linkedGitLabIssue !== undefined
+        ? { linkedGitLabIssue: args.linkedGitLabIssue }
+        : {}),
       ...(args.createdWithAgent ? { createdWithAgent: args.createdWithAgent } : {}),
       ...(args.comment !== undefined ? { comment: args.comment } : {}),
+      ...(args.manualOrder !== undefined ? { manualOrder: args.manualOrder } : {}),
       ...(args.workspaceStatus !== undefined ? { workspaceStatus: args.workspaceStatus } : {})
     })
     const worktree = mergeWorktree(repo.id, created, meta)
@@ -6256,11 +6322,15 @@ export class OrcaRuntimeService {
       linkedIssue?: number | null
       linkedPR?: number | null
       linkedLinearIssue?: string
+      linkedGitLabMR?: number | null
+      linkedGitLabIssue?: number | null
       comment?: string
       displayName?: string
       workspaceStatus?: string
+      manualOrder?: number
       sparseCheckout?: { directories: string[]; presetId?: string }
       pushTarget?: GitPushTarget
+      runHooks?: boolean
       setupDecision?: 'run' | 'skip' | 'inherit'
       createdWithAgent?: TuiAgent
       startup?: WorktreeStartupLaunch
@@ -6285,13 +6355,17 @@ export class OrcaRuntimeService {
         ...(args.displayName ? { displayName: args.displayName } : {}),
         ...(args.baseBranch ? { baseBranch: args.baseBranch } : {}),
         ...(args.branchNameOverride ? { branchNameOverride: args.branchNameOverride } : {}),
-        ...(args.setupDecision ? { setupDecision: args.setupDecision } : {}),
+        ...(args.runHooks ? { setupDecision: 'run' as const } : {}),
+        ...(!args.runHooks && args.setupDecision ? { setupDecision: args.setupDecision } : {}),
         ...(args.sparseCheckout ? { sparseCheckout: args.sparseCheckout } : {}),
         ...(args.linkedIssue != null ? { linkedIssue: args.linkedIssue } : {}),
         ...(args.linkedPR != null ? { linkedPR: args.linkedPR } : {}),
         ...(args.linkedLinearIssue ? { linkedLinearIssue: args.linkedLinearIssue } : {}),
+        ...(args.linkedGitLabMR != null ? { linkedGitLabMR: args.linkedGitLabMR } : {}),
+        ...(args.linkedGitLabIssue != null ? { linkedGitLabIssue: args.linkedGitLabIssue } : {}),
         ...(args.pushTarget ? { pushTarget: args.pushTarget } : {}),
         ...(args.workspaceStatus ? { workspaceStatus: args.workspaceStatus as never } : {}),
+        ...(args.manualOrder !== undefined ? { manualOrder: args.manualOrder } : {}),
         ...(args.createdWithAgent ? { createdWithAgent: args.createdWithAgent } : {})
       },
       repo,
@@ -6815,9 +6889,27 @@ export class OrcaRuntimeService {
     if (isFolderRepo(repo)) {
       throw new Error('Folder mode does not support deleting worktrees.')
     }
+    const provider = repo.connectionId ? requireSshGitProvider(repo.connectionId) : null
+    const registeredWorktrees = repo.connectionId
+      ? await provider!.listWorktrees(repo.path)
+      : await listWorktrees(repo.path)
+    const canonicalWorktreePath = getRegisteredDeletableWorktree(
+      repo.path,
+      worktree.path,
+      registeredWorktrees
+    ).path
+    const deleteBranch = this.store.getWorktreeMeta(worktree.id)?.preserveBranchOnDelete !== true
     if (repo.connectionId) {
-      const provider = requireSshGitProvider(repo.connectionId)
-      await provider.removeWorktree(worktree.path, force)
+      await (deleteBranch
+        ? provider!.removeWorktree(canonicalWorktreePath, force)
+        : provider!.removeWorktree(canonicalWorktreePath, force, { deleteBranch }))
+      await cleanupUnusedWorktreePushTargetRemoteSsh(
+        provider!,
+        repo.path,
+        worktree.id,
+        worktree.pushTarget,
+        this.store
+      )
       this.clearOptimisticReconcileToken(worktree.id)
       this.store.removeWorktreeMeta(worktree.id)
       this.invalidateResolvedWorktreeCache()
@@ -6829,22 +6921,22 @@ export class OrcaRuntimeService {
     const hooks = getEffectiveHooks(repo)
     let warning: string | undefined
     if (hooks?.scripts.archive && runHooks) {
-      const result = await runHook('archive', worktree.path, repo)
+      const result = await runHook('archive', canonicalWorktreePath, repo)
       if (!result.success) {
-        console.error(`[hooks] archive hook failed for ${worktree.path}:`, result.output)
+        console.error(`[hooks] archive hook failed for ${canonicalWorktreePath}:`, result.output)
       }
     } else if (hooks?.scripts.archive) {
       // Runtime RPC calls have no renderer trust prompt, so hooks require explicit CLI opt-in.
-      warning = `orca.yaml archive hook skipped for ${worktree.path}; pass --run-hooks to run it.`
+      warning = `orca.yaml archive hook skipped for ${canonicalWorktreePath}; pass --run-hooks to run it.`
       console.warn(`[hooks] ${warning}`)
     }
 
     let shouldTearDownPtys = true
     try {
-      await assertWorktreeCleanForRemoval(worktree.path, force)
+      await assertWorktreeCleanForRemoval(canonicalWorktreePath, force)
     } catch (error) {
       if (!isOrphanCompatiblePreflightError(error)) {
-        throw new Error(formatWorktreeRemovalError(error, worktree.path, force))
+        throw new Error(formatWorktreeRemovalError(error, canonicalWorktreePath, force))
       }
       // Why: orphan cleanup does not need live shells to be killed first,
       // and preflight did not prove the worktree is cleanly removable.
@@ -6879,14 +6971,16 @@ export class OrcaRuntimeService {
     }
 
     try {
-      await removeWorktree(repo.path, worktree.path, force)
+      await (deleteBranch
+        ? removeWorktree(repo.path, canonicalWorktreePath, force)
+        : removeWorktree(repo.path, canonicalWorktreePath, force, { deleteBranch }))
     } catch (error) {
       if (isOrphanedWorktreeError(error)) {
-        if (await canSafelyRemoveOrphanedWorktreeDirectory(worktree.path, repo.path)) {
-          await rm(worktree.path, { recursive: true, force: true }).catch(() => {})
+        if (await canSafelyRemoveOrphanedWorktreeDirectory(canonicalWorktreePath, repo.path)) {
+          await rm(canonicalWorktreePath, { recursive: true, force: true }).catch(() => {})
         } else {
           console.warn(
-            `[worktrees] Refusing recursive cleanup for unproven worktree directory: ${worktree.path}`
+            `[worktrees] Refusing recursive cleanup for unproven worktree directory: ${canonicalWorktreePath}`
           )
         }
         // Why: `git worktree remove` failed, so git's internal worktree tracking
@@ -6894,6 +6988,12 @@ export class OrcaRuntimeService {
         // list` continues to show the stale entry and the branch it had checked out
         // remains locked — other worktrees cannot check it out.
         await gitExecFileAsync(['worktree', 'prune'], { cwd: repo.path }).catch(() => {})
+        await cleanupUnusedWorktreePushTargetRemote(
+          repo.path,
+          worktree.id,
+          worktree.pushTarget,
+          this.store
+        )
         this.clearOptimisticReconcileToken(worktree.id)
         this.store.removeWorktreeMeta(worktree.id)
         this.invalidateResolvedWorktreeCache()
@@ -6903,9 +7003,15 @@ export class OrcaRuntimeService {
           ...(warning ? { warning } : {})
         }
       }
-      throw new Error(formatWorktreeRemovalError(error, worktree.path, force))
+      throw new Error(formatWorktreeRemovalError(error, canonicalWorktreePath, force))
     }
 
+    await cleanupUnusedWorktreePushTargetRemote(
+      repo.path,
+      worktree.id,
+      worktree.pushTarget,
+      this.store
+    )
     this.clearOptimisticReconcileToken(worktree.id)
     this.store.removeWorktreeMeta(worktree.id)
     this.invalidateResolvedWorktreeCache()
@@ -8331,11 +8437,15 @@ export class OrcaRuntimeService {
     if (!this.ptyController?.listProcesses) {
       return
     }
-    const sessions = await withTimeout(
+    const sessionsResult = await withTimeoutResult(
       this.ptyController.listProcesses(),
-      PTY_CONTROLLER_LIST_TIMEOUT_MS,
-      []
+      PTY_CONTROLLER_LIST_TIMEOUT_MS
     )
+    if (!sessionsResult.ok) {
+      // Why: a transient controller failure is not evidence that retained PTYs exited.
+      return
+    }
+    const sessions = sessionsResult.value
     const livePtyIds = new Set(sessions.map((session) => session.id))
     for (const session of sessions) {
       const worktreeId =
@@ -8350,6 +8460,18 @@ export class OrcaRuntimeService {
         pty.connected = false
       }
     }
+  }
+
+  private pruneDisconnectedPtyTranscript(pty: RuntimePtyWorktreeRecord): void {
+    if (pty.connected) {
+      return
+    }
+    // Why: disconnected PTY records can stay addressable for status/exit reads,
+    // but their retained transcripts must not accumulate after the process dies.
+    pty.tailBuffer = []
+    pty.tailPartialLine = ''
+    pty.tailTruncated = false
+    pty.tailLinesTotal = 0
   }
 
   private leafExistsForPty(ptyId: string): boolean {
@@ -8965,30 +9087,18 @@ export class OrcaRuntimeService {
   private readPtyTerminal(
     handle: string,
     pty: RuntimePtyWorktreeRecord,
-    opts: { cursor?: number } = {}
+    opts: { cursor?: number; limit?: number } = {}
   ): RuntimeTerminalRead {
-    const allLines = buildTailLines(pty.tailBuffer, pty.tailPartialLine)
-
-    let tail: string[]
-    let truncated: boolean
-
-    if (typeof opts.cursor === 'number' && opts.cursor >= 0) {
-      const bufferStart = pty.tailLinesTotal - pty.tailBuffer.length
-      const sliceFrom = Math.max(0, opts.cursor - bufferStart)
-      tail = pty.tailBuffer.slice(sliceFrom)
-      truncated = opts.cursor < bufferStart
-    } else {
-      tail = allLines
-      truncated = pty.tailTruncated
-    }
-
-    return {
+    return readTerminalTail({
       handle,
       status: pty.connected ? 'running' : pty.lastExitCode !== null ? 'exited' : 'unknown',
-      tail,
-      truncated,
-      nextCursor: String(pty.tailLinesTotal)
-    }
+      completedLines: pty.tailBuffer,
+      partialLine: pty.tailPartialLine,
+      completedLineCount: pty.tailLinesTotal,
+      bufferTruncated: pty.tailTruncated,
+      cursor: opts.cursor,
+      limit: opts.limit
+    })
   }
 
   private issueHandle(leaf: RuntimeLeafRecord): string {
@@ -10001,8 +10111,11 @@ export class OrcaRuntimeService {
   }
 }
 
-const MAX_TAIL_LINES = 120
-const MAX_TAIL_CHARS = 4000
+const MAX_TAIL_LINES = 2000
+const MAX_TAIL_CHARS = 256 * 1024
+const DEFAULT_TERMINAL_READ_LIMIT = 120
+const MAX_TERMINAL_READ_LIMIT = 2000
+const MAX_TERMINAL_PREVIEW_CHARS = 32 * 1024
 const MAX_PREVIEW_LINES = 6
 const MAX_PREVIEW_CHARS = 300
 const WORKTREE_STATUS_PRIORITY: Record<RuntimeWorktreeStatus, number> = {
@@ -10042,6 +10155,24 @@ function withTimeout<T>(promise: Promise<T>, timeoutMs: number, fallback: T): Pr
     promise.then(
       (value) => resolve(value),
       () => resolve(fallback)
+    )
+  }).finally(() => {
+    if (timeout) {
+      clearTimeout(timeout)
+    }
+  })
+}
+
+function withTimeoutResult<T>(
+  promise: Promise<T>,
+  timeoutMs: number
+): Promise<{ ok: true; value: T } | { ok: false }> {
+  let timeout: ReturnType<typeof setTimeout> | null = null
+  return new Promise<{ ok: true; value: T } | { ok: false }>((resolve) => {
+    timeout = setTimeout(() => resolve({ ok: false }), timeoutMs)
+    promise.then(
+      (value) => resolve({ ok: true, value }),
+      () => resolve({ ok: false })
     )
   }).finally(() => {
     if (timeout) {
@@ -10118,6 +10249,119 @@ function appendToTailBuffer(
 
 function buildTailLines(lines: string[], partialLine: string): string[] {
   return partialLine.length > 0 ? [...lines, partialLine] : lines
+}
+
+function terminalReadLimit(limit: number | undefined, defaultLimit: number): number {
+  if (typeof limit !== 'number' || !Number.isFinite(limit) || limit <= 0) {
+    return defaultLimit
+  }
+  return Math.min(Math.max(1, Math.floor(limit)), MAX_TERMINAL_READ_LIMIT)
+}
+
+function trimTerminalPreviewToCharacterBudget(
+  lines: string[],
+  characterBudget: number
+): { tail: string[]; limited: boolean; omittedLineCount: number; slicedFirstLine: boolean } {
+  let totalCharacters = lines.reduce((sum, line) => sum + line.length, 0)
+  if (totalCharacters <= characterBudget) {
+    return { tail: lines, limited: false, omittedLineCount: 0, slicedFirstLine: false }
+  }
+
+  const tail = [...lines]
+  let omittedLineCount = 0
+  while (tail.length > 0 && totalCharacters - tail[0].length >= characterBudget) {
+    totalCharacters -= tail.shift()!.length
+    omittedLineCount += 1
+  }
+
+  let slicedFirstLine = false
+  if (tail.length > 0 && totalCharacters > characterBudget) {
+    tail[0] = tail[0].slice(totalCharacters - characterBudget)
+    slicedFirstLine = true
+  }
+
+  return { tail, limited: true, omittedLineCount, slicedFirstLine }
+}
+
+function readTerminalTail(args: {
+  handle: string
+  status: RuntimeTerminalState
+  completedLines: string[]
+  partialLine: string
+  completedLineCount: number
+  bufferTruncated: boolean
+  cursor?: number
+  limit?: number
+}): RuntimeTerminalRead {
+  const oldestCursor = Math.max(0, args.completedLineCount - args.completedLines.length)
+  const latestCursor = args.completedLineCount
+
+  if (typeof args.cursor === 'number' && args.cursor >= 0) {
+    const limit = terminalReadLimit(args.limit, MAX_TERMINAL_READ_LIMIT)
+    if (args.cursor > latestCursor) {
+      return {
+        handle: args.handle,
+        status: args.status,
+        tail: [],
+        truncated: false,
+        limited: false,
+        oldestCursor: String(oldestCursor),
+        nextCursor: String(latestCursor),
+        latestCursor: String(latestCursor),
+        returnedLineCount: 0
+      }
+    }
+    // Why: cursor reads are transcript/pagination reads. They return completed
+    // lines only so a partial line is not delivered once as "hel" and again as
+    // "hello" after the newline arrives.
+    const startCursor = Math.max(args.cursor, oldestCursor)
+    const startIndex = startCursor - oldestCursor
+    const available = args.completedLines.slice(startIndex)
+    const tail = available.slice(0, limit)
+    const nextCursor = startCursor + tail.length
+    return {
+      handle: args.handle,
+      status: args.status,
+      tail,
+      truncated: args.cursor < oldestCursor,
+      limited: tail.length < available.length,
+      oldestCursor: String(oldestCursor),
+      nextCursor: String(nextCursor),
+      latestCursor: String(latestCursor),
+      returnedLineCount: tail.length
+    }
+  }
+
+  // Why: un-cursored reads are preview reads for humans/agents. Return the
+  // latest bounded view, while the larger retained buffer remains available
+  // through cursor reads plus --limit.
+  const limit = terminalReadLimit(args.limit, DEFAULT_TERMINAL_READ_LIMIT)
+  const allLines = buildTailLines(args.completedLines, args.partialLine)
+  const lineBoundedTail = allLines.slice(-limit)
+  const charBoundedTail = trimTerminalPreviewToCharacterBudget(
+    lineBoundedTail,
+    MAX_TERMINAL_PREVIEW_CHARS
+  )
+  const lineBoundedStartIndex = Math.max(0, allLines.length - lineBoundedTail.length)
+  const charBoundedStartIndex = lineBoundedStartIndex + charBoundedTail.omittedLineCount
+  const hasPageableOmittedCompletedLines =
+    Math.min(args.completedLineCount, charBoundedStartIndex) > 0 ||
+    (charBoundedTail.slicedFirstLine && charBoundedStartIndex < args.completedLineCount)
+  // Why: a long unterminated partial line can exceed the preview character
+  // budget, but cursor reads only page completed lines, so the trimmed bytes
+  // cannot be recovered by asking for nextCursor again.
+  const truncatedByNonPageablePartial = charBoundedTail.limited && !hasPageableOmittedCompletedLines
+  return {
+    handle: args.handle,
+    status: args.status,
+    tail: charBoundedTail.tail,
+    truncated: args.bufferTruncated || truncatedByNonPageablePartial,
+    limited: lineBoundedTail.length < allLines.length || charBoundedTail.limited,
+    oldestCursor: String(oldestCursor),
+    nextCursor: String(latestCursor),
+    latestCursor: String(latestCursor),
+    returnedLineCount: charBoundedTail.tail.length
+  }
 }
 
 function getTerminalState(leaf: RuntimeLeafRecord): RuntimeTerminalState {

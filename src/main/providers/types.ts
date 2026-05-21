@@ -45,6 +45,8 @@ export type PtySpawnOptions = {
 }
 
 export type PtySpawnResult = {
+  /** App-facing PTY id. Remote providers must return globally routable ids,
+   *  not relay-local handles, because renderer/runtime IPC routes by this key. */
   id: string
   /** OS-level pid of the shell process, when available at spawn time.
    *  Why: the memory collector needs this to walk each PTY's process
@@ -167,7 +169,12 @@ export type IGitProvider = {
   getBranchCompare(worktreePath: string, baseRef: string): Promise<GitBranchCompareResult>
   getCommitCompare(worktreePath: string, commitId: string): Promise<GitCommitCompareResult>
   getUpstreamStatus(worktreePath: string): Promise<GitUpstreamStatus>
-  pushBranch(worktreePath: string, publish?: boolean, pushTarget?: GitPushTarget): Promise<void>
+  pushBranch(
+    worktreePath: string,
+    publish?: boolean,
+    pushTarget?: GitPushTarget,
+    options?: { forceWithLease?: boolean }
+  ): Promise<void>
   pullBranch(worktreePath: string): Promise<void>
   fetchRemote(worktreePath: string): Promise<void>
   getBranchDiff(
@@ -184,9 +191,13 @@ export type IGitProvider = {
     repoPath: string,
     branchName: string,
     targetDir: string,
-    options?: { base?: string }
+    options?: { base?: string; checkoutExistingBranch?: boolean }
   ): Promise<void>
-  removeWorktree(worktreePath: string, force?: boolean): Promise<void>
+  removeWorktree(
+    worktreePath: string,
+    force?: boolean,
+    options?: { deleteBranch?: boolean }
+  ): Promise<void>
   isGitRepo(path: string): boolean
   isGitRepoAsync(dirPath: string): Promise<{ isRepo: boolean; rootPath: string | null }>
   exec(args: string[], cwd: string): Promise<{ stdout: string; stderr: string }>

@@ -36,7 +36,8 @@ vi.mock('./gh-utils', () => ({
     repoPath,
     connectionId: connectionId ?? null
   }),
-  ghRepoExecOptions: (context: { repoPath: string }) => ({ cwd: context.repoPath }),
+  ghRepoExecOptions: (context: { repoPath: string; connectionId?: string | null }) =>
+    context.connectionId ? {} : { cwd: context.repoPath },
   getOwnerRepo: getOwnerRepoMock,
   getIssueOwnerRepo: getIssueOwnerRepoMock,
   getOwnerRepoForRemote: getOwnerRepoForRemoteMock,
@@ -98,7 +99,14 @@ describe('listWorkItems', () => {
             url: 'https://github.com/acme/widgets/issues/12',
             labels: [],
             updatedAt: '2026-03-29T00:00:00Z',
-            author: { login: 'octocat' }
+            author: { login: 'octocat' },
+            assignees: [
+              {
+                login: 'test-assignee',
+                name: 'Test Assignee',
+                databaseId: 1
+              }
+            ]
           }
         ])
       })
@@ -119,8 +127,8 @@ describe('listWorkItems', () => {
             reviewRequests: [
               {
                 requestedReviewer: {
-                  login: 'AmethystLiang',
-                  name: 'Amethyst Liang',
+                  login: 'test-assignee',
+                  name: 'Test Assignee',
                   avatarUrl: 'https://avatars.githubusercontent.com/u/1?v=4'
                 }
               }
@@ -141,7 +149,7 @@ describe('listWorkItems', () => {
         '--limit',
         '10',
         '--json',
-        'number,title,state,url,labels,updatedAt,author',
+        'number,title,state,url,labels,updatedAt,author,assignees',
         '--repo',
         'acme/widgets',
         '--assignee',
@@ -179,7 +187,14 @@ describe('listWorkItems', () => {
         url: 'https://github.com/acme/widgets/issues/12',
         labels: [],
         updatedAt: '2026-03-29T00:00:00Z',
-        author: 'octocat'
+        author: 'octocat',
+        assignees: [
+          {
+            login: 'test-assignee',
+            name: 'Test Assignee',
+            avatarUrl: 'https://avatars.githubusercontent.com/u/1?v=4'
+          }
+        ]
       },
       {
         id: 'pr:42',
@@ -197,8 +212,8 @@ describe('listWorkItems', () => {
         prRepo: { owner: 'acme', repo: 'widgets' },
         reviewRequests: [
           {
-            login: 'AmethystLiang',
-            name: 'Amethyst Liang',
+            login: 'test-assignee',
+            name: 'Test Assignee',
             avatarUrl: 'https://avatars.githubusercontent.com/u/1?v=4'
           }
         ]
@@ -452,7 +467,7 @@ describe('listWorkItems', () => {
         '--limit',
         '10',
         '--json',
-        'number,title,state,url,labels,updatedAt,author',
+        'number,title,state,url,labels,updatedAt,author,assignees',
         '--repo',
         'acme/widgets',
         '--state',
@@ -547,5 +562,28 @@ describe('listWorkItems', () => {
         isCrossRepository: true
       }
     ])
+  })
+
+  it('rejects unresolved SSH repositories without running unscoped GitHub work-item queries', async () => {
+    getIssueOwnerRepoMock.mockResolvedValue(null)
+    getOwnerRepoMock.mockResolvedValue(null)
+    getOwnerRepoForRemoteMock.mockResolvedValue(null)
+
+    await expect(
+      listWorkItems('/remote/repo', 10, undefined, undefined, undefined, 'ssh-1')
+    ).rejects.toThrow('GitHub work items require a GitHub remote for SSH repositories')
+
+    expect(ghExecFileAsyncMock).not.toHaveBeenCalled()
+
+    ghExecFileAsyncMock.mockClear()
+    getIssueOwnerRepoMock.mockResolvedValue(null)
+    getOwnerRepoMock.mockResolvedValue(null)
+    getOwnerRepoForRemoteMock.mockResolvedValue(null)
+
+    await expect(
+      listWorkItems('/remote/repo', 10, 'is:open', undefined, undefined, 'ssh-1')
+    ).rejects.toThrow('GitHub work items require a GitHub remote for SSH repositories')
+
+    expect(ghExecFileAsyncMock).not.toHaveBeenCalled()
   })
 })

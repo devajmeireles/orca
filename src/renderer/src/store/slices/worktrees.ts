@@ -17,6 +17,7 @@ import { ensureHooksConfirmed } from '@/lib/ensure-hooks-confirmed'
 import { tabHasLivePty } from '@/lib/tab-has-live-pty'
 import { callRuntimeRpc, getActiveRuntimeTarget } from '../../runtime/runtime-rpc-client'
 import { getHostedReviewCacheKey } from './hosted-review'
+import { getGitHubPRCacheKey, getLegacyGitHubPRCacheKey } from './github-cache-key'
 import { moveFocusToRendererBeforeFocusedWebviewHidden } from './browser-webview-cleanup'
 export type { WorktreeSlice, WorktreeDeleteState } from './worktree-helpers'
 
@@ -78,10 +79,13 @@ function areWorktreesEqual(current: Worktree[] | undefined, next: Worktree[]): b
       worktree.comment === candidate.comment &&
       worktree.linkedIssue === candidate.linkedIssue &&
       worktree.linkedPR === candidate.linkedPR &&
+      worktree.linkedGitLabMR === candidate.linkedGitLabMR &&
+      worktree.linkedGitLabIssue === candidate.linkedGitLabIssue &&
       worktree.isArchived === candidate.isArchived &&
       worktree.isUnread === candidate.isUnread &&
       worktree.isPinned === candidate.isPinned &&
       worktree.sortOrder === candidate.sortOrder &&
+      worktree.manualOrder === candidate.manualOrder &&
       worktree.lastActivityAt === candidate.lastActivityAt &&
       worktree.workspaceStatus === candidate.workspaceStatus &&
       worktree.createdWithAgent === candidate.createdWithAgent &&
@@ -111,6 +115,18 @@ function toVisibleTabType(contentType: string): WorkspaceVisibleTabType {
 
 function toRuntimeWorktreeIdSelector(worktreeId: string): string {
   return `id:${worktreeId}`
+}
+
+function canRetryWorktreeRemovalWithForce(error: string, force: boolean | undefined): boolean {
+  if (force) {
+    return false
+  }
+  const protectedRemovalMessages = [
+    'Refusing to delete unregistered worktree path:',
+    'Refusing to delete protected worktree path:',
+    'Refusing to delete worktree because it contains another registered worktree:'
+  ]
+  return !protectedRemovalMessages.some((message) => error.includes(message))
 }
 
 type WorktreeWithLineage = Worktree & {
@@ -614,7 +630,9 @@ export const createWorktreeSlice: StateCreator<AppState, [], [], WorktreeSlice> 
     createdWithAgent,
     linkedLinearIssue,
     branchNameOverride,
-    workspaceStatus
+    workspaceStatus,
+    linkedGitLabMR,
+    linkedGitLabIssue
   ) => {
     const retryableConflictPatterns = [
       /already exists locally/i,
@@ -634,6 +652,9 @@ export const createWorktreeSlice: StateCreator<AppState, [], [], WorktreeSlice> 
         const candidateName = nextCandidateName(name, attempt)
         const candidateBranchNameOverride = nextCandidateBranchName(branchNameOverride, attempt)
         try {
+          // Why: Manual sort is user-authored order. Stamp new workspaces
+          // deliberately at the top instead of relying on sortOrder fallback.
+          const manualOrder = get().sortBy === 'manual' ? Date.now() : undefined
           const createArgs = {
             repoId,
             name: candidateName,
@@ -650,7 +671,10 @@ export const createWorktreeSlice: StateCreator<AppState, [], [], WorktreeSlice> 
             ...(pushTarget ? { pushTarget } : {}),
             ...(createdWithAgent ? { createdWithAgent } : {}),
             ...(linkedLinearIssue !== undefined ? { linkedLinearIssue } : {}),
-            ...(workspaceStatus !== undefined ? { workspaceStatus } : {})
+            ...(manualOrder !== undefined ? { manualOrder } : {}),
+            ...(workspaceStatus !== undefined ? { workspaceStatus } : {}),
+            ...(linkedGitLabMR !== undefined ? { linkedGitLabMR } : {}),
+            ...(linkedGitLabIssue !== undefined ? { linkedGitLabIssue } : {})
           }
           const target = getActiveRuntimeTarget(get().settings)
           const result =
@@ -674,7 +698,10 @@ export const createWorktreeSlice: StateCreator<AppState, [], [], WorktreeSlice> 
                     ...(pushTarget ? { pushTarget } : {}),
                     ...(createdWithAgent ? { createdWithAgent } : {}),
                     ...(linkedLinearIssue !== undefined ? { linkedLinearIssue } : {}),
-                    ...(workspaceStatus !== undefined ? { workspaceStatus } : {})
+                    ...(manualOrder !== undefined ? { manualOrder } : {}),
+                    ...(workspaceStatus !== undefined ? { workspaceStatus } : {}),
+                    ...(linkedGitLabMR !== undefined ? { linkedGitLabMR } : {}),
+                    ...(linkedGitLabIssue !== undefined ? { linkedGitLabIssue } : {})
                   },
                   { timeoutMs: 10 * 60_000 }
                 )
@@ -969,7 +996,7 @@ export const createWorktreeSlice: StateCreator<AppState, [], [], WorktreeSlice> 
           [worktreeId]: {
             isDeleting: false,
             error,
-            canForceDelete: !(force ?? false)
+            canForceDelete: canRetryWorktreeRemovalWithForce(error, force)
           }
         }
       }))
@@ -1008,10 +1035,35 @@ export const createWorktreeSlice: StateCreator<AppState, [], [], WorktreeSlice> 
       const nextWorktrees = applyWorktreeUpdates(s.worktreesByRepo, worktreeId, enriched)
       const cacheKey =
         reviewRepo && reviewBranch
-          ? getHostedReviewCacheKey(reviewRepo.path, reviewBranch, s.settings, reviewRepo.id)
+          ? getHostedReviewCacheKey(
+              reviewRepo.path,
+              reviewBranch,
+              s.settings,
+              reviewRepo.id,
+              reviewRepo.connectionId
+            )
           : null
+      const prCacheKey =
+        reviewRepo && reviewBranch
+          ? getGitHubPRCacheKey(
+              reviewRepo.path,
+              reviewRepo.id,
+              reviewBranch,
+              s.settings,
+              reviewRepo.connectionId
+            )
+          : null
+      const prCacheKeys =
+        reviewRepo && reviewBranch
+          ? [
+              prCacheKey,
+              getLegacyGitHubPRCacheKey(reviewRepo.path, reviewRepo.id, reviewBranch),
+              getLegacyGitHubPRCacheKey(reviewRepo.path, undefined, reviewBranch)
+            ].filter((key): key is string => Boolean(key))
+          : []
       const hostedReviewCache = s.hostedReviewCache ?? {}
-      if (nextWorktrees === s.worktreesByRepo && !cacheKey) {
+      const prCache = s.prCache ?? {}
+      if (nextWorktrees === s.worktreesByRepo && !cacheKey && !prCacheKey) {
         return {}
       }
 
@@ -1023,6 +1075,15 @@ export const createWorktreeSlice: StateCreator<AppState, [], [], WorktreeSlice> 
               return next
             })()
           : hostedReviewCache
+      const nextPRCache = prCacheKeys.some((key) => prCache[key])
+        ? (() => {
+            const next = { ...prCache }
+            for (const key of prCacheKeys) {
+              delete next[key]
+            }
+            return next
+          })()
+        : prCache
 
       return {
         ...(nextWorktrees !== s.worktreesByRepo
@@ -1030,7 +1091,8 @@ export const createWorktreeSlice: StateCreator<AppState, [], [], WorktreeSlice> 
           : {}),
         ...(nextHostedReviewCache !== hostedReviewCache
           ? { hostedReviewCache: nextHostedReviewCache }
-          : {})
+          : {}),
+        ...(nextPRCache !== prCache ? { prCache: nextPRCache } : {})
       }
     })
 

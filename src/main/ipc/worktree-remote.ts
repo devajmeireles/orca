@@ -8,7 +8,7 @@
 // cohesive flow would split awkwardly.
 
 import type { BrowserWindow } from 'electron'
-import { join } from 'path'
+import { join, posix, win32 } from 'path'
 import { existsSync } from 'fs'
 import { randomUUID } from 'crypto'
 import type { Store } from '../persistence'
@@ -29,11 +29,22 @@ import { parseGitHubOwnerRepo } from '../github/gh-utils'
 import type { OrcaRuntimeService } from '../runtime/orca-runtime'
 import type { RemoteFetchResult, RemoteTrackingBase } from '../runtime/orca-runtime'
 import { isWslPath, parseWslPath, getWslHome } from '../wsl'
-import { createSetupRunnerScript, getEffectiveHooks, shouldRunSetupForCreate } from '../hooks'
+import {
+  buildPosixRunnerScript,
+  buildWindowsRunnerScript,
+  createSetupRunnerScript,
+  getEffectiveHooks,
+  getEffectiveHooksFromConfig,
+  getSetupRunnerEnvVars,
+  parseOrcaYaml,
+  shouldRunSetupForCreate
+} from '../hooks'
 import { requireSshGitProvider } from '../providers/ssh-git-dispatch'
+import { getSshFilesystemProvider } from '../providers/ssh-filesystem-dispatch'
 import { getActiveMultiplexer } from './ssh'
 import type { SshGitProvider } from '../providers/ssh-git-provider'
 import { isTuiAgent } from '../../shared/tui-agent-config'
+import { isWindowsAbsolutePathLike } from '../../shared/cross-platform-path'
 import {
   sanitizeWorktreeName,
   sanitizeWorktreeDisplayName,
@@ -44,9 +55,12 @@ import {
   mergeWorktree,
   areWorktreePathsEqual
 } from './worktree-logic'
+import { getRepoIdFromWorktreeId } from '../../shared/worktree-id'
 import { invalidateAuthorizedRootsCache } from './filesystem-auth'
 import { createWorktreeSymlinks } from './worktree-symlinks'
 import { normalizeSparseDirectories } from './sparse-checkout-directories'
+import { joinWorktreeRelativePath } from '../runtime/runtime-relative-paths'
+import type { IFilesystemProvider } from '../providers/types'
 
 async function findRemoteForUrl(repoPath: string, remoteUrl: string): Promise<string | null> {
   const target = parseGitHubOwnerRepo(remoteUrl)
@@ -118,6 +132,53 @@ async function resolveCreateBranchNameSsh(
   return branchNameOverride
 }
 
+function normalizeLocalBranchName(branchName: string | undefined): string {
+  return branchName?.replace(/^refs\/heads\//, '') ?? ''
+}
+
+async function canCheckoutExistingLocalBranch(
+  repoPath: string,
+  branchName: string,
+  baseBranch: string
+): Promise<boolean> {
+  if (normalizeLocalBranchName(baseBranch) !== branchName) {
+    return false
+  }
+  try {
+    await gitExecFileAsync(
+      ['rev-parse', '--verify', '--quiet', `refs/heads/${branchName}^{commit}`],
+      {
+        cwd: repoPath
+      }
+    )
+  } catch {
+    return false
+  }
+  const worktrees = await listWorktrees(repoPath)
+  return !worktrees.some((worktree) => normalizeLocalBranchName(worktree.branch) === branchName)
+}
+
+async function canCheckoutExistingLocalBranchSsh(
+  provider: SshGitProvider,
+  repoPath: string,
+  branchName: string,
+  baseBranch: string
+): Promise<boolean> {
+  if (normalizeLocalBranchName(baseBranch) !== branchName) {
+    return false
+  }
+  try {
+    await provider.exec(
+      ['rev-parse', '--verify', '--quiet', `refs/heads/${branchName}^{commit}`],
+      repoPath
+    )
+  } catch {
+    return false
+  }
+  const worktrees = await provider.listWorktrees(repoPath)
+  return !worktrees.some((worktree) => normalizeLocalBranchName(worktree.branch) === branchName)
+}
+
 async function ensureUniqueRemoteName(repoPath: string, preferred: string): Promise<string> {
   const { stdout } = await gitExecFileAsync(['remote'], { cwd: repoPath })
   const existing = new Set(
@@ -140,17 +201,34 @@ async function ensureUniqueRemoteName(repoPath: string, preferred: string): Prom
 
 export async function prepareWorktreePushTarget(
   repoPath: string,
-  target: GitPushTarget
+  target: GitPushTarget,
+  store?: WorktreePushTargetStore,
+  repoId?: string
 ): Promise<GitPushTarget> {
   await validateGitPushTarget(repoPath, target)
+  const { remoteCreated: _ignoredRemoteCreated, ...sanitizedTarget } = target
   let remoteName = target.remoteName
+  let remoteCreated = false
   if (target.remoteUrl) {
     const existingRemote = await findRemoteForUrl(repoPath, target.remoteUrl)
     if (existingRemote) {
       remoteName = existingRemote
+      // Why: if a later PR worktree reuses an Orca-created fork remote, it
+      // must inherit ownership so deleting the final user can remove it.
+      remoteCreated = store
+        ? isPushTargetRemoteCreatedByKnownWorktree(
+            store,
+            {
+              ...target,
+              remoteName: existingRemote
+            },
+            repoId
+          )
+        : false
     } else {
       remoteName = await ensureUniqueRemoteName(repoPath, target.remoteName)
       await gitExecFileAsync(['remote', 'add', remoteName, target.remoteUrl], { cwd: repoPath })
+      remoteCreated = true
     }
   }
 
@@ -163,8 +241,152 @@ export async function prepareWorktreePushTarget(
     { cwd: repoPath }
   )
   return {
-    ...target,
-    remoteName
+    ...sanitizedTarget,
+    remoteName,
+    ...(remoteCreated ? { remoteCreated: true } : {})
+  }
+}
+
+type GitRemoteExec = (args: string[], cwd: string) => Promise<{ stdout: string; stderr?: string }>
+type WorktreePushTargetStore = Pick<Store, 'getAllWorktreeMeta'>
+
+function sameGitHubRemoteUrl(left: string, right: string): boolean {
+  if (left === right) {
+    return true
+  }
+  const parsedLeft = parseGitHubOwnerRepo(left)
+  const parsedRight = parseGitHubOwnerRepo(right)
+  return Boolean(
+    parsedLeft &&
+    parsedRight &&
+    parsedLeft.owner.toLowerCase() === parsedRight.owner.toLowerCase() &&
+    parsedLeft.repo.toLowerCase() === parsedRight.repo.toLowerCase()
+  )
+}
+
+function isPushTargetUsedByAnotherWorktree(
+  store: WorktreePushTargetStore,
+  removedWorktreeId: string,
+  target: GitPushTarget
+): boolean {
+  const removedRepoId = getRepoIdFromWorktreeId(removedWorktreeId)
+  return Object.entries(store.getAllWorktreeMeta()).some(([worktreeId, meta]) => {
+    // Why: git remotes are repo-local; matching metadata from another repo
+    // must not pin this repo's fork remote forever.
+    const belongsToSameRepo = getRepoIdFromWorktreeId(worktreeId) === removedRepoId
+    if (worktreeId === removedWorktreeId || !belongsToSameRepo || !meta.pushTarget) {
+      return false
+    }
+    const otherRemoteUrl = meta.pushTarget.remoteUrl
+    const targetRemoteUrl = target.remoteUrl
+    return (
+      meta.pushTarget.remoteName === target.remoteName ||
+      (typeof otherRemoteUrl === 'string' &&
+        typeof targetRemoteUrl === 'string' &&
+        sameGitHubRemoteUrl(otherRemoteUrl, targetRemoteUrl))
+    )
+  })
+}
+
+function isPushTargetRemoteCreatedByKnownWorktree(
+  store: WorktreePushTargetStore,
+  target: GitPushTarget,
+  repoId?: string
+): boolean {
+  return Object.entries(store.getAllWorktreeMeta()).some(([worktreeId, meta]) => {
+    if (repoId && getRepoIdFromWorktreeId(worktreeId) !== repoId) {
+      return false
+    }
+    if (!meta.pushTarget?.remoteCreated) {
+      return false
+    }
+    const otherRemoteUrl = meta.pushTarget.remoteUrl
+    const targetRemoteUrl = target.remoteUrl
+    return (
+      meta.pushTarget.remoteName === target.remoteName ||
+      (typeof otherRemoteUrl === 'string' &&
+        typeof targetRemoteUrl === 'string' &&
+        sameGitHubRemoteUrl(otherRemoteUrl, targetRemoteUrl))
+    )
+  })
+}
+
+async function hasBranchConfigUsingRemote(
+  execGit: GitRemoteExec,
+  repoPath: string,
+  target: GitPushTarget
+): Promise<boolean> {
+  try {
+    const { stdout } = await execGit(
+      ['config', '--get-regexp', '^branch\\..*\\.(remote|pushRemote)$'],
+      repoPath
+    )
+    return stdout
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter(Boolean)
+      .some((line) => {
+        const value = line.split(/\s+/).slice(1).join(' ')
+        return value === target.remoteName || value === target.remoteUrl
+      })
+  } catch {
+    return false
+  }
+}
+
+async function cleanupUnusedWorktreePushTargetRemoteWithExec(
+  repoPath: string,
+  removedWorktreeId: string,
+  target: GitPushTarget | undefined,
+  store: WorktreePushTargetStore,
+  execGit: GitRemoteExec
+): Promise<void> {
+  if (
+    !target?.remoteCreated ||
+    !target.remoteUrl ||
+    target.remoteName === 'origin' ||
+    target.remoteName === 'upstream'
+  ) {
+    return
+  }
+  if (isPushTargetUsedByAnotherWorktree(store, removedWorktreeId, target)) {
+    return
+  }
+  if (await hasBranchConfigUsingRemote(execGit, repoPath, target)) {
+    return
+  }
+
+  let configuredRemoteUrl: string
+  try {
+    configuredRemoteUrl = (
+      await execGit(['remote', 'get-url', target.remoteName], repoPath)
+    ).stdout.trim()
+  } catch {
+    return
+  }
+  if (!sameGitHubRemoteUrl(configuredRemoteUrl, target.remoteUrl)) {
+    return
+  }
+
+  await execGit(['remote', 'remove', target.remoteName], repoPath)
+}
+
+export async function cleanupUnusedWorktreePushTargetRemote(
+  repoPath: string,
+  removedWorktreeId: string,
+  target: GitPushTarget | undefined,
+  store: WorktreePushTargetStore
+): Promise<void> {
+  try {
+    await cleanupUnusedWorktreePushTargetRemoteWithExec(
+      repoPath,
+      removedWorktreeId,
+      target,
+      store,
+      (args, cwd) => gitExecFileAsync(args, { cwd })
+    )
+  } catch (error) {
+    console.warn(`[worktrees] Failed to clean up fork PR remote for ${removedWorktreeId}`, error)
   }
 }
 
@@ -244,29 +466,67 @@ async function ensureUniqueRemoteNameSsh(
 async function prepareWorktreePushTargetSsh(
   provider: SshGitProvider,
   repoPath: string,
-  target: GitPushTarget
+  target: GitPushTarget,
+  store?: WorktreePushTargetStore,
+  repoId?: string
 ): Promise<GitPushTarget> {
   assertGitPushTargetShape(target)
+  const { remoteCreated: _ignoredRemoteCreated, ...sanitizedTarget } = target
   await provider.exec(['check-ref-format', '--branch', target.branchName], repoPath)
   let remoteName = target.remoteName
+  let remoteCreated = false
   if (target.remoteUrl) {
     const existingRemote = await findRemoteForUrlSsh(provider, repoPath, target.remoteUrl)
     if (existingRemote) {
       remoteName = existingRemote
+      // Why: if a later PR worktree reuses an Orca-created fork remote, it
+      // must inherit ownership so deleting the final user can remove it.
+      remoteCreated = store
+        ? isPushTargetRemoteCreatedByKnownWorktree(
+            store,
+            {
+              ...target,
+              remoteName: existingRemote
+            },
+            repoId
+          )
+        : false
     } else {
       remoteName = await ensureUniqueRemoteNameSsh(provider, repoPath, target.remoteName)
       await provider.exec(['remote', 'add', remoteName, target.remoteUrl], repoPath)
+      remoteCreated = true
     }
   }
-  await provider.exec(
-    [
-      'fetch',
-      remoteName,
-      `+refs/heads/${target.branchName}:refs/remotes/${remoteName}/${target.branchName}`
-    ],
-    repoPath
+  await provider.fetchRemoteTrackingRef(
+    repoPath,
+    remoteName,
+    target.branchName,
+    `refs/remotes/${remoteName}/${target.branchName}`
   )
-  return { ...target, remoteName }
+  return { ...sanitizedTarget, remoteName, ...(remoteCreated ? { remoteCreated: true } : {}) }
+}
+
+export async function cleanupUnusedWorktreePushTargetRemoteSsh(
+  provider: SshGitProvider,
+  repoPath: string,
+  removedWorktreeId: string,
+  target: GitPushTarget | undefined,
+  store: WorktreePushTargetStore
+): Promise<void> {
+  try {
+    await cleanupUnusedWorktreePushTargetRemoteWithExec(
+      repoPath,
+      removedWorktreeId,
+      target,
+      store,
+      (args, cwd) => provider.exec(args, cwd)
+    )
+  } catch (error) {
+    console.warn(
+      `[worktrees] Failed to clean up remote fork PR remote for ${removedWorktreeId}`,
+      error
+    )
+  }
 }
 
 async function configureCreatedWorktreePushTargetSsh(
@@ -280,6 +540,48 @@ async function configureCreatedWorktreePushTargetSsh(
     worktreePath
   )
   return target
+}
+
+async function readRemoteEffectiveHooks(
+  repo: Repo,
+  fsProvider: IFilesystemProvider,
+  hooksRootPath: string
+): Promise<ReturnType<typeof getEffectiveHooksFromConfig>> {
+  try {
+    const result = await fsProvider.readFile(joinWorktreeRelativePath(hooksRootPath, 'orca.yaml'))
+    const yamlHooks = result.isBinary ? null : parseOrcaYaml(result.content)
+    return getEffectiveHooksFromConfig(repo, yamlHooks, true)
+  } catch {
+    return getEffectiveHooksFromConfig(repo, null, false)
+  }
+}
+
+async function createRemoteSetupRunnerScript(
+  repo: Repo,
+  worktreePath: string,
+  script: string,
+  gitProvider: SshGitProvider,
+  fsProvider: IFilesystemProvider
+): Promise<CreateWorktreeResult['setup']> {
+  const useWindowsFormat = isWindowsAbsolutePathLike(worktreePath)
+  const runnerRelativePath = useWindowsFormat ? 'orca/setup-runner.cmd' : 'orca/setup-runner.sh'
+  const { stdout } = await gitProvider.exec(
+    ['rev-parse', '--git-path', runnerRelativePath],
+    worktreePath
+  )
+  const runnerScriptPath = stdout.trim()
+  const runnerDir = useWindowsFormat
+    ? win32.dirname(runnerScriptPath)
+    : posix.dirname(runnerScriptPath)
+  await fsProvider.createDir(runnerDir)
+  await fsProvider.writeFile(
+    runnerScriptPath,
+    useWindowsFormat ? buildWindowsRunnerScript(script) : buildPosixRunnerScript(script)
+  )
+  return {
+    runnerScriptPath,
+    envVars: getSetupRunnerEnvVars(repo, worktreePath)
+  }
 }
 
 async function resolveRemoteTrackingBaseSsh(
@@ -372,18 +674,6 @@ export async function createRemoteWorktree(
     username
   )
 
-  // Check branch conflict on remote
-  try {
-    const { stdout } = await provider.exec(['branch', '--list', '--all', branchName], repo.path)
-    if (stdout.trim()) {
-      throw new Error(`Branch "${branchName}" already exists. Pick a different worktree name.`)
-    }
-  } catch (e) {
-    if (e instanceof Error && e.message.includes('already exists')) {
-      throw e
-    }
-  }
-
   // Compute worktree path relative to the repo's parent on the remote
   const remotePath = `${repo.path}/../${sanitizedName}`
 
@@ -411,17 +701,34 @@ export async function createRemoteWorktree(
     )
   }
 
+  const checkoutExistingBranch = await canCheckoutExistingLocalBranchSsh(
+    provider,
+    repo.path,
+    branchName,
+    baseBranch
+  )
+  if (!checkoutExistingBranch) {
+    // Check branch conflict on remote
+    try {
+      const { stdout } = await provider.exec(['branch', '--list', '--all', branchName], repo.path)
+      if (stdout.trim()) {
+        throw new Error(`Branch "${branchName}" already exists. Pick a different worktree name.`)
+      }
+    } catch (e) {
+      if (e instanceof Error && e.message.includes('already exists')) {
+        throw e
+      }
+    }
+  }
+
   const remoteTrackingBase = await resolveRemoteTrackingBaseSsh(provider, repo.path, baseBranch)
   if (remoteTrackingBase) {
     try {
-      await provider.exec(
-        [
-          'fetch',
-          '--no-tags',
-          remoteTrackingBase.remote,
-          `+refs/heads/${remoteTrackingBase.branch}:${remoteTrackingBase.ref}`
-        ],
-        repo.path
+      await provider.fetchRemoteTrackingRef(
+        repo.path,
+        remoteTrackingBase.remote,
+        remoteTrackingBase.branch,
+        remoteTrackingBase.ref
       )
     } catch {
       throw new Error(
@@ -440,11 +747,25 @@ export async function createRemoteWorktree(
     }
   }
 
+  const fsProvider = getSshFilesystemProvider(repo.connectionId!)
+  if (fsProvider) {
+    const primaryHooks = await readRemoteEffectiveHooks(repo, fsProvider, repo.path)
+    if (primaryHooks?.scripts.setup) {
+      shouldRunSetupForCreate(repo, args.setupDecision)
+    }
+  }
+
   let preparedPushTarget: GitPushTarget | undefined
   if (args.pushTarget) {
     // Why: fork-PR SSH worktrees need the same contributor-remote setup as
     // local worktrees before creation, otherwise Push/Sync can target origin.
-    preparedPushTarget = await prepareWorktreePushTargetSsh(provider, repo.path, args.pushTarget)
+    preparedPushTarget = await prepareWorktreePushTargetSsh(
+      provider,
+      repo.path,
+      args.pushTarget,
+      store,
+      repo.id
+    )
   }
 
   const mux = getActiveMultiplexer(repo.connectionId!)
@@ -474,9 +795,12 @@ export async function createRemoteWorktree(
 
   // Create worktree via relay
   try {
-    await provider.addWorktree(repo.path, branchName, remotePath, {
-      base: baseBranch
-    })
+    await provider.addWorktree(
+      repo.path,
+      branchName,
+      remotePath,
+      checkoutExistingBranch ? { checkoutExistingBranch } : { base: baseBranch }
+    )
   } catch (err) {
     if (
       err instanceof Error &&
@@ -530,6 +854,7 @@ export async function createRemoteWorktree(
     // window elapses. See smart-sort.ts `CREATE_GRACE_MS`.
     createdAt: now,
     baseRef: baseBranch,
+    ...(checkoutExistingBranch ? { preserveBranchOnDelete: true } : {}),
     ...(configuredPushTarget ? { pushTarget: configuredPushTarget } : {}),
     ...(requestedDisplayName
       ? { displayName: requestedDisplayName }
@@ -540,6 +865,9 @@ export async function createRemoteWorktree(
     ...(args.linkedIssue !== undefined ? { linkedIssue: args.linkedIssue } : {}),
     ...(args.linkedPR !== undefined ? { linkedPR: args.linkedPR } : {}),
     ...(args.linkedLinearIssue !== undefined ? { linkedLinearIssue: args.linkedLinearIssue } : {}),
+    ...(args.manualOrder !== undefined ? { manualOrder: args.manualOrder } : {}),
+    ...(args.linkedGitLabMR !== undefined ? { linkedGitLabMR: args.linkedGitLabMR } : {}),
+    ...(args.linkedGitLabIssue !== undefined ? { linkedGitLabIssue: args.linkedGitLabIssue } : {}),
     ...(args.workspaceStatus !== undefined ? { workspaceStatus: args.workspaceStatus } : {})
   }
   const meta = store.setWorktreeMeta(worktreeId, metaUpdates)
@@ -551,8 +879,41 @@ export async function createRemoteWorktree(
   // local-only until that protocol work is in scope. Remote repos with
   // `symlinkPaths` configured have them silently ignored here.
 
+  let setup: CreateWorktreeResult['setup']
+  if (fsProvider) {
+    const hooks = await readRemoteEffectiveHooks(repo, fsProvider, created.path)
+    const setupScript = hooks?.scripts.setup
+    let shouldLaunchSetup = false
+    if (setupScript) {
+      try {
+        shouldLaunchSetup = shouldRunSetupForCreate(repo, args.setupDecision)
+      } catch (error) {
+        // Why: the remote worktree already exists. If the created branch adds
+        // a setup hook without a renderer decision, skip setup instead of
+        // reporting successful git creation as failed.
+        console.warn(`[hooks] setup hook skipped for ${created.path}:`, error)
+      }
+    }
+    if (setupScript && shouldLaunchSetup) {
+      try {
+        setup = await createRemoteSetupRunnerScript(
+          repo,
+          created.path,
+          setupScript,
+          provider,
+          fsProvider
+        )
+      } catch (error) {
+        console.error(`[hooks] Failed to prepare setup runner for ${created.path}:`, error)
+      }
+    }
+  }
+
   notifyWorktreesChanged(mainWindow, repo.id)
-  return { worktree }
+  return {
+    worktree,
+    ...(setup ? { setup } : {})
+  }
 }
 
 export async function createLocalWorktree(
@@ -678,6 +1039,8 @@ export async function createLocalWorktree(
   // conflict) cannot spin this loop indefinitely.
   const MAX_SUFFIX_ATTEMPTS = 100
   let resolved = false
+  let checkoutExistingBranch = false
+  let selectedExistingLocalBranchName: string | null = null
   let lastBranchConflictKind: 'local' | 'remote' | null = null
   let lastExistingPR: Awaited<ReturnType<typeof getPRForBranch>> | null = null
   for (let suffix = 1; suffix <= MAX_SUFFIX_ATTEMPTS; suffix += 1) {
@@ -691,16 +1054,26 @@ export async function createLocalWorktree(
 
     branchName = await resolveCreateBranchName(
       repo.path,
-      suffix === 1 && args.branchNameOverride
-        ? args.branchNameOverride
-        : args.branchNameOverride
-          ? `${args.branchNameOverride}-${suffix}`
-          : undefined,
+      selectedExistingLocalBranchName
+        ? selectedExistingLocalBranchName
+        : suffix === 1 && args.branchNameOverride
+          ? args.branchNameOverride
+          : args.branchNameOverride
+            ? `${args.branchNameOverride}-${suffix}`
+            : undefined,
       effectiveSanitizedName,
       settings,
       username
     )
-    lastBranchConflictKind = await getBranchConflictKind(repo.path, branchName, baseBranch)
+    checkoutExistingBranch = await canCheckoutExistingLocalBranch(repo.path, branchName, baseBranch)
+    if (checkoutExistingBranch && !selectedExistingLocalBranchName) {
+      // Why: suffix retries may need a new path, but an existing branch checkout
+      // must keep using the user-selected branch instead of creating a sibling.
+      selectedExistingLocalBranchName = branchName
+    }
+    lastBranchConflictKind = checkoutExistingBranch
+      ? null
+      : await getBranchConflictKind(repo.path, branchName, baseBranch)
     if (lastBranchConflictKind) {
       continue
     }
@@ -711,7 +1084,7 @@ export async function createLocalWorktree(
     // forced us past the first suffix — at that point uniqueness matters
     // enough to justify the GitHub call. The common case (brand-new branch
     // name, no collisions) skips the network entirely.
-    if (suffix > 1) {
+    if (suffix > 1 && !checkoutExistingBranch) {
       lastExistingPR = null
       try {
         lastExistingPR = await getPRForBranch(repo.path, branchName)
@@ -779,25 +1152,48 @@ export async function createLocalWorktree(
     // Why: validate and fetch the contributor remote before creating the
     // worktree. If this fails, retrying won't hit branch/path conflicts from a
     // half-created worktree.
-    preparedPushTarget = await prepareWorktreePushTarget(repo.path, args.pushTarget)
+    preparedPushTarget = await prepareWorktreePushTarget(repo.path, args.pushTarget, store, repo.id)
   }
 
-  await (sparseDirectories.length > 0
-    ? addSparseWorktree(
-        repo.path,
-        worktreePath,
-        branchName,
-        sparseDirectories,
-        baseBranch,
-        settings.refreshLocalBaseRefOnWorktreeCreate
-      )
-    : addWorktree(
-        repo.path,
-        worktreePath,
-        branchName,
-        baseBranch,
-        settings.refreshLocalBaseRefOnWorktreeCreate
-      ))
+  const existingBranchOption = { checkoutExistingBranch }
+  if (sparseDirectories.length > 0) {
+    await (checkoutExistingBranch
+      ? addSparseWorktree(
+          repo.path,
+          worktreePath,
+          branchName,
+          sparseDirectories,
+          baseBranch,
+          settings.refreshLocalBaseRefOnWorktreeCreate,
+          existingBranchOption
+        )
+      : addSparseWorktree(
+          repo.path,
+          worktreePath,
+          branchName,
+          sparseDirectories,
+          baseBranch,
+          settings.refreshLocalBaseRefOnWorktreeCreate
+        ))
+  } else {
+    await (checkoutExistingBranch
+      ? addWorktree(
+          repo.path,
+          worktreePath,
+          branchName,
+          baseBranch,
+          settings.refreshLocalBaseRefOnWorktreeCreate,
+          false,
+          existingBranchOption
+        )
+      : addWorktree(
+          repo.path,
+          worktreePath,
+          branchName,
+          baseBranch,
+          settings.refreshLocalBaseRefOnWorktreeCreate
+        ))
+  }
 
   let configuredPushTarget: GitPushTarget | undefined
   if (preparedPushTarget) {
@@ -834,6 +1230,7 @@ export async function createLocalWorktree(
     // worktree from ambient PTY bumps in other worktrees for CREATE_GRACE_MS.
     createdAt: now,
     baseRef: baseBranch,
+    ...(checkoutExistingBranch ? { preserveBranchOnDelete: true } : {}),
     ...(configuredPushTarget ? { pushTarget: configuredPushTarget } : {}),
     ...(requestedDisplayName
       ? { displayName: requestedDisplayName }
@@ -851,6 +1248,9 @@ export async function createLocalWorktree(
     ...(args.linkedIssue !== undefined ? { linkedIssue: args.linkedIssue } : {}),
     ...(args.linkedPR !== undefined ? { linkedPR: args.linkedPR } : {}),
     ...(args.linkedLinearIssue !== undefined ? { linkedLinearIssue: args.linkedLinearIssue } : {}),
+    ...(args.manualOrder !== undefined ? { manualOrder: args.manualOrder } : {}),
+    ...(args.linkedGitLabMR !== undefined ? { linkedGitLabMR: args.linkedGitLabMR } : {}),
+    ...(args.linkedGitLabIssue !== undefined ? { linkedGitLabIssue: args.linkedGitLabIssue } : {}),
     ...(args.workspaceStatus !== undefined ? { workspaceStatus: args.workspaceStatus } : {})
   }
   const meta = store.setWorktreeMeta(worktreeId, metaUpdates)

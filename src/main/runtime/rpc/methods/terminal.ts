@@ -167,6 +167,12 @@ function appendPendingMultiplexOutput(stream: TerminalMultiplexStream, data: str
   }
 }
 
+function isTerminalReadPayloadIncomplete(read: { truncated: boolean; limited?: boolean }): boolean {
+  // Why: uncursored terminal reads are bounded previews; limited previews are
+  // incomplete stream payloads even when the retained buffer was not truncated.
+  return read.truncated || read.limited === true
+}
+
 function sendSnapshotFrames(
   sendFrame: (opcode: TerminalStreamOpcode, payload?: Uint8Array<ArrayBufferLike>) => void,
   options: SnapshotFrameOptions
@@ -272,7 +278,8 @@ const TerminalRead = TerminalHandle.extend({
           message: 'Cursor must be a non-negative integer'
         })
     )
-    .optional()
+    .optional(),
+  limit: OptionalFiniteNumber
 })
 
 // Why: the legacy handler allowed `title: string | null` and rejected every
@@ -472,7 +479,10 @@ export const TERMINAL_METHODS: RpcAnyMethod[] = [
     name: 'terminal.read',
     params: TerminalRead,
     handler: async (params, { runtime }) => ({
-      terminal: await runtime.readTerminal(params.terminal, { cursor: params.cursor })
+      terminal: await runtime.readTerminal(params.terminal, {
+        cursor: params.cursor,
+        limit: params.limit
+      })
     })
   }),
   defineMethod({
@@ -910,7 +920,7 @@ export const TERMINAL_METHODS: RpcAnyMethod[] = [
             rows: serialized?.rows ?? size?.rows,
             displayMode,
             seq,
-            truncated: read.truncated
+            truncated: serialized ? read.truncated : isTerminalReadPayloadIncomplete(read)
           })
           sendSnapshotFrames((opcode, payload) => sendFrame(request.streamId, opcode, payload), {
             kind: 'scrollback',
@@ -918,7 +928,7 @@ export const TERMINAL_METHODS: RpcAnyMethod[] = [
             rows: serialized?.rows ?? size?.rows ?? 24,
             displayMode,
             seq,
-            truncated: read.truncated,
+            truncated: serialized ? read.truncated : isTerminalReadPayloadIncomplete(read),
             truncatedByByteBudget: serialized?.truncatedByByteBudget,
             data: serialized?.data ?? (read.tail.length > 0 ? `${read.tail.join('\r\n')}\r\n` : '')
           })
@@ -1007,7 +1017,12 @@ export const TERMINAL_METHODS: RpcAnyMethod[] = [
 
       if (!leaf?.ptyId) {
         const read = await runtime.readTerminal(params.terminal)
-        emit({ type: 'subscribed', streamId: null, lines: read.tail, truncated: read.truncated })
+        emit({
+          type: 'subscribed',
+          streamId: null,
+          lines: read.tail,
+          truncated: isTerminalReadPayloadIncomplete(read)
+        })
         emit({ type: 'end' })
         return
       }
@@ -1027,7 +1042,7 @@ export const TERMINAL_METHODS: RpcAnyMethod[] = [
         emit({
           type: 'scrollback',
           lines: read.tail,
-          truncated: read.truncated,
+          truncated: isTerminalReadPayloadIncomplete(read),
           serialized: serialized?.data,
           cols: serialized?.cols ?? size?.cols,
           rows: serialized?.rows ?? size?.rows,
@@ -1214,7 +1229,7 @@ export const TERMINAL_METHODS: RpcAnyMethod[] = [
           type: 'subscribed',
           streamId,
           lines: read.tail,
-          truncated: read.truncated,
+          truncated: isTerminalReadPayloadIncomplete(read),
           cols: serialized?.cols ?? size?.cols,
           rows: serialized?.rows ?? size?.rows,
           displayMode,
@@ -1226,7 +1241,7 @@ export const TERMINAL_METHODS: RpcAnyMethod[] = [
           rows: serialized?.rows ?? size?.rows ?? 24,
           displayMode,
           seq,
-          truncated: read.truncated,
+          truncated: serialized ? read.truncated : isTerminalReadPayloadIncomplete(read),
           truncatedByByteBudget: serialized?.truncatedByByteBudget,
           data: serialized?.data ?? ''
         })
