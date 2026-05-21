@@ -160,19 +160,11 @@ async function preparePullRequestBranch(
   // Why: PR generation only needs the selected base branch. A repo-wide
   // `fetch --all` makes stale contributor fork remotes block unrelated PRs.
   await fetchComparisonBase(execGit, fetchTarget)
-  const headBeforeRebase = await safeExec(execGit, ['rev-parse', 'HEAD'])
-  // Why: GitHub PR diffs are three-dot based; rebasing first keeps already-landed
-  // branch changes from bleeding into the generated description.
-  await requiredExec(
-    execGit,
-    ['rebase', comparisonBase],
-    'Rebase before generating PR details failed'
-  )
-  const headAfterRebase = await safeExec(execGit, ['rev-parse', 'HEAD'])
   return {
     comparisonBase,
-    branchChanged:
-      Boolean(headBeforeRebase) && Boolean(headAfterRebase) && headBeforeRebase !== headAfterRebase
+    // Why: Generate must be read-only. Rebasing the live worktree can rewrite
+    // files under the running dev app and trigger a full Electron/Vite reload.
+    branchChanged: false
   }
 }
 
