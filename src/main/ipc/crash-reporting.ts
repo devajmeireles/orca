@@ -1,14 +1,17 @@
-/* oxlint-disable max-lines -- Why: crash-reporting IPC handlers share one
-   dedupe/submission state machine and one crash-store contract. */
+/* oxlint-disable max-lines -- Why: crash-reporting IPC handlers share renderer
+   error capture, diagnostic upload, and crash-store submission state. */
 import os from 'node:os'
 import { app, clipboard, ipcMain } from 'electron'
 import {
   type CrashReportBreadcrumbData,
-  formatCrashReportText,
+  type CrashReportDiagnosticBundle,
   type ReactErrorBoundaryReportArgs,
   type ReactErrorBoundaryReportResult,
   type CrashReportSubmitArgs,
-  type CrashReportSubmitResult
+  type CrashReportSubmitResult,
+  formatCrashReportText,
+  formatUncapturedCrashReportText,
+  sanitizeCrashReportString
 } from '../../shared/crash-reporting'
 import { submitFeedback } from './feedback'
 import type { CrashReportStore } from '../crash-reporting/crash-report-store'
@@ -16,6 +19,16 @@ import {
   getCrashBreadcrumbSnapshot,
   recordCrashBreadcrumb
 } from '../crash-reporting/crash-breadcrumb-store'
+import {
+  collectDiagnosticBundle,
+  deleteDiagnosticBundle,
+  getDiagnosticsStatus,
+  uploadDiagnosticBundle
+} from '../observability'
+import {
+  resolveDiagnosticOrcaChannel,
+  resolveDiagnosticTokenEndpoint
+} from '../observability/diagnostic-upload-endpoint'
 
 const inFlightSubmissions = new Set<string>()
 const submittedReportIds = new Set<string>()
@@ -25,6 +38,7 @@ const RENDERER_ERROR_DEDUPE_MS = 10 * 60 * 1000
 const MAX_RENDERER_ERROR_KEY_AGE_MS = RENDERER_ERROR_DEDUPE_MS * 2
 const MAX_RECENT_RENDERER_ERROR_REPORT_KEYS = 256
 const MAX_SUBMITTED_REPORT_IDS = 256
+const CRASH_REPORT_LOG_LOOKBACK_MINUTES = 3 * 24 * 60
 
 const REACT_ERROR_BOUNDARY_SURFACES = new Set<ReactErrorBoundaryReportArgs['surface']>([
   'app-root',
@@ -38,6 +52,11 @@ const REACT_ERROR_BOUNDARY_SURFACES = new Set<ReactErrorBoundaryReportArgs['surf
   'overlay',
   'rich-markdown-editor'
 ])
+
+type CrashDiagnosticBundleUpload = {
+  readonly diagnosticBundle: CrashReportDiagnosticBundle
+  readonly tokenEndpoint?: string
+}
 
 function stringField(value: unknown, maxLength: number): string | undefined {
   if (typeof value !== 'string') {
@@ -240,6 +259,18 @@ async function getLatestSendableReport(
   )
 }
 
+async function getRequestedCrashReport(
+  store: CrashReportStore,
+  args?: { reportId?: string }
+): Promise<Awaited<ReturnType<CrashReportStore['getLatestPending']>>> {
+  if (args?.reportId) {
+    return store.getById(args.reportId)
+  }
+  // Why: Help > Report Crash can intentionally submit without a report ID.
+  // Do not replace that uncaptured report with a pending crash that appears later.
+  return args ? null : getLatestPendingReport(store)
+}
+
 function sanitizeRendererBreadcrumbData(value: unknown): CrashReportBreadcrumbData | undefined {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
     return undefined
@@ -253,6 +284,121 @@ function sanitizeRendererBreadcrumbData(value: unknown): CrashReportBreadcrumbDa
     }
   }
   return Object.keys(sanitized).length > 0 ? sanitized : undefined
+}
+
+function formatUnknownError(error: unknown): string {
+  return sanitizeCrashReportString(error instanceof Error ? error.message : String(error))
+}
+
+function buildUncapturedCrashReportText(
+  notes: string | undefined,
+  diagnosticBundle?: CrashReportDiagnosticBundle
+): string {
+  return formatUncapturedCrashReportText(
+    {
+      createdAt: new Date().toISOString(),
+      appVersion: app.getVersion(),
+      platform: os.platform(),
+      osRelease: os.release(),
+      arch: os.arch(),
+      electronVersion: process.versions.electron ?? 'unknown',
+      chromeVersion: process.versions.chrome ?? 'unknown'
+    },
+    notes,
+    diagnosticBundle
+  )
+}
+
+async function collectAndUploadCrashDiagnosticBundle(): Promise<CrashDiagnosticBundleUpload> {
+  const status = getDiagnosticsStatus()
+  if (!status.bundleEnabled) {
+    return {
+      diagnosticBundle: {
+        status: 'not_uploaded',
+        reason: status.disabledReason ?? 'diagnostic bundle collection is disabled'
+      }
+    }
+  }
+
+  let bundle: ReturnType<typeof collectDiagnosticBundle>
+  try {
+    bundle = collectDiagnosticBundle({
+      appVersion: app.getVersion(),
+      platform: os.platform(),
+      arch: os.arch(),
+      osRelease: os.release(),
+      orcaChannel: resolveDiagnosticOrcaChannel(),
+      // Why: Help > Report Crash is often used after relaunch, long after the
+      // default 30 minute support bundle window would miss the failure context.
+      lookbackMinutes: CRASH_REPORT_LOG_LOOKBACK_MINUTES
+    })
+  } catch (error) {
+    return { diagnosticBundle: { status: 'not_uploaded', reason: formatUnknownError(error) } }
+  }
+
+  const tokenEndpoint = resolveDiagnosticTokenEndpoint()
+  if (!tokenEndpoint) {
+    return {
+      diagnosticBundle: {
+        status: 'not_uploaded',
+        reason: 'diagnostic upload endpoint is not configured for this build',
+        bundleSubmissionId: bundle.bundleSubmissionId,
+        bytes: bundle.bytes,
+        spanCount: bundle.spanCount
+      }
+    }
+  }
+
+  try {
+    const result = await uploadDiagnosticBundle({
+      tokenEndpoint,
+      payload: bundle.payload,
+      bundleSubmissionId: bundle.bundleSubmissionId
+    })
+    return {
+      diagnosticBundle: {
+        status: 'uploaded',
+        ticketId: result.ticketId,
+        bundleSubmissionId: bundle.bundleSubmissionId,
+        bytes: bundle.bytes,
+        spanCount: bundle.spanCount
+      },
+      tokenEndpoint
+    }
+  } catch (error) {
+    return {
+      diagnosticBundle: {
+        status: 'not_uploaded',
+        reason: formatUnknownError(error),
+        bundleSubmissionId: bundle.bundleSubmissionId,
+        bytes: bundle.bytes,
+        spanCount: bundle.spanCount
+      }
+    }
+  }
+}
+
+async function deleteUploadedCrashDiagnosticBundle(
+  upload: CrashDiagnosticBundleUpload
+): Promise<boolean> {
+  if (upload.diagnosticBundle.status !== 'uploaded') {
+    return true
+  }
+  if (!upload.tokenEndpoint) {
+    return false
+  }
+  try {
+    await deleteDiagnosticBundle({
+      tokenEndpoint: upload.tokenEndpoint,
+      ticketId: upload.diagnosticBundle.ticketId
+    })
+    return true
+  } catch (error) {
+    // Why: if the feedback post fails after log upload, deleting the orphaned
+    // bundle preserves the user's expectation that one Send creates one report.
+    console.error('[crash-reporting] Failed to delete orphaned diagnostic bundle:', error)
+    return false
+  }
 }
 
 export function registerCrashReportingHandlers(store: CrashReportStore): void {
@@ -289,11 +435,10 @@ export function registerCrashReportingHandlers(store: CrashReportStore): void {
   ipcMain.handle(
     'crashReports:copyLatestDiagnostics',
     async (_event, args?: { reportId?: string; notes?: string }) => {
-      const report = args?.reportId
-        ? await store.getById(args.reportId)
-        : await getLatestPendingReport(store)
+      const report = await getRequestedCrashReport(store, args)
       if (!report) {
-        return { ok: false as const, error: 'No crash report available.' }
+        clipboard.writeText(buildUncapturedCrashReportText(args?.notes))
+        return { ok: true as const }
       }
       clipboard.writeText(formatCrashReportText(report, args?.notes))
       return { ok: true as const }
@@ -314,11 +459,26 @@ export function registerCrashReportingHandlers(store: CrashReportStore): void {
   ipcMain.handle(
     'crashReports:submit',
     async (_event, args: CrashReportSubmitArgs): Promise<CrashReportSubmitResult> => {
-      const report = args.reportId
-        ? await store.getById(args.reportId)
-        : await getLatestPendingReport(store)
+      const report = await getRequestedCrashReport(store, args)
       if (!report) {
-        return { ok: false, status: null, error: 'No crash report available.' }
+        const diagnosticUpload = await collectAndUploadCrashDiagnosticBundle()
+        const diagnosticBundle = diagnosticUpload.diagnosticBundle
+        const result = await submitFeedback({
+          feedback: buildUncapturedCrashReportText(args.notes, diagnosticBundle),
+          submissionType: 'crash',
+          submitAnonymously: args.submitAnonymously,
+          githubLogin: args.githubLogin,
+          githubEmail: args.githubEmail
+        })
+        return result.ok
+          ? { ok: true, report: null, diagnosticBundle }
+          : {
+              ...result,
+              report: null,
+              ...((await deleteUploadedCrashDiagnosticBundle(diagnosticUpload))
+                ? {}
+                : { diagnosticBundle })
+            }
       }
       const canSubmitDismissedReport = Boolean(args.reportId && report.status === 'dismissed')
       if (
@@ -341,15 +501,23 @@ export function registerCrashReportingHandlers(store: CrashReportStore): void {
 
       inFlightSubmissions.add(report.id)
       try {
+        const diagnosticUpload = await collectAndUploadCrashDiagnosticBundle()
+        const diagnosticBundle = diagnosticUpload.diagnosticBundle
         const result = await submitFeedback({
-          feedback: formatCrashReportText(report, args.notes),
+          feedback: formatCrashReportText(report, args.notes, diagnosticBundle),
           submissionType: 'crash',
           submitAnonymously: args.submitAnonymously,
           githubLogin: args.githubLogin,
           githubEmail: args.githubEmail
         })
         if (!result.ok) {
-          return { ...result, report }
+          return {
+            ...result,
+            report,
+            ...((await deleteUploadedCrashDiagnosticBundle(diagnosticUpload))
+              ? {}
+              : { diagnosticBundle })
+          }
         }
         rememberSubmittedReportId(report.id)
         if (report.status === 'dismissed') {
