@@ -1330,6 +1330,126 @@
   transform-origin: center;
 }
 
+/* ── Feature tip: session-persistence animation ──────────────────── */
+
+/* Why: the session-persistence tip tells one story — terminal content
+   survives a restart. Three actors: the terminal content (dims out then
+   in), the restart overlay (fades in during the dim beat), and the
+   "restored" badge (flashes after content returns). All are governed by
+   a single 3.8s loop so the beats stay in sync without JS timers. */
+
+@keyframes session-persist-content-fade {
+  /* 0–10%: content visible, cursor blinking */
+  0%,
+  10% {
+    opacity: 1;
+  }
+  /* 20–45%: content dims while restart overlay is visible */
+  20%,
+  45% {
+    opacity: 0.12;
+  }
+  /* 55–75%: content fades back in — "it survived" */
+  55%,
+  75% {
+    opacity: 1;
+  }
+  /* 85–100%: stay visible until loop resets */
+  85%,
+  100% {
+    opacity: 1;
+  }
+}
+
+@keyframes session-persist-overlay-fade {
+  /* Overlay hidden while content is visible */
+  0%,
+  15% {
+    opacity: 0;
+  }
+  /* Overlay visible during restart beat */
+  25%,
+  42% {
+    opacity: 1;
+  }
+  /* Overlay fades out as content returns */
+  52%,
+  100% {
+    opacity: 0;
+  }
+}
+
+@keyframes session-persist-cursor-blink {
+  0%,
+  49% {
+    opacity: 1;
+  }
+  50%,
+  99% {
+    opacity: 0;
+  }
+}
+
+@keyframes session-persist-check-flash {
+  /* Hidden during most of the loop */
+  0%,
+  54% {
+    opacity: 0;
+    transform: scale(0.85);
+  }
+  /* Flash in when content is restored */
+  62%,
+  74% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  /* Fade out before reset */
+  82%,
+  100% {
+    opacity: 0;
+    transform: scale(0.85);
+  }
+}
+
+.session-persist-visual .session-persist-content {
+  animation: session-persist-content-fade 3.8s ease-in-out infinite;
+}
+
+.session-persist-visual .session-persist-restart-overlay {
+  animation: session-persist-overlay-fade 3.8s ease-in-out infinite;
+  pointer-events: none;
+}
+
+.session-persist-visual .session-persist-cursor {
+  animation: session-persist-cursor-blink 0.9s step-end infinite;
+}
+
+.session-persist-visual .session-persist-restored-check {
+  animation: session-persist-check-flash 3.8s ease-in-out infinite;
+  pointer-events: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  /* Keep the visual static for reduced-motion users — show restored state. */
+  .session-persist-visual .session-persist-content {
+    animation: none;
+    opacity: 1;
+  }
+  .session-persist-visual .session-persist-restart-overlay {
+    animation: none;
+    opacity: 0;
+  }
+  .session-persist-visual .session-persist-cursor {
+    animation: none;
+    opacity: 1;
+  }
+  .session-persist-visual .session-persist-restored-check {
+    animation: none;
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
 /* ── Feature wall: agents-orchestration animations ───────────────── */
 
 /* Why: drives the supported-agents marquee on page 1 of the agents tile.

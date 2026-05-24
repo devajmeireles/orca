@@ -1,8 +1,8 @@
-export type FeatureTipId = 'voice-dictation'
+export type FeatureTipId = 'voice-dictation' | 'session-persistence'
 
 export type FeatureTipPriority = 'new' | 'unseen'
 
-export type FeatureTipAction = 'enable-voice'
+export type FeatureTipAction = 'enable-voice' | 'open-session-persistence-release-notes'
 
 export type FeatureTip = {
   id: FeatureTipId
@@ -19,6 +19,16 @@ export type CompletedFeatureTipState = {
 }
 
 export const FEATURE_TIPS = [
+  {
+    id: 'session-persistence',
+    priority: 'new',
+    eyebrow: 'New in 1.3.32',
+    title: 'Pick up exactly where you left off',
+    description:
+      'Terminals, splits, scrollback, and your focused tab all come back after a restart — right where you left them.',
+    action: 'open-session-persistence-release-notes',
+    ctaLabel: "See What's New"
+  },
   {
     id: 'voice-dictation',
     priority: 'new',

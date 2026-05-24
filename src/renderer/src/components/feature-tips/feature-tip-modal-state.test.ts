@@ -23,20 +23,41 @@ describe('feature tip modal state', () => {
     expect(tip?.id).toBe('voice-dictation')
   })
 
-  it('falls back to the next unseen tip when no modal tip id is pinned', () => {
+  it('falls back to session-persistence when no modal tip id is pinned and no tips are seen', () => {
     const tip = getFeatureTipForModal({
       modalData: {},
       seenTipIds: [],
       settings: makeSettings()
     })
 
+    // session-persistence is the newest tip and takes priority
+    expect(tip?.id).toBe('session-persistence')
+  })
+
+  it('falls back to voice-dictation when session-persistence has been seen', () => {
+    const tip = getFeatureTipForModal({
+      modalData: {},
+      seenTipIds: ['session-persistence'],
+      settings: makeSettings()
+    })
+
     expect(tip?.id).toBe('voice-dictation')
+  })
+
+  it('keeps rendering session-persistence tip when pinned even after seen', () => {
+    const tip = getFeatureTipForModal({
+      modalData: { tipId: 'session-persistence' },
+      seenTipIds: ['session-persistence'],
+      settings: makeSettings()
+    })
+
+    expect(tip?.id).toBe('session-persistence')
   })
 
   it('returns no tip when every tip is already seen and no modal tip id is pinned', () => {
     const tip = getFeatureTipForModal({
       modalData: {},
-      seenTipIds: ['voice-dictation'],
+      seenTipIds: ['voice-dictation', 'session-persistence'],
       settings: makeSettings()
     })
 

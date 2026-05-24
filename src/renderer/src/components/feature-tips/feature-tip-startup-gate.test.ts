@@ -22,11 +22,25 @@ function makeSettings(voiceEnabled = false): Pick<GlobalSettings, 'voice'> {
 }
 
 describe('feature tip startup gate', () => {
-  it('opens the feature tip for an existing user on app open', () => {
+  it('opens session-persistence tip first for an existing user on app open', () => {
     expect(
       getFeatureTipsAppOpenDecision({
         activeModal: 'none',
         featureTipsSeenIds: [],
+        onboarding: existingUserOnboarding,
+        persistedUIReady: true,
+        promptedThisSession: false,
+        settings: makeSettings(),
+        suppressedByOnboardingThisSession: false
+      })
+    ).toEqual({ kind: 'open', tipId: 'session-persistence' })
+  })
+
+  it('opens voice-dictation after session-persistence has been seen', () => {
+    expect(
+      getFeatureTipsAppOpenDecision({
+        activeModal: 'none',
+        featureTipsSeenIds: ['session-persistence'],
         onboarding: existingUserOnboarding,
         persistedUIReady: true,
         promptedThisSession: false,
@@ -64,11 +78,11 @@ describe('feature tip startup gate', () => {
     ).toEqual({ kind: 'skip' })
   })
 
-  it('does not reopen after the tip was marked seen', () => {
+  it('does not reopen after all tips were marked seen', () => {
     expect(
       getFeatureTipsAppOpenDecision({
         activeModal: 'none',
-        featureTipsSeenIds: ['voice-dictation'],
+        featureTipsSeenIds: ['voice-dictation', 'session-persistence'],
         onboarding: existingUserOnboarding,
         persistedUIReady: true,
         promptedThisSession: false,
@@ -78,11 +92,26 @@ describe('feature tip startup gate', () => {
     ).toEqual({ kind: 'skip' })
   })
 
-  it('does not open after voice dictation is already enabled', () => {
+  it('does not open after voice dictation is already enabled (voice tip skipped; session-persistence still shows)', () => {
     expect(
       getFeatureTipsAppOpenDecision({
         activeModal: 'none',
         featureTipsSeenIds: [],
+        onboarding: existingUserOnboarding,
+        persistedUIReady: true,
+        promptedThisSession: false,
+        settings: makeSettings(true),
+        suppressedByOnboardingThisSession: false
+      })
+      // session-persistence has no completed gate, so it still shows
+    ).toEqual({ kind: 'open', tipId: 'session-persistence' })
+  })
+
+  it('skips entirely when voice is enabled and session-persistence already seen', () => {
+    expect(
+      getFeatureTipsAppOpenDecision({
+        activeModal: 'none',
+        featureTipsSeenIds: ['session-persistence'],
         onboarding: existingUserOnboarding,
         persistedUIReady: true,
         promptedThisSession: false,
