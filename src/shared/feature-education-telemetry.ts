@@ -1,5 +1,4 @@
 import type { ContextualTourId } from './contextual-tours'
-import type { FeatureInteractionId } from './feature-interactions'
 
 export const FEATURE_EDUCATION_CONTEXTUAL_TOUR_IDS = [
   'right-sidebar',
@@ -10,16 +9,6 @@ export const FEATURE_EDUCATION_CONTEXTUAL_TOUR_IDS = [
   'workspace-creation'
 ] as const satisfies readonly ContextualTourId[]
 
-export const FEATURE_EDUCATION_FEATURE_IDS = [
-  'right-sidebar',
-  'workspace-board',
-  'browser',
-  'tasks',
-  'automations',
-  'workspace-creation',
-  'voice-dictation'
-] as const satisfies readonly FeatureInteractionId[]
-
 export const FEATURE_EDUCATION_SOURCES = [
   'right_sidebar_visible',
   'workspace_board_visible',
@@ -29,7 +18,6 @@ export const FEATURE_EDUCATION_SOURCES = [
   'workspace_creation_visible',
   'workspace_creation_modal',
   'workspace_creation_add_project',
-  'dictation_session',
   'unknown'
 ] as const
 

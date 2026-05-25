@@ -145,16 +145,6 @@ describe('feature education telemetry schemas', () => {
 
     expect(parsed.success).toBe(false)
   })
-
-  it('accepts first feature interaction payloads', () => {
-    const parsed = eventSchemas.feature_interaction_first_recorded.safeParse({
-      feature_id: 'voice-dictation',
-      source: 'dictation_session',
-      had_contextual_tour_seen: false
-    })
-
-    expect(parsed.success).toBe(true)
-  })
 })
 
 describe('agent_started schema', () => {

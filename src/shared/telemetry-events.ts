@@ -19,7 +19,6 @@ import { FEATURE_WALL_EXIT_ACTIONS, FEATURE_WALL_TOUR_DEPTH_STEPS } from './feat
 import {
   CONTEXTUAL_TOUR_OUTCOMES,
   FEATURE_EDUCATION_CONTEXTUAL_TOUR_IDS,
-  FEATURE_EDUCATION_FEATURE_IDS,
   FEATURE_EDUCATION_SOURCES
 } from './feature-education-telemetry'
 import { SETUP_SCRIPT_IMPORT_PROVIDERS } from './setup-script-import-providers'
@@ -886,7 +885,6 @@ const onboardingFeatureSetupTerminalInteractedSchema = z
 
 const featureEducationSourceSchema = z.enum(FEATURE_EDUCATION_SOURCES)
 const featureEducationContextualTourIdSchema = z.enum(FEATURE_EDUCATION_CONTEXTUAL_TOUR_IDS)
-const featureEducationFeatureIdSchema = z.enum(FEATURE_EDUCATION_FEATURE_IDS)
 
 const contextualTourShownSchema = z
   .object({
@@ -907,14 +905,6 @@ const contextualTourOutcomeSchema = z
   .refine((payload) => payload.steps_seen <= payload.total_steps, {
     message: 'steps_seen must be less than or equal to total_steps',
     path: ['steps_seen']
-  })
-  .strict()
-
-const featureInteractionFirstRecordedSchema = z
-  .object({
-    feature_id: featureEducationFeatureIdSchema,
-    source: featureEducationSourceSchema,
-    had_contextual_tour_seen: z.boolean()
   })
   .strict()
 
@@ -982,7 +972,6 @@ export const eventSchemas = {
 
   contextual_tour_shown: contextualTourShownSchema,
   contextual_tour_outcome: contextualTourOutcomeSchema,
-  feature_interaction_first_recorded: featureInteractionFirstRecordedSchema,
 
   smart_sort_class_distribution: smartSortClassDistributionSchema,
   smart_sort_class_1_promotion: smartSortClass1PromotionSchema,

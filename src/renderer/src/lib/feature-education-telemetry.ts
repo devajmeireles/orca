@@ -1,5 +1,4 @@
 import type { ContextualTourId } from '../../../shared/contextual-tours'
-import type { FeatureInteractionId } from '../../../shared/feature-interactions'
 import {
   normalizeFeatureEducationSource,
   type ContextualTourOutcome
@@ -31,18 +30,6 @@ export function trackContextualTourOutcome(args: {
     outcome: args.outcome,
     steps_seen: clampTourStepCount(args.stepsSeen),
     total_steps: clampTourStepCount(args.totalSteps, 1)
-  })
-}
-
-export function trackFeatureInteractionFirstRecorded(args: {
-  featureId: FeatureInteractionId
-  source: string | null | undefined
-  hadContextualTourSeen: boolean
-}): void {
-  track('feature_interaction_first_recorded', {
-    feature_id: args.featureId,
-    source: normalizeFeatureEducationSource(args.source),
-    had_contextual_tour_seen: args.hadContextualTourSeen
   })
 }
 

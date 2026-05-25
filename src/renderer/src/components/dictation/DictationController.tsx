@@ -150,7 +150,7 @@ export function DictationController() {
 
       dictationStateRef.current = 'listening'
       setDictationState('listening')
-      recordFeatureInteraction('voice-dictation', 'dictation_session')
+      recordFeatureInteraction('voice-dictation')
     } catch (err) {
       if (dictationRunRef.current !== runId) {
         return

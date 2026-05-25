@@ -34,7 +34,6 @@ import {
 } from '../../../../shared/feature-interactions'
 import {
   getContextualTour,
-  isContextualTourId,
   normalizeContextualTourIds,
   type ContextualTourId
 } from '../../../../shared/contextual-tours'
@@ -65,7 +64,6 @@ import { DEFAULT_PET_ID, isBundledPetId } from '../../components/pet/pet-models'
 import { revokeCustomPetBlobUrl } from '../../components/pet/pet-blob-cache'
 import { isGitRepoKind } from '../../../../shared/repo-kind'
 import type { WorkspacePortScanResult } from '../../../../shared/workspace-ports'
-import { trackFeatureInteractionFirstRecorded } from '../../lib/feature-education-telemetry'
 import {
   getContextualTourRequestDecision,
   hasContextualTourTarget,
@@ -463,7 +461,7 @@ export type UISlice = {
   featureTipsSeenIds: FeatureTipId[]
   markFeatureTipsSeen: (ids: FeatureTipId[]) => void
   featureInteractions: FeatureInteractionState
-  recordFeatureInteraction: (id: FeatureInteractionId, source?: string) => void
+  recordFeatureInteraction: (id: FeatureInteractionId) => void
   contextualToursSeenIds: ContextualTourId[]
   activeContextualTourId: ContextualTourId | null
   activeContextualTourStepIndex: number
@@ -916,7 +914,7 @@ export const createUISlice: StateCreator<AppState, [], [], UISlice> = (set, get)
       return { featureTipsSeenIds: next }
     }),
   featureInteractions: {},
-  recordFeatureInteraction: (id, source) =>
+  recordFeatureInteraction: (id) =>
     set((s) => {
       if (!s.persistedUIReady) {
         return s
@@ -930,11 +928,6 @@ export const createUISlice: StateCreator<AppState, [], [], UISlice> = (set, get)
       }
       if (typeof window !== 'undefined') {
         window.api.ui.set({ featureInteractions: next }).catch(console.error)
-        trackFeatureInteractionFirstRecorded({
-          featureId: id,
-          source,
-          hadContextualTourSeen: isContextualTourId(id) && s.contextualToursSeenIds.includes(id)
-        })
       }
       return { featureInteractions: next }
     }),
