@@ -23,7 +23,7 @@ export type FeatureInteractionState = Partial<
 >
 
 // Why: education state has three separate meanings; see
-// docs/readme/feature-education-state.md before adding or reusing ids here.
+// docs/reference/feature-education-state.md before adding or reusing ids here.
 export const FEATURE_INTERACTIONS = [
   {
     id: 'right-sidebar',

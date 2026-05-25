@@ -9,6 +9,7 @@ single design or implementation pass.
 - Public-facing docs that are not part of the root README.
 - Docs that other checked-in files link to.
 - Telemetry availability notes that dashboard authors need after the original design or implementation branch is gone. See [Telemetry Availability](./telemetry-availability.md).
+- Feature education state and retention analytics notes that define how contextual tours are persisted and measured. See [Feature Education State](./feature-education-state.md) and [Feature Education Retention Analytics](./feature-education-retention-analytics.md).
 
 ## What Stays Out
 
