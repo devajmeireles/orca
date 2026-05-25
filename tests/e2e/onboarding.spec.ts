@@ -250,12 +250,8 @@ test.describe('Onboarding flow', () => {
       .toBe(oppositeTheme)
 
     // --- Step 3: notifications ---
-    await expect(orcaPage.getByRole('button', { name: /System Default/i })).toHaveAttribute(
-      'aria-pressed',
-      'true'
-    )
+    await expect(orcaPage.getByRole('combobox')).toContainText(/System Default/i)
     await expect(orcaPage.getByRole('button', { name: /Send Test Notification/i })).toBeVisible()
-    await expect(orcaPage.getByText(/Advanced sound file/i)).toBeVisible()
     await continueOnboarding(orcaPage)
     await expect(orcaPage.getByRole('heading', { name: /Set up Orca for agents/i })).toBeVisible()
     await expect(orcaPage.getByText('4 of 7')).toBeVisible()
@@ -558,10 +554,7 @@ test.describe('Onboarding flow', () => {
         return { supported: true, platform: 'darwin', requested: true }
       }
     })
-    await expect(orcaPage.getByRole('button', { name: /System Default/i })).toHaveAttribute(
-      'aria-pressed',
-      'true'
-    )
+    await expect(orcaPage.getByRole('combobox')).toContainText(/System Default/i)
 
     await onboardingFooterButton(orcaPage, SKIP_TO_PROJECT_SETUP_BUTTON).click()
 
@@ -620,9 +613,10 @@ test.describe('Onboarding flow', () => {
     await continueOnboarding(orcaPage)
     await expect(orcaPage.getByRole('heading', { name: /Set up notifications/i })).toBeVisible()
 
-    const dingSound = orcaPage.getByRole('button', { name: /^Ding\b/i })
-    await dingSound.click()
-    await expect(dingSound).toHaveAttribute('aria-pressed', 'true')
+    const soundSelect = orcaPage.getByRole('combobox')
+    await soundSelect.click()
+    await orcaPage.getByRole('option', { name: /^Ding\b/i }).click()
+    await expect(soundSelect).toContainText(/Ding/i)
 
     await continueOnboarding(orcaPage)
     await expect(orcaPage.getByRole('heading', { name: /Set up Orca for agents/i })).toBeVisible()
