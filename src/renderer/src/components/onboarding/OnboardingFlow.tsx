@@ -39,7 +39,7 @@ const stepCopy = {
   },
   tour: {
     title: 'Explore Orca',
-    subtitle: 'See how Orca supports parallel agent work.'
+    subtitle: ''
   },
   repo: {
     title: 'Point Orca at some code',

@@ -31,7 +31,6 @@ describe('OnboardingFlow', () => {
     )
 
     expect(html).toContain('Explore Orca')
-    expect(html).toContain('See how Orca supports parallel agent work.')
     expect(html).toContain('Preview the core workflow.')
     expect(html).toContain('Run agents in isolated workspaces.')
     expect(html).toContain('Review, verify, and ship changes.')
