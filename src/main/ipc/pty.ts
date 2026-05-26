@@ -14,6 +14,7 @@ import { openCodeHookService } from '../opencode/hook-service'
 import { agentHookServer } from '../agent-hooks/server'
 import { isAgentStatusHooksEnabled } from '../agent-hooks/managed-agent-hook-controls'
 import { piTitlebarExtensionService } from '../pi/titlebar-extension-service'
+import { detectPiAgentKindFromCommand, type PiAgentKind } from '../../shared/pi-agent-kind'
 import { isPwshAvailable } from '../pwsh'
 import { LocalPtyProvider } from '../providers/local-pty-provider'
 import type { IPtyProvider, PtySpawnOptions, PtySpawnResult } from '../providers/types'
@@ -256,6 +257,13 @@ export type BuildPtyHostEnvOptions = {
   skipCodexHomeEnv?: boolean
   skipClaudeConfigDirEnv?: boolean
   githubAttributionEnabled: boolean
+  /** The launch command the renderer chose for this PTY (e.g. 'pi', 'omp',
+   *  'claude'). Used to resolve the per-agent overlay source dir for Pi /
+   *  OMP - both consume `PI_CODING_AGENT_DIR` but default to different
+   *  `~/.<kind>/agent` paths. Undefined for bare-shell spawns; defaults
+   *  resolve to Pi for back-compat. NEVER infer from disk presence; that's
+   *  the bug this option fixes (cross-agent shadowing when both dirs exist). */
+  launchCommand?: string
   agentStatusHooksEnabled: boolean
 }
 
@@ -278,6 +286,43 @@ function shouldSkipCodexHomeEnvForWindowsShell(
 const CODEX_HOME_ENV_KEYS = ['CODEX_HOME', 'ORCA_CODEX_HOME'] as const
 const CLAUDE_CONFIG_DIR_ENV_KEYS = ['CLAUDE_CONFIG_DIR', 'ORCA_CLAUDE_CONFIG_DIR'] as const
 
+function readEnvWithProcessFallback(
+  baseEnv: Record<string, string>,
+  key: string
+): string | undefined {
+  return baseEnv[key] ?? process.env[key]
+}
+
+function resolvePiAgentSourceDir(
+  baseEnv: Record<string, string>,
+  kind: PiAgentKind
+): string | undefined {
+  const sourceKey = kind === 'omp' ? 'ORCA_OMP_SOURCE_AGENT_DIR' : 'ORCA_PI_SOURCE_AGENT_DIR'
+  const overlayKey = kind === 'omp' ? 'ORCA_OMP_CODING_AGENT_DIR' : 'ORCA_PI_CODING_AGENT_DIR'
+  const otherOverlayKey = kind === 'omp' ? 'ORCA_PI_CODING_AGENT_DIR' : 'ORCA_OMP_CODING_AGENT_DIR'
+
+  const sourceDir = readEnvWithProcessFallback(baseEnv, sourceKey)
+  if (sourceDir) {
+    return sourceDir
+  }
+
+  const publicDir = readEnvWithProcessFallback(baseEnv, 'PI_CODING_AGENT_DIR')
+  const ownOverlayDir = readEnvWithProcessFallback(baseEnv, overlayKey)
+  const otherOverlayDir = readEnvWithProcessFallback(baseEnv, otherOverlayKey)
+  // Why: if PI_CODING_AGENT_DIR is just a restored Orca overlay from either
+  // kind and the matching source shadow is absent, remirroring it would leak
+  // another agent's overlay tree into this launch. Fall through to defaults.
+  if (publicDir && publicDir !== ownOverlayDir && publicDir !== otherOverlayDir) {
+    return publicDir
+  }
+
+  return readShellStartupEnvVar(
+    'PI_CODING_AGENT_DIR',
+    baseEnv.HOME ?? process.env.HOME,
+    baseEnv.SHELL ?? process.env.SHELL
+  )
+}
+
 function mergePtyEnvDeletions(
   existingKeys: string[] | undefined,
   additionalKeys: readonly string[]
@@ -295,6 +340,16 @@ function shouldPrepareClaudeForHostPty(
   return (
     isClaudeLaunch || (isAgentStatusHooksEnabled(settings) && isClaudeRuntimeHomeEnabled(settings))
   )
+}
+
+function getInheritedAgentHookEnvKeysToDelete(
+  spawnEnv: Record<string, string> | undefined
+): string[] {
+  const env = spawnEnv ?? {}
+  // Why: daemon/local providers merge process.env after main-process cleanup.
+  // Delete reverted or unavailable hook env keys there without dropping fresh
+  // receiver coordinates that buildPtyHostEnv intentionally set.
+  return AGENT_HOOK_RUNTIME_ENV_KEYS.filter((key) => env[key] === undefined)
 }
 
 // Why: when agent status is disabled, a nested Orca terminal can still pass
@@ -374,16 +429,10 @@ export function buildPtyHostEnv(
       baseEnv.HOME ?? process.env.HOME,
       baseEnv.SHELL ?? process.env.SHELL
     )
-  const preexistingPiAgentDir =
-    baseEnv.ORCA_PI_SOURCE_AGENT_DIR ??
-    process.env.ORCA_PI_SOURCE_AGENT_DIR ??
-    baseEnv.PI_CODING_AGENT_DIR ??
-    process.env.PI_CODING_AGENT_DIR ??
-    readShellStartupEnvVar(
-      'PI_CODING_AGENT_DIR',
-      baseEnv.HOME ?? process.env.HOME,
-      baseEnv.SHELL ?? process.env.SHELL
-    )
+  const piAgentKind = detectPiAgentKindFromCommand(opts.launchCommand)
+  // Why: source shadows are agent-scoped. Trusting the other kind's source
+  // would reintroduce the exact Pi/OMP extension-state shadowing this PR fixes.
+  const preexistingPiAgentDir = resolvePiAgentSourceDir(baseEnv, piAgentKind)
 
   if (opts.agentStatusHooksEnabled) {
     // Why: OPENCODE_CONFIG_DIR is a singular path, not a colon-list, so a user
@@ -426,31 +475,59 @@ export function buildPtyHostEnv(
     Object.assign(baseEnv, agentHookServer.buildPtyEnv())
   }
 
-  // Why: PI_CODING_AGENT_DIR owns Pi's full config/session root. Build a
-  // PTY-scoped overlay from the caller's chosen root so Pi sessions keep
-  // their user state without sharing a mutable overlay across terminals.
-  // Under the daemon path, `id` is the daemon sessionId — the overlay
-  // survives daemon cold restore because the sessionId is stable across
-  // restarts by design. A future reader should NOT "simplify" id allocation
-  // back to a fresh UUID per spawn; that would discard user Pi state on
-  // every daemon reconnect.
+  // Why: PI_CODING_AGENT_DIR owns Pi's / OMP's full config/session root (OMP
+  // inherits the env var name from Pi by design; its CHANGELOG documents the
+  // OMP_CODING_AGENT_DIR -> PI_CODING_AGENT_DIR rename. Build a PTY-scoped
+  // overlay from the caller's chosen root so sessions keep their user state
+  // without sharing a mutable overlay across terminals. Under the daemon path,
+  // `id` is the daemon sessionId — the overlay survives daemon cold restore
+  // because the sessionId is stable across restarts by design. A future reader
+  // should NOT "simplify" id allocation back to a fresh UUID per spawn; that
+  // would discard user state on every daemon reconnect.
   if (opts.agentStatusHooksEnabled) {
-    Object.assign(baseEnv, piTitlebarExtensionService.buildPtyEnv(id, preexistingPiAgentDir))
+    Object.assign(
+      baseEnv,
+      piTitlebarExtensionService.buildPtyEnv(id, preexistingPiAgentDir, piAgentKind)
+    )
     if (baseEnv.PI_CODING_AGENT_DIR) {
       // Why: ~/.zshrc can re-export the user's default after spawn; shell-ready
-      // wrappers restore this PTY-scoped value after user startup files run.
-      baseEnv.ORCA_PI_CODING_AGENT_DIR = baseEnv.PI_CODING_AGENT_DIR
-      if (preexistingPiAgentDir) {
-        // Why: preserve the original Pi root across nested Orca terminals; the
-        // public env var is intentionally restored to the current PTY overlay.
-        baseEnv.ORCA_PI_SOURCE_AGENT_DIR = preexistingPiAgentDir
+      // wrappers restore this PTY-scoped value after user startup files run. The
+      // shadow var name is agent-scoped (ORCA_PI_* for Pi, ORCA_OMP_* for OMP)
+      // so an OMP PTY never reads a stale Pi shadow (and vice versa). The
+      // restored target stays `PI_CODING_AGENT_DIR` because that's what the
+      // OMP/Pi binary itself reads.
+      if (piAgentKind === 'omp') {
+        delete baseEnv.ORCA_PI_CODING_AGENT_DIR
+        delete baseEnv.ORCA_PI_SOURCE_AGENT_DIR
+        baseEnv.ORCA_OMP_CODING_AGENT_DIR = baseEnv.PI_CODING_AGENT_DIR
+        if (preexistingPiAgentDir) {
+          // Why: preserve the original OMP root across nested Orca terminals; the
+          // public env var is intentionally restored to the current PTY overlay.
+          baseEnv.ORCA_OMP_SOURCE_AGENT_DIR = preexistingPiAgentDir
+        }
+      } else {
+        delete baseEnv.ORCA_OMP_CODING_AGENT_DIR
+        delete baseEnv.ORCA_OMP_SOURCE_AGENT_DIR
+        baseEnv.ORCA_PI_CODING_AGENT_DIR = baseEnv.PI_CODING_AGENT_DIR
+        if (preexistingPiAgentDir) {
+          // Why: preserve the original Pi root across nested Orca terminals; the
+          // public env var is intentionally restored to the current PTY overlay.
+          baseEnv.ORCA_PI_SOURCE_AGENT_DIR = preexistingPiAgentDir
+        }
       }
     }
   } else {
+    // Why: when agent status is disabled we must strip BOTH kinds' shadow vars
+    // so a nested PTY does not inherit a stale overlay from either agent.
     restoreOrStripOverlayEnv(baseEnv, {
       primary: 'PI_CODING_AGENT_DIR',
       overlay: 'ORCA_PI_CODING_AGENT_DIR',
       source: 'ORCA_PI_SOURCE_AGENT_DIR'
+    })
+    restoreOrStripOverlayEnv(baseEnv, {
+      primary: 'PI_CODING_AGENT_DIR',
+      overlay: 'ORCA_OMP_CODING_AGENT_DIR',
+      source: 'ORCA_OMP_SOURCE_AGENT_DIR'
     })
   }
 
@@ -743,7 +820,7 @@ export function registerPtyHandlers(
           ? (getSettings()?.terminalWindowsPowerShellImplementation ?? 'auto')
           : undefined,
       pwshAvailable: () => isPwshAvailable(),
-      buildSpawnEnv: (id, baseEnv, context) => {
+      buildSpawnEnv: (id, baseEnv, ctx) => {
         const settings = getSettings?.()
         const env = buildPtyHostEnv(id, baseEnv, {
           isPackaged: app.isPackaged,
@@ -754,11 +831,12 @@ export function registerPtyHandlers(
             : null,
           // Why: WSL's inner shell cannot use a Windows userData CODEX_HOME.
           // Leave Linux Codex on its native ~/.codex until we own a WSL home.
-          skipCodexHomeEnv: context?.isWsl === true,
+          skipCodexHomeEnv: ctx?.isWsl === true,
           // Why: same host-path boundary as CODEX_HOME; WSL Claude needs a
           // Linux-side runtime home before it can inherit CLAUDE_CONFIG_DIR.
-          skipClaudeConfigDirEnv: context?.isWsl === true,
+          skipClaudeConfigDirEnv: ctx?.isWsl === true,
           githubAttributionEnabled: settings?.enableGitHubAttribution ?? false,
+          launchCommand: ctx?.command,
           agentStatusHooksEnabled: isAgentStatusHooksEnabled(settings)
         })
         // Why: agents need their own terminal handle at process start so they
@@ -1083,6 +1161,7 @@ export function registerPtyHandlers(
           skipCodexHomeEnv,
           skipClaudeConfigDirEnv: skipCodexHomeEnv,
           githubAttributionEnabled: getSettings?.()?.enableGitHubAttribution ?? false,
+          launchCommand: args.command,
           agentStatusHooksEnabled: isAgentStatusHooksEnabled(settings)
         })
       }
@@ -1093,9 +1172,12 @@ export function registerPtyHandlers(
         cwd: args.cwd,
         env
       }
-      if (claudeAuth?.stripAuthEnv) {
-        spawnOptions.envToDelete = [...CLAUDE_AUTH_ENV_VARS, 'ANTHROPIC_CUSTOM_HEADERS']
-      }
+      spawnOptions.envToDelete = mergePtyEnvDeletions(
+        claudeAuth?.stripAuthEnv
+          ? [...CLAUDE_AUTH_ENV_VARS, 'ANTHROPIC_CUSTOM_HEADERS']
+          : undefined,
+        args.connectionId ? [] : getInheritedAgentHookEnvKeysToDelete(env)
+      )
       if (skipCodexHomeEnv) {
         spawnOptions.envToDelete = mergePtyEnvDeletions(spawnOptions.envToDelete, [
           ...CODEX_HOME_ENV_KEYS,
@@ -1478,6 +1560,7 @@ export function registerPtyHandlers(
             skipCodexHomeEnv,
             skipClaudeConfigDirEnv: skipCodexHomeEnv,
             githubAttributionEnabled: getSettings?.()?.enableGitHubAttribution ?? false,
+            launchCommand: args.command,
             agentStatusHooksEnabled: isAgentStatusHooksEnabled(settings)
           })
         } catch (err) {
@@ -1502,7 +1585,10 @@ export function registerPtyHandlers(
         ? [...CLAUDE_AUTH_ENV_VARS, 'ANTHROPIC_CUSTOM_HEADERS']
         : undefined
       const combinedEnvToDelete = mergePtyEnvDeletions(
-        envToDelete,
+        mergePtyEnvDeletions(
+          envToDelete,
+          args.connectionId ? [] : getInheritedAgentHookEnvKeysToDelete(spawnEnv)
+        ),
         skipCodexHomeEnv ? [...CODEX_HOME_ENV_KEYS, ...CLAUDE_CONFIG_DIR_ENV_KEYS] : []
       )
       const spawnOptions: PtySpawnOptions = {
