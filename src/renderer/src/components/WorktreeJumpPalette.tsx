@@ -25,6 +25,7 @@ import { getWorktreeStatus, getWorktreeStatusLabel } from '@/lib/worktree-status
 import { activateAndRevealWorktree } from '@/lib/worktree-activation'
 import { findWorktreeById } from '@/store/slices/worktree-helpers'
 import {
+  getWorktreePaletteSearchScope,
   searchWorktrees,
   type MatchRange,
   type PaletteSearchResult
@@ -33,6 +34,7 @@ import {
   CREATE_WORKTREE_ITEM_ID,
   createWorktreePaletteRequestGuard,
   getNextWorktreePaletteSelection,
+  getWorktreePaletteSelectionItemIds,
   getWorktreePaletteCreateActionState
 } from '@/lib/worktree-palette-create-action'
 import { getWorkspacePortsByWorktreeId } from '@/lib/workspace-port-groups'
@@ -47,6 +49,22 @@ import {
   queueBrowserFocusRequest
 } from '@/components/browser-pane/browser-focus'
 import { RepoBadgeMark } from '@/components/repo/RepoBadgeLabel'
+import { useSettingsNavigationMetadata } from '@/hooks/useSettingsNavigationMetadata'
+import {
+  buildCmdJActionResults,
+  buildCmdJSettingsResults,
+  rankCmdJMiddleResults,
+  type CmdJActionResult,
+  type CmdJSettingsResult
+} from '@/components/cmd-j/palette-results'
+import {
+  buildCmdJQuickActionContext,
+  captureCmdJActiveGroupSnapshot,
+  getUnavailableQuickActionMessage,
+  type CmdJActiveGroupSnapshot
+} from '@/components/cmd-j/quick-action-context'
+import { CMD_J_QUICK_ACTIONS } from '@/components/cmd-j/quick-actions'
+import type { SettingsNavTarget } from '@/lib/settings-navigation-types'
 import type { BrowserPage, BrowserWorkspace, Worktree } from '../../../shared/types'
 import { isGitRepoKind } from '../../../shared/repo-kind'
 
@@ -63,6 +81,18 @@ type BrowserPaletteItem = {
   result: BrowserPaletteSearchResult
 }
 
+type SettingsPaletteItem = {
+  id: string
+  type: 'settings'
+  result: CmdJSettingsResult
+}
+
+type QuickActionPaletteItem = {
+  id: string
+  type: 'quick-action'
+  result: CmdJActionResult
+}
+
 type SectionHeader = {
   id: string
   type: 'section-header'
@@ -75,9 +105,20 @@ type HintRow = {
   label: string
 }
 
-type PaletteItem = WorktreePaletteItem | BrowserPaletteItem
+type CreateWorktreePaletteItem = {
+  id: typeof CREATE_WORKTREE_ITEM_ID
+  type: 'create-worktree'
+}
 
-type PaletteListEntry = PaletteItem | SectionHeader | HintRow
+// Why: Cmd+J is a fast intent surface, not a dump of every setup button.
+// Keep future quick actions curated; route one-time setup flows through Settings.
+type PaletteItem =
+  | WorktreePaletteItem
+  | SettingsPaletteItem
+  | QuickActionPaletteItem
+  | BrowserPaletteItem
+
+type PaletteListEntry = PaletteItem | CreateWorktreePaletteItem | SectionHeader | HintRow
 
 type BrowserSelection = {
   worktree: Worktree
@@ -147,10 +188,22 @@ function findBrowserSelection(
   return { page, workspace, worktree }
 }
 
+function getSettingsTargetFromSectionId(sectionId: string): {
+  pane: SettingsNavTarget
+  repoId: string | null
+} {
+  if (sectionId.startsWith('repo-')) {
+    return { pane: 'repo', repoId: sectionId.slice('repo-'.length) }
+  }
+  return { pane: sectionId as SettingsNavTarget, repoId: null }
+}
+
 export default function WorktreeJumpPalette(): React.JSX.Element | null {
   const visible = useAppStore((s) => s.activeModal === 'worktree-palette')
   const closeModal = useAppStore((s) => s.closeModal)
   const openModal = useAppStore((s) => s.openModal)
+  const openSettingsPage = useAppStore((s) => s.openSettingsPage)
+  const openSettingsTarget = useAppStore((s) => s.openSettingsTarget)
   const worktreesByRepo = useAppStore((s) => s.worktreesByRepo)
   const allWorktrees = useAllWorktrees()
   const repos = useAppStore((s) => s.repos)
@@ -175,11 +228,22 @@ export default function WorktreeJumpPalette(): React.JSX.Element | null {
   const activeBrowserTabId = useAppStore((s) => s.activeBrowserTabId)
   const browserTabsByWorktree = useAppStore((s) => s.browserTabsByWorktree)
   const browserPagesByWorkspace = useAppStore((s) => s.browserPagesByWorkspace)
+  useAppStore((s) => s.activeGroupIdByWorktree)
+  useAppStore((s) => s.groupsByWorktree)
+  useAppStore((s) => s.settings?.activeRuntimeEnvironmentId)
   const sshConnectionStates = useAppStore((s) => s.sshConnectionStates)
   const hideDefaultBranchWorkspace = useAppStore((s) => s.hideDefaultBranchWorkspace)
   const showSleepingWorkspaces = useAppStore((s) => s.showSleepingWorkspaces)
   const lastVisitedAtByWorktreeId = useAppStore((s) => s.lastVisitedAtByWorktreeId)
   const workspacePortScan = useAppStore((s) => s.workspacePortScan?.result ?? null)
+  const openNewBrowserTabInActiveWorkspace = useAppStore(
+    (s) => s.openNewBrowserTabInActiveWorkspace
+  )
+  const openNewMarkdownInActiveWorkspace = useAppStore((s) => s.openNewMarkdownInActiveWorkspace)
+  const openNewTerminalTabInActiveWorkspace = useAppStore(
+    (s) => s.openNewTerminalTabInActiveWorkspace
+  )
+  const settingsSections = useSettingsNavigationMetadata()
 
   const [query, setQuery] = useState('')
   const deferredQuery = useDeferredValue(query)
@@ -188,6 +252,7 @@ export default function WorktreeJumpPalette(): React.JSX.Element | null {
   const previousActiveTabTypeRef = useRef<'browser' | 'editor' | 'terminal'>('terminal')
   const previousBrowserPageIdRef = useRef<string | null>(null)
   const previousBrowserFocusTargetRef = useRef<'webview' | 'address-bar'>('webview')
+  const activeGroupSnapshotRef = useRef<CmdJActiveGroupSnapshot | null>(null)
   const wasVisibleRef = useRef(false)
   const skipRestoreFocusRef = useRef(false)
   const prevQueryRef = useRef('')
@@ -199,17 +264,12 @@ export default function WorktreeJumpPalette(): React.JSX.Element | null {
   const canCreateWorktree = repos.length > 0
 
   const hasQuery = deferredQuery.trim().length > 0
+  const isLoading = repos.length > 0 && Object.keys(worktreesByRepo).length === 0
 
-  // Why: keep the jump palette aligned with the sidebar. Surfacing hidden
-  // default-branch or sleeping workspaces here would reintroduce entries the
-  // user asked the workspace navigation surfaces to omit.
-  // Drift warning: this check must stay in lockstep with the sidebar's
-  // filter in computeVisibleWorktreeIds (visible-worktrees.ts). Both
-  // surfaces share isDefaultBranchWorkspace so the predicate can't drift,
-  // but adding a new filter axis (e.g. a second toggle) here would need
-  // the matching change in the sidebar pipeline — otherwise Cmd+J and
-  // the sidebar will show different lists.
-  const visibleWorktrees = useMemo(
+  // Why: the empty-query palette mirrors sidebar filters so opening Search
+  // starts from the same quiet list. Typed search switches to the global
+  // non-archived scope below.
+  const emptyQueryVisibleWorktrees = useMemo(
     () =>
       allWorktrees.filter((worktree) => {
         if (worktree.isArchived) {
@@ -246,11 +306,21 @@ export default function WorktreeJumpPalette(): React.JSX.Element | null {
   const { visibleWorktreesForState, switchableWorktreesForRows } = useMemo(
     () =>
       orderEmptyQueryWorktrees({
-        visibleWorktrees,
+        visibleWorktrees: emptyQueryVisibleWorktrees,
         activeWorktreeId,
         lastVisitedAtByWorktreeId
       }),
-    [visibleWorktrees, activeWorktreeId, lastVisitedAtByWorktreeId]
+    [emptyQueryVisibleWorktrees, activeWorktreeId, lastVisitedAtByWorktreeId]
+  )
+
+  const searchScopeWorktrees = useMemo(
+    () =>
+      getWorktreePaletteSearchScope({
+        hasQuery,
+        allWorktrees,
+        emptyQueryWorktrees: switchableWorktreesForRows
+      }),
+    [allWorktrees, hasQuery, switchableWorktreesForRows]
   )
 
   // Why: typed queries still route through sortWorktreesSmart — switcher
@@ -259,7 +329,7 @@ export default function WorktreeJumpPalette(): React.JSX.Element | null {
     () =>
       hasQuery
         ? sortWorktreesSmart(
-            visibleWorktrees,
+            searchScopeWorktrees,
             tabsByWorktree,
             repoMap,
             agentStatusByPaneKey,
@@ -268,11 +338,10 @@ export default function WorktreeJumpPalette(): React.JSX.Element | null {
             migrationUnsupportedByPtyId,
             terminalLayoutsByTabId
           )
-        : switchableWorktreesForRows,
+        : searchScopeWorktrees,
     [
       hasQuery,
-      visibleWorktrees,
-      switchableWorktreesForRows,
+      searchScopeWorktrees,
       tabsByWorktree,
       repoMap,
       agentStatusByPaneKey,
@@ -407,6 +476,61 @@ export default function WorktreeJumpPalette(): React.JSX.Element | null {
     [browserMatches]
   )
 
+  const settingsResults = useMemo(
+    () => buildCmdJSettingsResults(settingsSections),
+    [settingsSections]
+  )
+  const actionResults = useMemo(() => buildCmdJActionResults(CMD_J_QUICK_ACTIONS), [])
+
+  const openCreateWorkspaceAction = useCallback(() => {
+    queueMicrotask(() =>
+      openModal('new-workspace-composer', { telemetrySource: 'command_palette' })
+    )
+  }, [openModal])
+
+  const openAddQuickCommandAction = useCallback(() => {
+    openSettingsTarget({ pane: 'quick-commands', repoId: null, intent: 'add-quick-command' })
+    openSettingsPage()
+  }, [openSettingsPage, openSettingsTarget])
+
+  const buildQuickActionContext = useCallback(
+    () =>
+      buildCmdJQuickActionContext({
+        state: useAppStore.getState(),
+        activeGroupSnapshot: activeGroupSnapshotRef.current,
+        openNewBrowserTab: openNewBrowserTabInActiveWorkspace,
+        openNewMarkdownFile: openNewMarkdownInActiveWorkspace,
+        openNewTerminalTab: openNewTerminalTabInActiveWorkspace,
+        openCreateWorkspace: openCreateWorkspaceAction,
+        openAddQuickCommand: openAddQuickCommandAction
+      }),
+    [
+      openAddQuickCommandAction,
+      openCreateWorkspaceAction,
+      openNewBrowserTabInActiveWorkspace,
+      openNewMarkdownInActiveWorkspace,
+      openNewTerminalTabInActiveWorkspace
+    ]
+  )
+
+  const quickActionContext = buildQuickActionContext()
+
+  const middleItems = useMemo<(SettingsPaletteItem | QuickActionPaletteItem)[]>(
+    () =>
+      rankCmdJMiddleResults({
+        query: deferredQuery,
+        settingsResults,
+        actionResults: actionResults.filter(
+          (action) => action.isAvailable(quickActionContext).available
+        )
+      }).map((result) =>
+        result.kind === 'settings'
+          ? { id: result.id, type: 'settings' as const, result }
+          : { id: `quick-action:${result.id}`, type: 'quick-action' as const, result }
+      ),
+    [actionResults, deferredQuery, quickActionContext, settingsResults]
+  )
+
   // Why: on empty query we cap the worktree section (not browser tabs) so the
   // BROWSER TABS header + ≥1 page row stays visible above the fold — users
   // with 30+ worktrees would otherwise never see browser pages. The cap is
@@ -418,35 +542,69 @@ export default function WorktreeJumpPalette(): React.JSX.Element | null {
   const EMPTY_QUERY_WORKTREE_CAP = 5
   const EMPTY_QUERY_BROWSER_CAP = 5
 
-  const listEntries = useMemo<PaletteListEntry[]>(() => {
-    const entries: PaletteListEntry[] = []
-
+  const paletteSections = useMemo(() => {
     // Why: the worktree cap only earns its keep when there are browser tabs
     // to protect above-the-fold. With zero browser pages, capping would force
     // the user to type for no reason — uncap so the recent list fills the
     // viewport naturally.
     const worktreeCap = !hasQuery && browserItems.length > 0 ? EMPTY_QUERY_WORKTREE_CAP : Infinity
     const visibleWorktreeItems = hasQuery ? worktreeItems : worktreeItems.slice(0, worktreeCap)
+    const visibleMiddleItems = hasQuery ? middleItems : []
     const visibleBrowserItems = hasQuery
       ? browserItems
       : browserItems.slice(0, EMPTY_QUERY_BROWSER_CAP)
+    const showWorktreeHint = !hasQuery && worktreeItems.length > worktreeCap
+
+    return {
+      visibleWorktreeItems,
+      visibleMiddleItems,
+      visibleBrowserItems,
+      showWorktreeHint
+    }
+  }, [worktreeItems, middleItems, browserItems, hasQuery])
+
+  const selectableItems = useMemo<PaletteItem[]>(
+    () => [
+      ...paletteSections.visibleWorktreeItems,
+      ...paletteSections.visibleMiddleItems,
+      ...paletteSections.visibleBrowserItems
+    ],
+    [paletteSections]
+  )
+
+  const { createWorktreeName, showCreateAction } = useMemo(
+    () =>
+      getWorktreePaletteCreateActionState({
+        canCreateWorktree,
+        query: deferredQuery
+      }),
+    [canCreateWorktree, deferredQuery]
+  )
+
+  const listEntries = useMemo<PaletteListEntry[]>(() => {
+    const entries: PaletteListEntry[] = []
+    const { visibleWorktreeItems, visibleMiddleItems, visibleBrowserItems, showWorktreeHint } =
+      paletteSections
+    const visibleWorkspaceItemCount = visibleWorktreeItems.length + (showCreateAction ? 1 : 0)
+    const populatedSectionCount = [
+      visibleWorkspaceItemCount,
+      visibleMiddleItems.length,
+      visibleBrowserItems.length
+    ].filter((count) => count > 0).length
 
     // Header rule: on empty query each section is categorically distinct
     // (worktrees vs. tabs), so a lone header is a useful signpost. On query,
     // suppress headers unless both sections are populated — otherwise a lone
     // header above one list is noise.
     const showWorktreeHeader = hasQuery
-      ? visibleWorktreeItems.length > 0 && visibleBrowserItems.length > 0
+      ? visibleWorkspaceItemCount > 0 && populatedSectionCount > 1
       : visibleWorktreeItems.length > 0
     const showBrowserHeader = hasQuery
-      ? visibleWorktreeItems.length > 0 && visibleBrowserItems.length > 0
+      ? visibleBrowserItems.length > 0 && populatedSectionCount > 1
       : visibleBrowserItems.length > 0
+    const showMiddleHeader = hasQuery && visibleMiddleItems.length > 0 && populatedSectionCount > 1
 
-    // Why: only surface the hint when there's actually something hidden,
-    // otherwise the row would be a lie.
-    const showWorktreeHint = !hasQuery && worktreeItems.length > worktreeCap
-
-    if (visibleWorktreeItems.length > 0) {
+    if (visibleWorkspaceItemCount > 0) {
       if (showWorktreeHeader) {
         entries.push({
           id: '__header_worktrees__',
@@ -455,6 +613,11 @@ export default function WorktreeJumpPalette(): React.JSX.Element | null {
         })
       }
       entries.push(...visibleWorktreeItems)
+      if (showCreateAction) {
+        // Why: the typed create affordance is workspace-scoped, so keep it
+        // directly under workspace matches instead of after actions/tabs.
+        entries.push({ id: CREATE_WORKTREE_ITEM_ID, type: 'create-worktree' })
+      }
       if (showWorktreeHint) {
         entries.push({
           id: '__hint_worktree_cap__',
@@ -462,6 +625,16 @@ export default function WorktreeJumpPalette(): React.JSX.Element | null {
           label: `Type to see all ${worktreeItems.length} workspaces`
         })
       }
+    }
+    if (visibleMiddleItems.length > 0) {
+      if (showMiddleHeader) {
+        entries.push({
+          id: '__header_actions_settings__',
+          type: 'section-header',
+          label: 'Actions & Settings'
+        })
+      }
+      entries.push(...visibleMiddleItems)
     }
     if (visibleBrowserItems.length > 0) {
       if (showBrowserHeader) {
@@ -474,37 +647,29 @@ export default function WorktreeJumpPalette(): React.JSX.Element | null {
       entries.push(...visibleBrowserItems)
     }
     return entries
-  }, [worktreeItems, browserItems, hasQuery])
+  }, [hasQuery, paletteSections, showCreateAction, worktreeItems.length])
 
-  const selectableItems = useMemo<PaletteItem[]>(
-    () =>
-      listEntries.filter((e): e is PaletteItem => e.type !== 'section-header' && e.type !== 'hint'),
+  const selectionItemIds = useMemo(
+    () => getWorktreePaletteSelectionItemIds(listEntries),
     [listEntries]
   )
 
-  const selectableItemIds = useMemo(() => selectableItems.map((item) => item.id), [selectableItems])
-
-  const { createWorktreeName, showCreateAction } = useMemo(
-    () =>
-      getWorktreePaletteCreateActionState({
-        canCreateWorktree,
-        query: deferredQuery,
-        selectableItemIds
-      }),
-    [canCreateWorktree, deferredQuery, selectableItemIds]
-  )
-
-  const isLoading = repos.length > 0 && Object.keys(worktreesByRepo).length === 0
   // Why: empty-state / "has any worktrees?" uses the full visible list
   // (including current) so the palette never claims to be empty just
   // because the only visible worktree is the currently active one.
   // See docs/cmd-j-empty-query-ordering.md.
   const hasAnyWorktrees = visibleWorktreesForState.length > 0
+  const hasAnySearchableWorktrees = hasQuery ? searchScopeWorktrees.length > 0 : hasAnyWorktrees
   const hasAnyBrowserPages = browserPageEntries.length > 0
+  const hasAnyMiddleResults = middleItems.length > 0
 
   useEffect(() => {
     if (visible && !wasVisibleRef.current) {
       createLookupGuard.invalidate()
+      activeGroupSnapshotRef.current = captureCmdJActiveGroupSnapshot(
+        useAppStore.getState(),
+        activeWorktreeId
+      )
       previousWorktreeIdRef.current = activeWorktreeId
       previousActiveTabTypeRef.current = activeTabType
       previousBrowserPageIdRef.current =
@@ -536,6 +701,7 @@ export default function WorktreeJumpPalette(): React.JSX.Element | null {
       } else {
         createLookupGuard.invalidate()
       }
+      activeGroupSnapshotRef.current = null
     }
 
     wasVisibleRef.current = visible
@@ -558,7 +724,7 @@ export default function WorktreeJumpPalette(): React.JSX.Element | null {
     const nextSelectedItemId = getNextWorktreePaletteSelection({
       currentSelectedItemId: selectedItemId,
       queryChanged,
-      selectableItemIds,
+      selectableItemIds: selectionItemIds,
       showCreateAction
     })
     if (queryChanged) {
@@ -570,7 +736,7 @@ export default function WorktreeJumpPalette(): React.JSX.Element | null {
     if (nextSelectedItemId !== selectedItemId) {
       setSelectedItemId(nextSelectedItemId)
     }
-  }, [deferredQuery, selectedItemId, showCreateAction, visible, selectableItemIds])
+  }, [deferredQuery, selectedItemId, showCreateAction, visible, selectionItemIds])
 
   const focusFallbackSurface = useCallback(() => {
     requestAnimationFrame(() => {
@@ -674,15 +840,46 @@ export default function WorktreeJumpPalette(): React.JSX.Element | null {
     [closeModal, requestBrowserFocus]
   )
 
+  const handleSelectSettings = useCallback(
+    (result: CmdJSettingsResult) => {
+      const target = getSettingsTargetFromSectionId(result.sectionId)
+      skipRestoreFocusRef.current = true
+      closeModal()
+      setSelectedItemId('')
+      openSettingsTarget(target)
+      openSettingsPage()
+    },
+    [closeModal, openSettingsPage, openSettingsTarget]
+  )
+
+  const handleSelectQuickAction = useCallback(
+    (action: CmdJActionResult) => {
+      skipRestoreFocusRef.current = true
+      closeModal()
+      setSelectedItemId('')
+      const ctx = buildQuickActionContext()
+      void action.run(ctx).then((result) => {
+        if (result.status === 'unavailable') {
+          toast.error(getUnavailableQuickActionMessage(action.title, result.reason))
+        }
+      })
+    },
+    [buildQuickActionContext, closeModal]
+  )
+
   const handleSelectItem = useCallback(
     (item: PaletteItem) => {
       if (item.type === 'worktree') {
         handleSelectWorktree(item.worktree.id)
-      } else {
+      } else if (item.type === 'browser-page') {
         handleSelectBrowserPage(item.result)
+      } else if (item.type === 'settings') {
+        handleSelectSettings(item.result)
+      } else {
+        handleSelectQuickAction(item.result)
       }
     },
-    [handleSelectBrowserPage, handleSelectWorktree]
+    [handleSelectBrowserPage, handleSelectQuickAction, handleSelectSettings, handleSelectWorktree]
   )
 
   const handleCreateWorktree = useCallback(() => {
@@ -857,10 +1054,10 @@ export default function WorktreeJumpPalette(): React.JSX.Element | null {
 
   const resultCount = selectableItems.length
   const emptyState = (() => {
-    if ((hasAnyWorktrees || hasAnyBrowserPages) && hasQuery) {
+    if ((hasAnySearchableWorktrees || hasAnyMiddleResults || hasAnyBrowserPages) && hasQuery) {
       return {
         title: 'No results match your search',
-        subtitle: 'Try a name, branch, repo, port, comment, PR, page title, or URL.'
+        subtitle: 'Try a workspace, setting, action, page title, URL, PR, or port.'
       }
     }
     // Why: empty-query rows exclude the current worktree, so a single-worktree
@@ -870,12 +1067,12 @@ export default function WorktreeJumpPalette(): React.JSX.Element | null {
     if (!hasQuery && hasAnyWorktrees && !hasAnyBrowserPages) {
       return {
         title: 'No other worktrees to switch to',
-        subtitle: 'Type to search or create a new worktree.'
+        subtitle: 'Type to search workspaces, settings, tabs, and actions.'
       }
     }
     return {
-      title: 'No active worktrees or browser tabs',
-      subtitle: 'Create a worktree or open a page in Orca to get started.'
+      title: 'No active worktrees, settings, actions, or browser tabs',
+      subtitle: 'Create a workspace or open a page in Orca to get started.'
     }
   })()
 
@@ -887,7 +1084,7 @@ export default function WorktreeJumpPalette(): React.JSX.Element | null {
       onOpenAutoFocus={handleOpenAutoFocus}
       onCloseAutoFocus={handleCloseAutoFocus}
       title="Jump to..."
-      description="Search worktrees and browser tabs"
+      description="Search workspaces, settings, tabs, and actions"
       overlayClassName="bg-black/55 backdrop-blur-[2px]"
       contentClassName="top-[13%] w-[736px] max-w-[94vw] overflow-hidden rounded-xl border border-border/70 bg-background/96 shadow-[0_26px_84px_rgba(0,0,0,0.32)] backdrop-blur-xl"
       commandProps={{
@@ -898,7 +1095,7 @@ export default function WorktreeJumpPalette(): React.JSX.Element | null {
       }}
     >
       <CommandInput
-        placeholder={'Jump to worktree or browser tab\u2026  try "repo/worktree"'}
+        placeholder="Search workspaces, settings, tabs, and actions..."
         value={query}
         onValueChange={setQuery}
         wrapperClassName="mx-3 mt-3 rounded-lg border border-border/55 bg-muted/28 px-3.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]"
@@ -906,7 +1103,7 @@ export default function WorktreeJumpPalette(): React.JSX.Element | null {
         className="h-12 text-[14px] placeholder:text-muted-foreground/75"
       />
       <CommandList ref={listRef} className="max-h-[min(460px,62vh)] px-2.5 pb-2.5 pt-2">
-        {isLoading ? (
+        {isLoading && selectableItems.length === 0 && !showCreateAction ? (
           <PaletteState
             title="Loading jump targets"
             subtitle="Gathering your recent worktrees and open browser pages."
@@ -939,6 +1136,26 @@ export default function WorktreeJumpPalette(): React.JSX.Element | null {
                   >
                     {entry.label}
                   </div>
+                )
+              }
+
+              if (entry.type === 'create-worktree') {
+                return (
+                  <CommandItem
+                    key={entry.id}
+                    value={CREATE_WORKTREE_ITEM_ID}
+                    onSelect={handleCreateWorktree}
+                    className="group mx-0.5 mt-1 flex cursor-pointer items-center gap-3 rounded-lg border border-transparent px-3 py-1.5 text-left outline-none transition-[background-color,border-color,box-shadow] data-[selected=true]:border-border data-[selected=true]:bg-accent data-[selected=true]:text-foreground"
+                  >
+                    <div className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full border border-dashed border-border/60 bg-muted/25 text-muted-foreground/70">
+                      <Plus size={13} aria-hidden="true" />
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <div className="text-[14px] font-semibold tracking-[-0.01em] text-foreground">
+                        {`Create workspace "${createWorktreeName}"`}
+                      </div>
+                    </div>
+                  </CommandItem>
                 )
               }
 
@@ -1064,6 +1281,40 @@ export default function WorktreeJumpPalette(): React.JSX.Element | null {
                 )
               }
 
+              if (entry.type === 'settings' || entry.type === 'quick-action') {
+                const result = entry.result
+                const Icon = result.icon
+                const kindLabel = entry.type === 'settings' ? 'Settings' : 'Action'
+                return (
+                  <CommandItem
+                    key={entry.id}
+                    value={entry.id}
+                    onSelect={() => handleSelectItem(entry)}
+                    className={cn(
+                      'group mx-0.5 flex cursor-pointer items-center gap-3 rounded-lg border border-transparent px-3 py-2.5 text-left outline-none transition-[background-color,border-color,box-shadow]',
+                      'data-[selected=true]:border-border data-[selected=true]:bg-accent data-[selected=true]:text-foreground'
+                    )}
+                  >
+                    <div className="flex w-4 shrink-0 items-center justify-center self-start pt-0.5 text-muted-foreground/85">
+                      <Icon className="size-3.5" aria-hidden="true" />
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <div className="flex min-w-0 items-center gap-2">
+                        <span className="truncate text-[14px] font-semibold tracking-[-0.01em] text-foreground">
+                          {result.title}
+                        </span>
+                        <span className="shrink-0 rounded-[6px] border border-border/60 bg-background/45 px-1.5 py-px text-[9px] font-medium leading-normal text-muted-foreground/88">
+                          {kindLabel}
+                        </span>
+                      </div>
+                      <div className="mt-1 truncate text-[12px] leading-5 text-muted-foreground/88">
+                        {result.description}
+                      </div>
+                    </div>
+                  </CommandItem>
+                )
+              }
+
               const result = entry.result
               const browserWorktree = worktreeMap.get(result.worktreeId)
               const browserRepo = browserWorktree ? repoMap.get(browserWorktree.repoId) : undefined
@@ -1133,25 +1384,6 @@ export default function WorktreeJumpPalette(): React.JSX.Element | null {
                 </CommandItem>
               )
             })}
-            {showCreateAction && (
-              // Why: render the create action last so cmdk does not briefly
-              // auto-select it before our effect promotes the first real match
-              // when the query only matches browser pages.
-              <CommandItem
-                value={CREATE_WORKTREE_ITEM_ID}
-                onSelect={handleCreateWorktree}
-                className="group mx-0.5 mt-1 flex cursor-pointer items-center gap-3 rounded-lg border border-transparent px-3 py-1.5 text-left outline-none transition-[background-color,border-color,box-shadow] data-[selected=true]:border-border data-[selected=true]:bg-accent data-[selected=true]:text-foreground"
-              >
-                <div className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full border border-dashed border-border/60 bg-muted/25 text-muted-foreground/70">
-                  <Plus size={13} aria-hidden="true" />
-                </div>
-                <div className="min-w-0 flex-1">
-                  <div className="text-[14px] font-semibold tracking-[-0.01em] text-foreground">
-                    {`Create workspace "${createWorktreeName}"`}
-                  </div>
-                </div>
-              </CommandItem>
-            )}
           </>
         )}
       </CommandList>

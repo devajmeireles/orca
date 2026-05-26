@@ -62,6 +62,7 @@ import {
   markCopilotFolderTrusted,
   markCursorWorkspaceTrusted
 } from '../agent-trust-presets'
+import { applyAgentStatusHooksEnabled } from '../agent-hooks/managed-agent-hook-controls'
 import { upsertProjectTrustLevelInContent } from '../codex/config-toml-trust'
 import {
   isWindowsAbsolutePathLike,
@@ -425,6 +426,7 @@ type RuntimeStore = {
     branchPrefixCustom: string
     defaultTuiAgent?: GlobalSettings['defaultTuiAgent']
     agentCmdOverrides?: GlobalSettings['agentCmdOverrides']
+    agentStatusHooksEnabled?: GlobalSettings['agentStatusHooksEnabled']
     defaultTaskSource?: GlobalSettings['defaultTaskSource']
     defaultTaskViewPreset?: GlobalSettings['defaultTaskViewPreset']
     visibleTaskProviders?: GlobalSettings['visibleTaskProviders']
@@ -1299,6 +1301,7 @@ export class OrcaRuntimeService {
     GlobalSettings,
     | 'defaultTuiAgent'
     | 'agentCmdOverrides'
+    | 'agentStatusHooksEnabled'
     | 'defaultTaskSource'
     | 'defaultTaskViewPreset'
     | 'visibleTaskProviders'
@@ -1313,6 +1316,7 @@ export class OrcaRuntimeService {
     return {
       defaultTuiAgent: settings.defaultTuiAgent ?? null,
       agentCmdOverrides: settings.agentCmdOverrides ?? {},
+      agentStatusHooksEnabled: settings.agentStatusHooksEnabled !== false,
       defaultTaskSource: settings.defaultTaskSource ?? 'github',
       defaultTaskViewPreset: settings.defaultTaskViewPreset ?? 'issues',
       visibleTaskProviders: settings.visibleTaskProviders ?? ['github', 'gitlab', 'linear'],
@@ -1325,6 +1329,7 @@ export class OrcaRuntimeService {
   updateClientSettings(
     updates: Pick<
       Partial<GlobalSettings>,
+      | 'agentStatusHooksEnabled'
       | 'defaultTaskSource'
       | 'defaultTaskViewPreset'
       | 'defaultRepoSelection'
@@ -1335,6 +1340,7 @@ export class OrcaRuntimeService {
     GlobalSettings,
     | 'defaultTuiAgent'
     | 'agentCmdOverrides'
+    | 'agentStatusHooksEnabled'
     | 'defaultTaskSource'
     | 'defaultTaskViewPreset'
     | 'visibleTaskProviders'
@@ -1342,10 +1348,17 @@ export class OrcaRuntimeService {
     | 'defaultLinearTeamSelection'
     | 'githubProjects'
   > {
-    if (!this.store?.updateSettings) {
+    if (!this.store?.getSettings || !this.store.updateSettings) {
       throw new Error('runtime_unavailable')
     }
+    const before = this.store.getSettings().agentStatusHooksEnabled !== false
     this.store.updateSettings(updates)
+    if (
+      typeof updates.agentStatusHooksEnabled === 'boolean' &&
+      before !== updates.agentStatusHooksEnabled
+    ) {
+      applyAgentStatusHooksEnabled(updates.agentStatusHooksEnabled)
+    }
     return this.getClientSettings()
   }
 
@@ -6721,7 +6734,8 @@ export class OrcaRuntimeService {
       agent,
       draft: content,
       cmdOverrides: settings.agentCmdOverrides ?? {},
-      platform: agentLaunchPlatform
+      platform: agentLaunchPlatform,
+      useOrcaClaudeAgentStatusSettings: settings.agentStatusHooksEnabled !== false
     })
     if (draftLaunchPlan) {
       return {
@@ -6738,7 +6752,8 @@ export class OrcaRuntimeService {
       prompt: '',
       cmdOverrides: settings.agentCmdOverrides ?? {},
       platform: agentLaunchPlatform,
-      allowEmptyPromptLaunch: true
+      allowEmptyPromptLaunch: true,
+      useOrcaClaudeAgentStatusSettings: settings.agentStatusHooksEnabled !== false
     })
     if (!startupPlan) {
       return null

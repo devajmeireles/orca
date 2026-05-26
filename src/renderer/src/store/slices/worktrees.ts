@@ -1684,7 +1684,6 @@ export const createWorktreeSlice: StateCreator<AppState, [], [], WorktreeSlice> 
       const restoredFileId = s.activeFileIdByWorktree[worktreeId] ?? null
       const restoredBrowserTabId = s.activeBrowserTabIdByWorktree[worktreeId] ?? null
       const restoredTabType = s.activeTabTypeByWorktree[worktreeId] ?? 'terminal'
-      const restoredRightSidebarTab = s.rightSidebarTabByWorktree[worktreeId] ?? 'explorer'
       const activeGroupId =
         s.activeGroupIdByWorktree[worktreeId] ?? s.groupsByWorktree[worktreeId]?.[0]?.id ?? null
       const activeGroup = activeGroupId
@@ -1854,7 +1853,6 @@ export const createWorktreeSlice: StateCreator<AppState, [], [], WorktreeSlice> 
         activeFileId,
         activeBrowserTabId,
         activeTabType,
-        rightSidebarTab: restoredRightSidebarTab,
         activeTabTypeByWorktree: { ...s.activeTabTypeByWorktree, [worktreeId]: activeTabType },
         activeTabId,
         everActivatedWorktreeIds: nextEverActivated,
