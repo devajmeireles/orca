@@ -42,7 +42,7 @@ type UploadResponse = {
 export async function uploadBundle(opts: UploadBundleOptions): Promise<UploadBundleResult> {
   const bytes = Buffer.byteLength(opts.payload)
   if (bytes > MAX_BUNDLE_BYTES) {
-    throw new Error(`bundle exceeds 10 MB cap (${bytes} bytes)`)
+    throw new Error(`bundle exceeds 4 MiB cap (${bytes} bytes)`)
   }
 
   // (1) Request a token. The token endpoint is rate-limited per IP at the
