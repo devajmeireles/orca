@@ -98,11 +98,19 @@ export function buildTerminalQuickCommandInput(command: TerminalQuickCommand): s
 }
 
 const LINE_BREAK_RE = /\r\n|\r|\n/
+// Why: heredocs, line-continuation backslashes, and shell block keywords
+// require real newlines; flattening them with '; ' produces shell syntax
+// errors. Preserve the original text in those cases.
+const SHELL_STRUCTURE_RE =
+  /<<-?\s*['"]?\w|\\(?:\r\n|\r|\n)|(?:^|\r\n|\r|\n)\s*(?:if|then|elif|else|fi|for|while|until|do|done|case|esac)\b/
 
 // Why: quick-command lines are independent shell commands; one shell command
 // list prevents foreground programs from reading later lines as stdin.
 export function flattenTerminalQuickCommand(command: TerminalQuickCommand): TerminalQuickCommand {
   if (!LINE_BREAK_RE.test(command.command)) {
+    return command
+  }
+  if (SHELL_STRUCTURE_RE.test(command.command)) {
     return command
   }
   return {
