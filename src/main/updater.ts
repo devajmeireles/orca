@@ -19,7 +19,10 @@ import {
   isPrereleaseVersion,
   statusesEqual
 } from './updater-fallback'
-import { fetchNewerReleaseTags, getReleaseDownloadUrl } from './updater-prerelease-feed'
+import {
+  fetchNewerReleaseTagsWithReadiness,
+  getReleaseDownloadUrl
+} from './updater-prerelease-feed'
 import { fetchNudge, shouldApplyNudge } from './updater-nudge'
 
 type CheckFailureSource = 'event' | 'promise' | 'fallback-promise'
@@ -436,11 +439,15 @@ async function pinDefaultReleaseFeed(): Promise<void> {
   // newer RC or the next stable. Stable users should only resolve stable tags.
   const currentVersion = app.getVersion()
   const includePrerelease = includePrereleaseActive || isPrereleaseVersion(currentVersion)
-  const releaseTags = await fetchNewerReleaseTags(currentVersion, includePrerelease ? 2 : 1, {
-    includePrerelease
-  })
-  const newerTag = releaseTags[0] ?? null
-  const fallbackTag = includePrerelease ? (releaseTags[1] ?? null) : null
+  const releaseTagsResult = await fetchNewerReleaseTagsWithReadiness(
+    currentVersion,
+    includePrerelease ? 2 : 1,
+    {
+      includePrerelease
+    }
+  )
+  const newerTag = releaseTagsResult.tags[0] ?? null
+  const fallbackTag = includePrerelease ? (releaseTagsResult.tags[1] ?? null) : null
   pendingPrereleaseFallback =
     includePrerelease && newerTag && fallbackTag
       ? {
@@ -466,6 +473,12 @@ async function pinDefaultReleaseFeed(): Promise<void> {
       `[updater] release feed pinned: current=${currentVersion} includePrerelease=${includePrerelease} → ${url}`
     )
     autoUpdater.setFeedURL({ provider: 'generic', url })
+  } else if (releaseTagsResult.state === 'not-ready') {
+    clearPrereleaseFallbackContext()
+    console.info(
+      `[updater] release feed deferred: current=${currentVersion} includePrerelease=${includePrerelease}; newest release assets are still publishing`
+    )
+    throw new Error('Latest release assets are still publishing')
   } else {
     clearPrereleaseFallbackContext()
     const url = 'https://github.com/stablyai/orca/releases/latest/download'

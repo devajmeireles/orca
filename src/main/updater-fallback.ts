@@ -79,6 +79,7 @@ export function isBenignCheckFailure(message: string): boolean {
   // During that window electron-updater may fail the check even though
   // nothing is wrong on the client side.
   return (
+    normalizedMessage.includes('latest release assets are still publishing') ||
     isGitHubReleaseTransitionFailure(normalizedMessage) ||
     normalizedMessage.includes('no published versions on github')
   )

@@ -131,7 +131,12 @@ const { fetchNewerReleaseTagsMock } = vi.hoisted(() => ({
 }))
 
 vi.mock('./updater-prerelease-feed', () => ({
-  fetchNewerReleaseTags: fetchNewerReleaseTagsMock,
+  fetchNewerReleaseTagsWithReadiness: async (...args: unknown[]) => {
+    const result = await fetchNewerReleaseTagsMock(...args)
+    return Array.isArray(result)
+      ? { tags: result, state: result.length > 0 ? 'ready' : 'no-newer' }
+      : result
+  },
   getReleaseDownloadUrl: (tag: string) =>
     `https://github.com/stablyai/orca/releases/download/${tag}`
 }))
@@ -893,6 +898,73 @@ describe('updater', () => {
     expect(autoUpdaterMock.setFeedURL).toHaveBeenLastCalledWith({
       provider: 'generic',
       url: 'https://github.com/stablyai/orca/releases/latest/download'
+    })
+  })
+
+  it('does not fall back to the moving latest feed when newer release assets are still publishing', async () => {
+    appMock.getVersion.mockReturnValue('1.4.26')
+    fetchNewerReleaseTagsMock.mockResolvedValue({ tags: [], state: 'not-ready' })
+    autoUpdaterMock.checkForUpdates.mockResolvedValue(undefined)
+
+    const sendMock = vi.fn()
+    const mainWindow = { webContents: { send: sendMock } }
+
+    const { setupAutoUpdater, checkForUpdatesFromMenu } = await import('./updater')
+
+    setupAutoUpdater(mainWindow as never, { getLastUpdateCheckAt: () => Date.now() })
+    const setupFeedUrlCalls = autoUpdaterMock.setFeedURL.mock.calls.length
+
+    checkForUpdatesFromMenu()
+
+    await vi.waitFor(() => {
+      const statuses = sendMock.mock.calls
+        .filter(([channel]) => channel === 'updater:status')
+        .map(([, status]) => status)
+      expect(statuses).toContainEqual(
+        expect.objectContaining({
+          state: 'error',
+          userInitiated: true,
+          message: expect.stringContaining("Couldn't reach the update server")
+        })
+      )
+    })
+    expect(autoUpdaterMock.checkForUpdates).not.toHaveBeenCalled()
+    expect(autoUpdaterMock.setFeedURL.mock.calls.length).toBe(setupFeedUrlCalls)
+  })
+
+  it('keeps background checks retryable while newer release assets are still publishing', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-05-24T21:40:00Z'))
+    appMock.getVersion.mockReturnValue('1.4.26')
+    fetchNewerReleaseTagsMock
+      .mockResolvedValueOnce({ tags: [], state: 'not-ready' })
+      .mockResolvedValueOnce(['v1.4.27'])
+    autoUpdaterMock.checkForUpdates.mockResolvedValue(undefined)
+    const setLastUpdateCheckAt = vi.fn()
+    const sendMock = vi.fn()
+    const mainWindow = { webContents: { send: sendMock } }
+
+    const { setupAutoUpdater } = await import('./updater')
+
+    setupAutoUpdater(mainWindow as never, {
+      getLastUpdateCheckAt: () => null,
+      setLastUpdateCheckAt
+    })
+
+    await vi.waitFor(() => {
+      expect(fetchNewerReleaseTagsMock).toHaveBeenCalledTimes(1)
+    })
+    expect(autoUpdaterMock.checkForUpdates).not.toHaveBeenCalled()
+    expect(setLastUpdateCheckAt).not.toHaveBeenCalled()
+
+    await vi.advanceTimersByTimeAsync(60 * 60 * 1000)
+
+    await vi.waitFor(() => {
+      expect(autoUpdaterMock.checkForUpdates).toHaveBeenCalledTimes(1)
+    })
+    expect(autoUpdaterMock.setFeedURL).toHaveBeenLastCalledWith({
+      provider: 'generic',
+      url: 'https://github.com/stablyai/orca/releases/download/v1.4.27'
     })
   })
 

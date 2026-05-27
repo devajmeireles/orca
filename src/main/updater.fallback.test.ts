@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   compareVersions,
+  isBenignCheckFailure,
   isMissingUpdateManifestFailure,
   isPrereleaseVersion
 } from './updater-fallback'
@@ -39,5 +40,11 @@ describe('isMissingUpdateManifestFailure', () => {
     ).toBe(true)
     expect(isMissingUpdateManifestFailure('net::ERR_FAILED')).toBe(false)
     expect(isMissingUpdateManifestFailure('Unable to find latest version on GitHub')).toBe(false)
+  })
+})
+
+describe('isBenignCheckFailure', () => {
+  it('treats in-progress release asset publication as retryable', () => {
+    expect(isBenignCheckFailure('Latest release assets are still publishing')).toBe(true)
   })
 })
