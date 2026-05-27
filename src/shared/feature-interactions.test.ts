@@ -9,7 +9,6 @@ import {
 describe('feature interactions', () => {
   it('defines local interaction semantics for product education features', () => {
     const expectedIds: FeatureInteractionId[] = [
-      'right-sidebar',
       'workspace-board',
       'browser',
       'tasks',

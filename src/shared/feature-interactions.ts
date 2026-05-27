@@ -1,5 +1,4 @@
 export type FeatureInteractionId =
-  | 'right-sidebar'
   | 'workspace-board'
   | 'browser'
   | 'tasks'
@@ -25,10 +24,6 @@ export type FeatureInteractionState = Partial<
 // Why: education state has three separate meanings; see
 // docs/reference/feature-education-state.md before adding or reusing ids here.
 export const FEATURE_INTERACTIONS = [
-  {
-    id: 'right-sidebar',
-    interaction: 'right sidebar opened'
-  },
   {
     id: 'workspace-board',
     interaction: 'workspace board opened'

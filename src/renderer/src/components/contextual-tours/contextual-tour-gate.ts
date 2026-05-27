@@ -21,9 +21,13 @@ export type ContextualTourRequestDecision =
         | 'missing-start-target'
     }
 
+export type ContextualTourPanelPlacement = 'top' | 'right' | 'bottom' | 'left'
+
 export type ContextualTourPanelPosition = {
   left: number
   top: number
+  placement: ContextualTourPanelPlacement
+  arrowOffset: number
 }
 
 type ViewportSize = {
@@ -123,6 +127,22 @@ export function getNextVisibleContextualTourStepIndex(args: {
   )
 }
 
+export function getPreviousVisibleContextualTourStepIndex(args: {
+  tour: ContextualTour
+  currentStepIndex: number
+  targetExists: (selector: string) => boolean
+}): number | null {
+  const visible = getVisibleContextualTourStepIndexes(args.tour, args.targetExists)
+  let prev: number | null = null
+  for (const index of visible) {
+    if (index >= args.currentStepIndex) {
+      break
+    }
+    prev = index
+  }
+  return prev
+}
+
 export function getContextualTourRequestDecision(args: {
   tour: ContextualTour
   persistedUIReady: boolean
@@ -178,6 +198,13 @@ export function getContextualTourStepProgress(args: {
   return { current: visibleIndex + 1, total: args.visibleStepIndexes.length }
 }
 
+export function getContextualTourOutcomeStepTotal(
+  visibleStepIndexes: readonly number[],
+  fallback = 1
+): number {
+  return visibleStepIndexes.length > 0 ? visibleStepIndexes.length : fallback
+}
+
 export function clampContextualTourPanelPosition(args: {
   targetRect: Pick<DOMRect, 'left' | 'right' | 'top' | 'bottom' | 'width' | 'height'>
   viewport: ViewportSize
@@ -193,28 +220,51 @@ export function clampContextualTourPanelPosition(args: {
   const roomBelow = viewport.height - targetRect.bottom
   const roomAbove = targetRect.top
 
+  let placement: ContextualTourPanelPlacement
   let left: number
   let top: number
   if (roomRight >= panel.width + gap || roomRight >= roomLeft) {
+    placement = 'right'
     left = targetRect.right + gap
-    top = targetRect.top
+    top = targetRect.top + targetRect.height / 2 - panel.height / 2
   } else {
+    placement = 'left'
     left = targetRect.left - panel.width - gap
-    top = targetRect.top
+    top = targetRect.top + targetRect.height / 2 - panel.height / 2
   }
 
   if (roomRight < panel.width + gap && roomLeft < panel.width + gap) {
     left = targetRect.left + targetRect.width / 2 - panel.width / 2
-    top =
-      roomBelow >= panel.height + gap || roomBelow >= roomAbove
-        ? targetRect.bottom + gap
-        : targetRect.top - panel.height - gap
+    if (roomBelow >= panel.height + gap || roomBelow >= roomAbove) {
+      placement = 'bottom'
+      top = targetRect.bottom + gap
+    } else {
+      placement = 'top'
+      top = targetRect.top - panel.height - gap
+    }
   }
 
-  return {
-    left: clampNumber(left, margin, Math.max(margin, viewport.width - panel.width - margin)),
-    top: clampNumber(top, margin, Math.max(margin, viewport.height - panel.height - margin))
-  }
+  const clampedLeft = clampNumber(
+    left,
+    margin,
+    Math.max(margin, viewport.width - panel.width - margin)
+  )
+  const clampedTop = clampNumber(
+    top,
+    margin,
+    Math.max(margin, viewport.height - panel.height - margin)
+  )
+
+  // Arrow offset along the panel edge, pointed at the target's center.
+  const targetCenterX = targetRect.left + targetRect.width / 2
+  const targetCenterY = targetRect.top + targetRect.height / 2
+  const arrowMargin = 16
+  const arrowOffset =
+    placement === 'top' || placement === 'bottom'
+      ? clampNumber(targetCenterX - clampedLeft, arrowMargin, panel.width - arrowMargin)
+      : clampNumber(targetCenterY - clampedTop, arrowMargin, panel.height - arrowMargin)
+
+  return { left: clampedLeft, top: clampedTop, placement, arrowOffset }
 }
 
 export function getContextualTourStepCopy(step: ContextualTourStep): string {

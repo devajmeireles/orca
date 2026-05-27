@@ -943,6 +943,30 @@ describe('createUISlice contextual tours', () => {
     expect(store.getState().contextualToursSeenIds).toEqual([])
   })
 
+  it('stores whether the feature was interacted with before the tour request', () => {
+    const store = createUIStore()
+    const tasksFirstSelector = '[data-contextual-tour-target="tasks-source-filters"]'
+    stubContextualTourTargets([tasksFirstSelector])
+    store.getState().hydratePersistedUI(makeAutoTourEligibleUI())
+
+    store.getState().recordFeatureInteraction('tasks')
+    store.getState().requestContextualTour('tasks', 'tasks_open')
+
+    expect(store.getState().activeContextualTourWasFeaturePreviouslyInteracted).toBe(true)
+  })
+
+  it('lets the caller preserve the pre-enable interaction snapshot for telemetry', () => {
+    const store = createUIStore()
+    const tasksFirstSelector = '[data-contextual-tour-target="tasks-source-filters"]'
+    stubContextualTourTargets([tasksFirstSelector])
+    store.getState().hydratePersistedUI(makeAutoTourEligibleUI())
+
+    store.getState().recordFeatureInteraction('tasks')
+    store.getState().requestContextualTour('tasks', 'tasks_open', false)
+
+    expect(store.getState().activeContextualTourWasFeaturePreviouslyInteracted).toBe(false)
+  })
+
   it('does not mark seen when the required first target is absent', () => {
     const store = createUIStore()
     stubContextualTourTargets([])
@@ -994,7 +1018,7 @@ describe('createUISlice contextual tours', () => {
     expect(store.getState().activeContextualTourId).toBe('workspace-creation')
   })
 
-  it('advances across visible steps and closes when no later target remains', () => {
+  it('advances across visible steps and leaves completion to the overlay', () => {
     const store = createUIStore()
     const visibleSelectors = [
       '[data-contextual-tour-target="browser-address"], [data-orca-browser-address-bar="true"]',
@@ -1008,7 +1032,25 @@ describe('createUISlice contextual tours', () => {
     expect(store.getState().activeContextualTourStepIndex).toBe(2)
 
     store.getState().advanceContextualTour()
-    expect(store.getState().activeContextualTourId).toBeNull()
+    expect(store.getState().activeContextualTourId).toBe('browser')
+    expect(store.getState().activeContextualTourStepIndex).toBe(2)
+  })
+
+  it('marks the active contextual tour suppressed when its owning source disables', () => {
+    const store = createUIStore()
+    store.setState({
+      activeContextualTourId: 'browser',
+      activeContextualTourStepIndex: 0,
+      activeContextualTourSource: 'browser_visible',
+      activeContextualTourWasFeaturePreviouslyInteracted: false,
+      contextualTourShownThisSession: true
+    })
+
+    store.getState().suppressContextualTour('tasks', 'tasks_open')
+    expect(store.getState().activeContextualTourSuppressed).toBe(false)
+
+    store.getState().suppressContextualTour('browser', 'browser_visible')
+    expect(store.getState().activeContextualTourSuppressed).toBe(true)
   })
 
   it('cancels a not-yet-rendered tour without persistence churn', () => {

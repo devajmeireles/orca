@@ -4,11 +4,14 @@ import {
   clampContextualTourPanelPosition,
   getContextualTourRequestDecision,
   getContextualTourStepProgress,
+  getContextualTourOutcomeStepTotal,
   getMeasurableContextualTourTarget,
   getNextVisibleContextualTourStepIndex,
+  getPreviousVisibleContextualTourStepIndex,
   getVisibleContextualTourStepIndexes,
   isContextualTourAllowedForModal
 } from './contextual-tour-gate'
+import { getContextualTourPanelCssPosition } from './contextual-tour-panel-position'
 
 describe('contextual tour gate', () => {
   it('allows workspace creation only over its own creation modals', () => {
@@ -221,10 +224,26 @@ describe('contextual tour gate', () => {
         targetExists
       })
     ).toBe(2)
+    expect(
+      getPreviousVisibleContextualTourStepIndex({
+        tour,
+        currentStepIndex: 2,
+        targetExists
+      })
+    ).toBe(0)
+    expect(
+      getPreviousVisibleContextualTourStepIndex({
+        tour,
+        currentStepIndex: 0,
+        targetExists
+      })
+    ).toBeNull()
     expect(getContextualTourStepProgress({ visibleStepIndexes, stepIndex: 2 })).toEqual({
       current: 2,
       total: 2
     })
+    expect(getContextualTourOutcomeStepTotal(visibleStepIndexes)).toBe(2)
+    expect(getContextualTourOutcomeStepTotal([])).toBe(1)
   })
 
   it('clamps the panel inside narrow viewports', () => {
@@ -245,5 +264,52 @@ describe('contextual tour gate', () => {
     expect(position.top).toBeGreaterThanOrEqual(12)
     expect(position.left).toBeLessThanOrEqual(12)
     expect(position.top).toBeLessThanOrEqual(48)
+  })
+
+  it('places the panel to the right when room allows and aims the arrow at target center', () => {
+    const position = clampContextualTourPanelPosition({
+      targetRect: { left: 100, right: 200, top: 200, bottom: 240, width: 100, height: 40 },
+      viewport: { width: 1024, height: 768 },
+      panel: { width: 320, height: 180 }
+    })
+
+    expect(position.placement).toBe('right')
+    // panel is positioned to the right of the target, vertically centered;
+    // arrow should sit near the panel's vertical center pointing at the target's center
+    expect(position.left).toBe(212)
+    expect(position.arrowOffset).toBeGreaterThan(60)
+    expect(position.arrowOffset).toBeLessThan(120)
+  })
+
+  it('converts viewport panel coordinates into hosted dialog coordinates', () => {
+    const position = {
+      left: 838,
+      top: 168,
+      placement: 'right' as const,
+      arrowOffset: 64
+    }
+
+    expect(
+      getContextualTourPanelCssPosition({
+        position,
+        panelHostRect: { left: 500, top: 80 }
+      })
+    ).toEqual({ left: 338, top: 88, arrowOffset: 64 })
+    expect(getContextualTourPanelCssPosition({ position })).toEqual({
+      left: 838,
+      top: 168,
+      arrowOffset: 64
+    })
+  })
+
+  it('flips below the target when neither side has horizontal room', () => {
+    const position = clampContextualTourPanelPosition({
+      targetRect: { left: 60, right: 260, top: 40, bottom: 80, width: 200, height: 40 },
+      viewport: { width: 320, height: 600 },
+      panel: { width: 304, height: 160 }
+    })
+
+    expect(position.placement).toBe('bottom')
+    expect(position.top).toBeGreaterThanOrEqual(80 + 12)
   })
 })

@@ -460,9 +460,6 @@ function App(): React.JSX.Element {
     // first-run user cannot have a tour marked seen before onboarding appears.
     const suppressTours = !onboardingLoaded || shouldShowOnboarding(onboarding)
     actions.setContextualToursOnboardingVisible(suppressTours)
-    if (suppressTours) {
-      actions.cancelContextualTour()
-    }
   }, [actions, onboarding, onboardingLoaded])
 
   useEffect(() => {

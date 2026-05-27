@@ -3,7 +3,6 @@ import { FEATURE_INTERACTION_IDS } from '../../../src/shared/feature-interaction
 
 const SEEN_FIRST_RUN_FEATURE_TIP_IDS = ['voice-dictation'] as const
 const SEEN_FIRST_RUN_CONTEXTUAL_TOUR_IDS = [
-  'right-sidebar',
   'workspace-board',
   'browser',
   'tasks',

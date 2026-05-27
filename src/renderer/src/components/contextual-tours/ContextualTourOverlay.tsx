@@ -1,6 +1,14 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type JSX } from 'react'
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+  type JSX
+} from 'react'
 import { useAppStore } from '@/store'
-import { hasFeatureInteraction } from '../../../../shared/feature-interactions'
 import { getContextualTour, type ContextualTourId } from '../../../../shared/contextual-tours'
 import type { ContextualTourOutcome } from '../../../../shared/feature-education-telemetry'
 import {
@@ -11,11 +19,13 @@ import {
   clampContextualTourPanelPosition,
   getContextualTourStepCopy,
   getContextualTourStepProgress,
+  getContextualTourOutcomeStepTotal,
   getMeasurableContextualTourTarget,
   getContextualTourPanelHost,
   getVisibleContextualTourStepIndexes,
   isContextualTourAllowedForModal
 } from './contextual-tour-gate'
+import { getContextualTourPanelCssPosition } from './contextual-tour-panel-position'
 import {
   ContextualTourOverlaySurface,
   getContextualTourFocusableElements,
@@ -29,11 +39,16 @@ export function ContextualTourOverlay(): JSX.Element | null {
   const activeTourId = useAppStore((s) => s.activeContextualTourId)
   const activeStepIndex = useAppStore((s) => s.activeContextualTourStepIndex)
   const activeTourSource = useAppStore((s) => s.activeContextualTourSource)
+  const wasFeaturePreviouslyInteracted = useAppStore(
+    (s) => s.activeContextualTourWasFeaturePreviouslyInteracted
+  )
   const activeModal = useAppStore((s) => s.activeModal)
+  const onboardingVisible = useAppStore((s) => s.contextualToursOnboardingVisible)
   const blockingSurfaceVisible = useAppStore((s) => s.contextualToursBlockingSurfaceVisible)
-  const featureInteractions = useAppStore((s) => s.featureInteractions)
+  const activeTourSuppressed = useAppStore((s) => s.activeContextualTourSuppressed)
   const markContextualToursSeen = useAppStore((s) => s.markContextualToursSeen)
   const advanceContextualTour = useAppStore((s) => s.advanceContextualTour)
+  const regressContextualTour = useAppStore((s) => s.regressContextualTour)
   const dismissContextualTour = useAppStore((s) => s.dismissContextualTour)
   const completeContextualTour = useAppStore((s) => s.completeContextualTour)
   const cancelContextualTour = useAppStore((s) => s.cancelContextualTour)
@@ -46,6 +61,7 @@ export function ContextualTourOverlay(): JSX.Element | null {
   const telemetryTourIdRef = useRef<ContextualTourId | null>(null)
   const telemetryOutcomeSentRef = useRef(false)
   const telemetryStepsSeenRef = useRef<Set<number>>(new Set())
+  const telemetryTotalStepsRef = useRef(1)
 
   const activeTour = useMemo(
     () => (activeTourId ? getContextualTour(activeTourId) : null),
@@ -67,17 +83,20 @@ export function ContextualTourOverlay(): JSX.Element | null {
         source: activeTourSource,
         outcome,
         stepsSeen: telemetryStepsSeenRef.current.size,
-        totalSteps: activeTour?.steps.length ?? 1
+        totalSteps: telemetryTotalStepsRef.current
       })
     },
-    [activeTour, activeTourId, activeTourSource]
+    [activeTourId, activeTourSource]
   )
 
-  useEffect(() => {
+  useLayoutEffect(() => {
+    // Why: reset before the measurement layout effect below, otherwise the
+    // first passive effect can hide a freshly measured tour until the next tick.
     markedTourIdRef.current = null
     telemetryTourIdRef.current = null
     telemetryOutcomeSentRef.current = false
     telemetryStepsSeenRef.current = new Set()
+    telemetryTotalStepsRef.current = 1
     setRenderState(null)
   }, [activeTourId])
 
@@ -85,17 +104,24 @@ export function ContextualTourOverlay(): JSX.Element | null {
     if (!activeTour || !activeTourId) {
       return
     }
-    if (blockingSurfaceVisible || !isContextualTourAllowedForModal(activeTour, activeModal)) {
+    if (
+      onboardingVisible ||
+      blockingSurfaceVisible ||
+      activeTourSuppressed ||
+      !isContextualTourAllowedForModal(activeTour, activeModal)
+    ) {
       emitContextualTourOutcome('cancelled')
       cancelContextualTour(activeTourId)
     }
   }, [
     activeModal,
+    activeTourSuppressed,
     activeTour,
     activeTourId,
     blockingSurfaceVisible,
     cancelContextualTour,
-    emitContextualTourOutcome
+    emitContextualTourOutcome,
+    onboardingVisible
   ])
 
   useEffect(() => {
@@ -122,6 +148,10 @@ export function ContextualTourOverlay(): JSX.Element | null {
     const targetExists = (selector: string): boolean =>
       getMeasurableContextualTourTarget(selector) !== null
     const visibleStepIndexes = getVisibleContextualTourStepIndexes(activeTour, targetExists)
+    telemetryTotalStepsRef.current = Math.max(
+      telemetryTotalStepsRef.current,
+      getContextualTourOutcomeStepTotal(visibleStepIndexes)
+    )
     const activeStep = activeTour.steps[activeStepIndex]
     const target = activeStep ? getMeasurableContextualTourTarget(activeStep.targetSelector) : null
     const progress = getContextualTourStepProgress({
@@ -130,13 +160,8 @@ export function ContextualTourOverlay(): JSX.Element | null {
     })
 
     if (visibleStepIndexes.length === 0) {
-      if (markedTourIdRef.current === activeTourId) {
-        emitContextualTourOutcome('completed')
-        completeContextualTour(activeTourId)
-      } else {
-        emitContextualTourOutcome('cancelled')
-        cancelContextualTour(activeTourId)
-      }
+      emitContextualTourOutcome('cancelled')
+      cancelContextualTour(activeTourId)
       return
     }
 
@@ -144,9 +169,6 @@ export function ContextualTourOverlay(): JSX.Element | null {
       const hasLaterStep = visibleStepIndexes.some((index) => index > activeStepIndex)
       if (hasLaterStep) {
         advanceContextualTour()
-      } else if (markedTourIdRef.current === activeTourId) {
-        emitContextualTourOutcome('completed')
-        completeContextualTour(activeTourId)
       } else {
         emitContextualTourOutcome('cancelled')
         cancelContextualTour(activeTourId)
@@ -161,6 +183,7 @@ export function ContextualTourOverlay(): JSX.Element | null {
       title: activeStep.title,
       body: getContextualTourStepCopy(activeStep),
       isLastStep: progress.current === progress.total,
+      isFirstStep: progress.current === 1,
       panelHost: getContextualTourPanelHost(target.element)
     })
   }, [
@@ -169,7 +192,6 @@ export function ContextualTourOverlay(): JSX.Element | null {
     activeTourId,
     advanceContextualTour,
     cancelContextualTour,
-    completeContextualTour,
     emitContextualTourOutcome,
     measureVersion
   ])
@@ -193,9 +215,9 @@ export function ContextualTourOverlay(): JSX.Element | null {
     trackContextualTourShown({
       tourId: activeTourId,
       source: activeTourSource,
-      wasFeaturePreviouslyInteracted: hasFeatureInteraction(featureInteractions, activeTourId)
+      wasFeaturePreviouslyInteracted
     })
-  }, [activeStepIndex, activeTourId, activeTourSource, featureInteractions, renderState])
+  }, [activeStepIndex, activeTourId, activeTourSource, renderState, wasFeaturePreviouslyInteracted])
 
   useEffect(() => {
     if (!activeTourId || !renderState) {
@@ -203,6 +225,24 @@ export function ContextualTourOverlay(): JSX.Element | null {
     }
     telemetryStepsSeenRef.current.add(activeStepIndex)
   }, [activeStepIndex, activeTourId, renderState])
+
+  useEffect(() => {
+    if (!activeTourId) {
+      return
+    }
+
+    const emitPendingCancellation = (): void => {
+      emitContextualTourOutcome('cancelled')
+    }
+
+    window.addEventListener('beforeunload', emitPendingCancellation)
+    return () => {
+      window.removeEventListener('beforeunload', emitPendingCancellation)
+      // Why: analytics expects every shown tour to have an outcome, even when
+      // the renderer closes or unmounts before the user presses Skip/Done.
+      emitPendingCancellation()
+    }
+  }, [activeTourId, emitContextualTourOutcome])
 
   useEffect(() => {
     if (!activeTourId || !renderState) {
@@ -250,25 +290,22 @@ export function ContextualTourOverlay(): JSX.Element | null {
     }
     // Why: Radix dialog/sheet content owns focus and z-index; hosting controls
     // there avoids outside-focus dismissal and keeps them above the backdrop.
+    // For hosted panels, the panel sits inside the dialog (no floating arrow
+    // / highlight rect on top), so we mark the target itself with a soft ring.
     const previousZIndex = panelHost.style.zIndex
     const targetElement =
       renderState?.targetElement instanceof HTMLElement ? renderState.targetElement : null
-    const previousOutline = targetElement?.style.outline
-    const previousOutlineOffset = targetElement?.style.outlineOffset
     const previousBoxShadow = targetElement?.style.boxShadow
     const previousBorderRadius = targetElement?.style.borderRadius
     panelHost.style.zIndex = '80'
     if (targetElement) {
-      targetElement.style.outline = '2px solid var(--ring)'
-      targetElement.style.outlineOffset = '4px'
-      targetElement.style.boxShadow = '0 0 0 2px var(--ring)'
+      targetElement.style.boxShadow =
+        '0 0 8px 0 color-mix(in srgb, var(--ring) 55%, transparent), 0 0 24px 4px color-mix(in srgb, var(--ring) 32%, transparent), 0 0 56px 16px color-mix(in srgb, var(--ring) 16%, transparent)'
       targetElement.style.borderRadius ||= 'var(--radius-md)'
     }
     return () => {
       panelHost.style.zIndex = previousZIndex
       if (targetElement) {
-        targetElement.style.outline = previousOutline ?? ''
-        targetElement.style.outlineOffset = previousOutlineOffset ?? ''
         targetElement.style.boxShadow = previousBoxShadow ?? ''
         targetElement.style.borderRadius = previousBorderRadius ?? ''
       }
@@ -287,16 +324,31 @@ export function ContextualTourOverlay(): JSX.Element | null {
   const panel = panelRect
     ? { width: panelRect.width, height: panelRect.height }
     : PANEL_FALLBACK_SIZE
-  const panelPosition = clampContextualTourPanelPosition({
+  const clamped = clampContextualTourPanelPosition({
     targetRect: renderState.rect,
     viewport,
     panel
   })
-  const highlightStyle = {
-    left: Math.max(8, renderState.rect.left - 4),
-    top: Math.max(8, renderState.rect.top - 4),
-    width: Math.max(0, Math.min(viewport.width - 16, renderState.rect.width + 8)),
-    height: Math.max(0, Math.min(viewport.height - 16, renderState.rect.height + 8))
+  const panelHostRect = renderState.panelHost?.getBoundingClientRect()
+  const cssPosition = getContextualTourPanelCssPosition({
+    position: clamped,
+    panelHostRect
+  })
+  const panelPosition: CSSProperties & { '--contextual-tour-arrow-offset'?: string } = {
+    left: cssPosition.left,
+    top: cssPosition.top,
+    '--contextual-tour-arrow-offset': `${cssPosition.arrowOffset}px`
+  }
+  // Why: align the highlight rect to the element so the ring sits ON the
+  // surface like a focus ring. Outsetting it floats the ring in empty
+  // space when the element touches a viewport edge (e.g. the right
+  // sidebar) and reads as misplaced chrome. The glow in box-shadow
+  // already extends outward from the element edge.
+  const highlightStyle: CSSProperties = {
+    left: renderState.rect.left,
+    top: renderState.rect.top,
+    width: renderState.rect.width,
+    height: renderState.rect.height
   }
 
   return (
@@ -306,11 +358,13 @@ export function ContextualTourOverlay(): JSX.Element | null {
       panelRef={panelRef}
       highlightStyle={highlightStyle}
       panelPosition={panelPosition}
+      panelPlacement={clamped.placement}
       panelHost={renderState.panelHost}
       onSkip={(id) => {
         emitContextualTourOutcome('skipped')
         dismissContextualTour(id)
       }}
+      onBack={regressContextualTour}
       onNext={() => {
         if (renderState.isLastStep) {
           emitContextualTourOutcome('completed')

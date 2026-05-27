@@ -1,9 +1,9 @@
-import { useEffect } from 'react'
+import { useEffect, useRef } from 'react'
 import type { ContextualTourId } from '../../../../shared/contextual-tours'
+import { hasFeatureInteraction } from '../../../../shared/feature-interactions'
 import { useAppStore } from '@/store'
 
 const TOUR_SOURCES = {
-  'right-sidebar': 'right_sidebar_visible',
   'workspace-board': 'workspace_board_visible',
   browser: 'browser_visible',
   tasks: 'tasks_open',
@@ -17,12 +17,13 @@ export function useContextualTour(
   source: string = TOUR_SOURCES[id]
 ): void {
   const requestContextualTour = useAppStore((s) => s.requestContextualTour)
-  const cancelContextualTour = useAppStore((s) => s.cancelContextualTour)
+  const suppressContextualTour = useAppStore((s) => s.suppressContextualTour)
   const recordFeatureInteraction = useAppStore((s) => s.recordFeatureInteraction)
   const persistedUIReady = useAppStore((s) => s.persistedUIReady)
   const activeModal = useAppStore((s) => s.activeModal)
   const activeContextualTourId = useAppStore((s) => s.activeContextualTourId)
   const activeContextualTourSource = useAppStore((s) => s.activeContextualTourSource)
+  const featureInteractions = useAppStore((s) => s.featureInteractions)
   const contextualToursSeenIds = useAppStore((s) => s.contextualToursSeenIds)
   const contextualToursAutoEligible = useAppStore((s) => s.contextualToursAutoEligible)
   const contextualTourShownThisSession = useAppStore((s) => s.contextualTourShownThisSession)
@@ -30,26 +31,38 @@ export function useContextualTour(
   const contextualToursBlockingSurfaceVisible = useAppStore(
     (s) => s.contextualToursBlockingSurfaceVisible
   )
+  const enabledInteractionSnapshotRef = useRef<{
+    id: ContextualTourId
+    wasPreviouslyInteracted: boolean
+  } | null>(null)
 
   useEffect(() => {
-    if (enabled && persistedUIReady) {
-      recordFeatureInteraction(id)
+    if (!enabled || !persistedUIReady) {
+      enabledInteractionSnapshotRef.current = null
+      return
     }
-  }, [enabled, id, persistedUIReady, recordFeatureInteraction])
+    if (enabledInteractionSnapshotRef.current?.id !== id) {
+      enabledInteractionSnapshotRef.current = {
+        id,
+        wasPreviouslyInteracted: hasFeatureInteraction(featureInteractions, id)
+      }
+    }
+    recordFeatureInteraction(id)
+  }, [enabled, featureInteractions, id, persistedUIReady, recordFeatureInteraction])
 
   useEffect(() => {
-    // Why: a tour can be registered by multiple surfaces; an inactive sibling
-    // must not cancel the instance started by the visible surface.
+    // Why: source disable should end through the overlay so a shown tour gets
+    // a cancellation outcome; the store flag also lets pre-render attempts retry.
     if (!enabled && activeContextualTourId === id && activeContextualTourSource === source) {
-      cancelContextualTour(id)
+      suppressContextualTour(id, source)
     }
   }, [
     activeContextualTourId,
     activeContextualTourSource,
-    cancelContextualTour,
     enabled,
     id,
-    source
+    source,
+    suppressContextualTour
   ])
 
   useEffect(() => {
@@ -77,7 +90,14 @@ export function useContextualTour(
       attempts += 1
       frame = window.requestAnimationFrame(() => {
         frame = null
-        requestContextualTour(id, source)
+        const snapshot = enabledInteractionSnapshotRef.current
+        requestContextualTour(
+          id,
+          source,
+          snapshot?.id === id
+            ? snapshot.wasPreviouslyInteracted
+            : hasFeatureInteraction(featureInteractions, id)
+        )
       })
     }
 
@@ -120,6 +140,7 @@ export function useContextualTour(
     contextualToursOnboardingVisible,
     contextualToursSeenIds,
     enabled,
+    featureInteractions,
     id,
     persistedUIReady,
     requestContextualTour,

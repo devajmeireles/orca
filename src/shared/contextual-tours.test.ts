@@ -9,7 +9,6 @@ import {
 describe('contextual tour definitions', () => {
   it('defines the required tours with three concise steps each', () => {
     const expectedIds: ContextualTourId[] = [
-      'right-sidebar',
       'workspace-board',
       'browser',
       'tasks',

@@ -28,6 +28,7 @@ import {
 } from '../../../../shared/workspace-cleanup'
 import { normalizeFeatureTipIds, type FeatureTipId } from '../../../../shared/feature-tips'
 import {
+  hasFeatureInteraction,
   normalizeFeatureInteractions,
   type FeatureInteractionId,
   type FeatureInteractionState
@@ -67,7 +68,8 @@ import type { WorkspacePortScanResult } from '../../../../shared/workspace-ports
 import {
   getContextualTourRequestDecision,
   hasContextualTourTarget,
-  getNextVisibleContextualTourStepIndex
+  getNextVisibleContextualTourStepIndex,
+  getPreviousVisibleContextualTourStepIndex
 } from '../../components/contextual-tours/contextual-tour-gate'
 
 export type PendingSidebarWorktreeReveal = {
@@ -467,14 +469,22 @@ export type UISlice = {
   activeContextualTourId: ContextualTourId | null
   activeContextualTourStepIndex: number
   activeContextualTourSource: string | null
+  activeContextualTourWasFeaturePreviouslyInteracted: boolean
+  activeContextualTourSuppressed: boolean
   contextualTourShownThisSession: boolean
   contextualToursOnboardingVisible: boolean
   contextualToursBlockingSurfaceVisible: boolean
   setContextualToursAutoEligible: (eligible: boolean) => void
   setContextualToursOnboardingVisible: (visible: boolean) => void
   setContextualToursBlockingSurfaceVisible: (visible: boolean) => void
-  requestContextualTour: (id: ContextualTourId, source: string) => void
+  requestContextualTour: (
+    id: ContextualTourId,
+    source: string,
+    wasFeaturePreviouslyInteracted?: boolean
+  ) => void
+  suppressContextualTour: (id: ContextualTourId, source: string) => void
   advanceContextualTour: () => void
+  regressContextualTour: () => void
   dismissContextualTour: (id?: ContextualTourId) => void
   completeContextualTour: (id?: ContextualTourId) => void
   cancelContextualTour: (id?: ContextualTourId) => void
@@ -938,6 +948,8 @@ export const createUISlice: StateCreator<AppState, [], [], UISlice> = (set, get)
   activeContextualTourId: null,
   activeContextualTourStepIndex: 0,
   activeContextualTourSource: null,
+  activeContextualTourWasFeaturePreviouslyInteracted: false,
+  activeContextualTourSuppressed: false,
   contextualTourShownThisSession: false,
   contextualToursOnboardingVisible: false,
   contextualToursBlockingSurfaceVisible: false,
@@ -963,7 +975,7 @@ export const createUISlice: StateCreator<AppState, [], [], UISlice> = (set, get)
         ? s
         : { contextualToursBlockingSurfaceVisible: visible }
     ),
-  requestContextualTour: (id, source) =>
+  requestContextualTour: (id, source, wasFeaturePreviouslyInteracted) =>
     set((s) => {
       const tour = getContextualTour(id)
       const decision = getContextualTourRequestDecision({
@@ -985,8 +997,18 @@ export const createUISlice: StateCreator<AppState, [], [], UISlice> = (set, get)
         activeContextualTourId: id,
         activeContextualTourStepIndex: decision.stepIndex,
         activeContextualTourSource: source,
+        activeContextualTourWasFeaturePreviouslyInteracted:
+          wasFeaturePreviouslyInteracted ?? hasFeatureInteraction(s.featureInteractions, id),
+        activeContextualTourSuppressed: false,
         contextualTourShownThisSession: true
       }
+    }),
+  suppressContextualTour: (id, source) =>
+    set((s) => {
+      if (s.activeContextualTourId !== id || s.activeContextualTourSource !== source) {
+        return s
+      }
+      return s.activeContextualTourSuppressed ? s : { activeContextualTourSuppressed: true }
     }),
   advanceContextualTour: () =>
     set((s) => {
@@ -999,13 +1021,24 @@ export const createUISlice: StateCreator<AppState, [], [], UISlice> = (set, get)
         targetExists: hasContextualTourTarget
       })
       if (nextStepIndex === null) {
-        return {
-          activeContextualTourId: null,
-          activeContextualTourStepIndex: 0,
-          activeContextualTourSource: null
-        }
+        return s
       }
       return { activeContextualTourStepIndex: nextStepIndex }
+    }),
+  regressContextualTour: () =>
+    set((s) => {
+      if (!s.activeContextualTourId) {
+        return s
+      }
+      const previousStepIndex = getPreviousVisibleContextualTourStepIndex({
+        tour: getContextualTour(s.activeContextualTourId),
+        currentStepIndex: s.activeContextualTourStepIndex,
+        targetExists: hasContextualTourTarget
+      })
+      if (previousStepIndex === null) {
+        return s
+      }
+      return { activeContextualTourStepIndex: previousStepIndex }
     }),
   dismissContextualTour: (id) => {
     const activeTourId = get().activeContextualTourId
@@ -1023,7 +1056,9 @@ export const createUISlice: StateCreator<AppState, [], [], UISlice> = (set, get)
       return {
         activeContextualTourId: null,
         activeContextualTourStepIndex: 0,
-        activeContextualTourSource: null
+        activeContextualTourSource: null,
+        activeContextualTourWasFeaturePreviouslyInteracted: false,
+        activeContextualTourSuppressed: false
       }
     })
   },
@@ -1043,7 +1078,9 @@ export const createUISlice: StateCreator<AppState, [], [], UISlice> = (set, get)
       return {
         activeContextualTourId: null,
         activeContextualTourStepIndex: 0,
-        activeContextualTourSource: null
+        activeContextualTourSource: null,
+        activeContextualTourWasFeaturePreviouslyInteracted: false,
+        activeContextualTourSuppressed: false
       }
     })
   },
@@ -1059,6 +1096,8 @@ export const createUISlice: StateCreator<AppState, [], [], UISlice> = (set, get)
         activeContextualTourId: null,
         activeContextualTourStepIndex: 0,
         activeContextualTourSource: null,
+        activeContextualTourWasFeaturePreviouslyInteracted: false,
+        activeContextualTourSuppressed: false,
         contextualTourShownThisSession: alreadyShown ? s.contextualTourShownThisSession : false
       }
     }),

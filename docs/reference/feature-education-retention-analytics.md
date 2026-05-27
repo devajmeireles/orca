@@ -32,7 +32,7 @@ Emitted once when a contextual tour first renders a measured target.
 
 Payload:
 
-- `tour_id`: `right-sidebar`, `workspace-board`, `browser`, `tasks`, `automations`, or `workspace-creation`
+- `tour_id`: `workspace-board`, `browser`, `tasks`, `automations`, or `workspace-creation`
 - `source`: bounded source enum from `src/shared/feature-education-telemetry.ts`
 - `was_feature_previously_interacted`: boolean from local education state at the moment the tour is shown
 
@@ -127,7 +127,6 @@ Build funnels from tour events to real product events:
 - `browser`: `contextual_tour_outcome` -> browser grab/annotation events. If these do not exist, add targeted events for the concrete actions, not a broad feature-interaction event.
 - `automations`: `contextual_tour_outcome` -> automation creation/run events. If these do not exist, add targeted events for create/run.
 - `workspace-board`: `contextual_tour_outcome` -> board-specific actions such as card moved/status changed. If these do not exist, add targeted events for those actions.
-- `right-sidebar`: `contextual_tour_outcome` -> right-sidebar tool action events such as source-control action, checks opened, or file/search use. If these do not exist, add targeted events for the concrete tool actions.
 
 Recommended funnel shape:
 

@@ -1,11 +1,15 @@
 import { createPortal } from 'react-dom'
 import { type CSSProperties, type JSX, type KeyboardEvent, type RefObject } from 'react'
+import { ArrowLeft, ArrowRight } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { cn } from '@/lib/utils'
 import { useAppStore } from '@/store'
 import type { ContextualTourId } from '../../../../shared/contextual-tours'
+import type { ContextualTourPanelPlacement } from './contextual-tour-gate'
 
 const FOCUSABLE_SELECTOR =
   'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+const SKIP_BUTTON_SELECTOR = 'button[aria-label^="Skip"], button[aria-label="Dismiss tour"]'
 
 export type ActiveTourRenderState = {
   rect: DOMRect
@@ -14,7 +18,12 @@ export type ActiveTourRenderState = {
   title: string
   body: string
   isLastStep: boolean
+  isFirstStep: boolean
   panelHost: HTMLElement | null
+}
+
+type PanelPositionStyle = CSSProperties & {
+  '--contextual-tour-arrow-offset'?: string
 }
 
 type ContextualTourOverlaySurfaceProps = {
@@ -22,9 +31,11 @@ type ContextualTourOverlaySurfaceProps = {
   renderState: ActiveTourRenderState
   panelRef: RefObject<HTMLElement | null>
   highlightStyle: CSSProperties
-  panelPosition: CSSProperties
+  panelPosition: PanelPositionStyle
+  panelPlacement: ContextualTourPanelPlacement | null
   panelHost: HTMLElement | null
   onSkip: (id: ContextualTourId) => void
+  onBack: () => void
   onNext: () => void
   onOverlayKeyDownCapture: (event: KeyboardEvent<HTMLDivElement>) => void
 }
@@ -39,22 +50,40 @@ if (typeof window !== 'undefined') {
   }
 }
 
+const PANEL_BASE_CLASSES =
+  'rounded-lg border border-border bg-popover text-popover-foreground shadow-[0_10px_24px_rgba(0,0,0,0.18)] backdrop-blur-[2px]'
+
+const PANEL_ANIMATION_CLASSES = 'animate-in fade-in-0 zoom-in-95 duration-200 ease-out'
+
 export function ContextualTourOverlaySurface({
   activeTourId,
   renderState,
   panelRef,
   highlightStyle,
   panelPosition,
+  panelPlacement,
   panelHost,
   onSkip,
+  onBack,
   onNext,
   onOverlayKeyDownCapture
 }: ContextualTourOverlaySurfaceProps): JSX.Element {
   const panelHostSlot = panelHost?.getAttribute('data-slot')
-  const hostedPanelClass =
+  const hostedPanelClass = cn(
+    PANEL_BASE_CLASSES,
+    PANEL_ANIMATION_CLASSES,
     panelHostSlot === 'sheet-content'
-      ? 'absolute left-3 top-[3.75rem] z-[80] w-[min(20rem,calc(100%-1.5rem))] rounded-lg border border-border bg-popover p-3 text-popover-foreground shadow-[0_10px_24px_rgba(0,0,0,0.18)]'
-      : 'relative z-[80] ml-3 mb-3 mt-1 w-[min(20rem,calc(100%-1.5rem))] shrink-0 rounded-lg border border-border bg-popover p-3 text-popover-foreground shadow-[0_10px_24px_rgba(0,0,0,0.18)]'
+      ? 'absolute z-[80] w-[min(20rem,calc(100%-1.5rem))]'
+      : 'absolute z-[80] w-[min(20rem,calc(100%-2rem))]'
+  )
+  const floatingPanelClass = cn(
+    PANEL_BASE_CLASSES,
+    PANEL_ANIMATION_CLASSES,
+    'fixed w-[min(20rem,calc(100vw-1.5rem))]'
+  )
+
+  const stepKey = `${activeTourId}-${renderState.progress.current}`
+
   const panel = (
     <section
       ref={panelRef}
@@ -62,54 +91,180 @@ export function ContextualTourOverlaySurface({
       aria-modal="true"
       aria-label={renderState.title}
       data-contextual-tour-panel=""
+      data-placement={panelPlacement ?? undefined}
       role="dialog"
       tabIndex={-1}
-      className={
-        panelHost
-          ? hostedPanelClass
-          : 'fixed w-[min(20rem,calc(100vw-1.5rem))] rounded-lg border border-border bg-popover p-3 text-popover-foreground shadow-[0_10px_24px_rgba(0,0,0,0.18)]'
-      }
-      style={panelHost ? undefined : panelPosition}
+      className={panelHost ? hostedPanelClass : floatingPanelClass}
+      style={panelPosition}
     >
-      <div className="text-[11px] font-medium text-muted-foreground">
-        {renderState.progress.current}/{renderState.progress.total}
-      </div>
-      <h2 className="mt-1 text-sm font-semibold">{renderState.title}</h2>
-      <p className="mt-1 text-xs leading-5 text-muted-foreground">{renderState.body}</p>
-      <div className="mt-3 flex justify-end gap-2">
-        <Button
-          type="button"
-          variant="ghost"
-          size="sm"
-          className="h-8"
-          onClick={() => onSkip(activeTourId)}
-        >
-          Skip
-        </Button>
-        <Button type="button" size="sm" className="h-8" onClick={onNext}>
-          {renderState.isLastStep ? 'Done' : 'Next'}
-        </Button>
+      {panelPlacement ? <ContextualTourArrow placement={panelPlacement} /> : null}
+      <div key={stepKey} className="animate-in fade-in-0 duration-150 ease-out p-4">
+        <h2 className="text-sm font-semibold tracking-tight text-foreground">
+          {renderState.title}
+        </h2>
+        <p className="mt-1.5 text-xs leading-5 text-muted-foreground">{renderState.body}</p>
+        <div className="mt-3.5 flex items-center justify-between gap-3">
+          <ContextualTourProgressDots
+            current={renderState.progress.current}
+            total={renderState.progress.total}
+          />
+          <div className="flex items-center gap-1.5">
+            {!renderState.isFirstStep ? (
+              <Button type="button" variant="ghost" size="xs" aria-label="Back" onClick={onBack}>
+                <ArrowLeft />
+                Back
+              </Button>
+            ) : null}
+            <Button
+              type="button"
+              variant="ghost"
+              size="xs"
+              aria-label={renderState.isLastStep ? 'Dismiss tour' : 'Skip tour'}
+              onClick={() => onSkip(activeTourId)}
+            >
+              {renderState.isLastStep ? 'Dismiss' : 'Skip'}
+            </Button>
+            <Button type="button" size="xs" onClick={onNext}>
+              {renderState.isLastStep ? 'Done' : 'Next'}
+              {!renderState.isLastStep ? <ArrowRight /> : null}
+            </Button>
+          </div>
+        </div>
       </div>
     </section>
   )
 
   return (
     <div
-      className={`fixed inset-0 z-[70] ${panelHost ? 'pointer-events-none' : 'pointer-events-auto'}`}
+      className={cn(
+        // Why: the overlay must let pointer events reach the highlighted
+        // surface so the user can still notice the target while reading.
+        // Only the panel itself captures interaction.
+        'fixed inset-0 z-[70] pointer-events-none'
+      )}
       data-contextual-tour-overlay=""
       role="presentation"
       onKeyDownCapture={onOverlayKeyDownCapture}
     >
-      <div className="absolute inset-0 bg-background/55" />
       {panelHost ? null : (
         <div
           aria-hidden="true"
-          className="fixed rounded-md border border-ring ring-2 ring-ring shadow-[0_10px_24px_rgba(0,0,0,0.18)]"
+          data-contextual-tour-highlight=""
+          className="contextual-tour-highlight fixed rounded-md animate-in fade-in-0 duration-200"
           style={highlightStyle}
         />
       )}
-      {panelHost ? createPortal(panel, panelHost) : panel}
+      <div className="pointer-events-auto">
+        {panelHost ? createPortal(panel, panelHost) : panel}
+      </div>
     </div>
+  )
+}
+
+function ContextualTourProgressDots({
+  current,
+  total
+}: {
+  current: number
+  total: number
+}): JSX.Element {
+  if (total <= 1) {
+    return <span className="text-[11px] font-medium text-muted-foreground">Step {current}</span>
+  }
+  return (
+    <div
+      className="flex items-center gap-1.5"
+      role="progressbar"
+      aria-valuemin={1}
+      aria-valuemax={total}
+      aria-valuenow={current}
+      aria-label={`Step ${current} of ${total}`}
+    >
+      {Array.from({ length: total }).map((_, index) => {
+        const isActive = index + 1 === current
+        const isComplete = index + 1 < current
+        return (
+          <span
+            key={index}
+            aria-hidden="true"
+            className={cn(
+              'block h-1.5 rounded-full transition-all duration-200 ease-out',
+              isActive
+                ? 'w-4 bg-foreground'
+                : isComplete
+                  ? 'w-1.5 bg-foreground/55'
+                  : 'w-1.5 bg-foreground/20'
+            )}
+          />
+        )
+      })}
+    </div>
+  )
+}
+
+function ContextualTourArrow({
+  placement
+}: {
+  placement: ContextualTourPanelPlacement
+}): JSX.Element {
+  // Why: a small triangle pointing at the target makes the panel/target
+  // relationship readable when the highlight isn't directly adjacent (e.g.
+  // clamped into a corner) or when the user's eye starts on the panel.
+  const offsetCss = 'var(--contextual-tour-arrow-offset, 50%)'
+  const horizontal = placement === 'top' || placement === 'bottom'
+  const longSide = 12
+  const shortSide = 6
+  const wrapperStyle: CSSProperties = horizontal
+    ? {
+        width: longSide,
+        height: shortSide,
+        left: offsetCss,
+        transform: 'translateX(-50%)',
+        ...(placement === 'top' ? { top: '100%' } : { bottom: '100%' })
+      }
+    : {
+        width: shortSide,
+        height: longSide,
+        top: offsetCss,
+        transform: 'translateY(-50%)',
+        ...(placement === 'left' ? { left: '100%' } : { right: '100%' })
+      }
+  const path =
+    placement === 'top'
+      ? 'M0 0 L6 6 L12 0'
+      : placement === 'bottom'
+        ? 'M0 6 L6 0 L12 6'
+        : placement === 'left'
+          ? 'M0 0 L6 6 L0 12'
+          : 'M6 0 L0 6 L6 12'
+  const maskPath =
+    placement === 'top'
+      ? 'M0 0 L12 0'
+      : placement === 'bottom'
+        ? 'M0 6 L12 6'
+        : placement === 'left'
+          ? 'M0 0 L0 12'
+          : 'M6 0 L6 12'
+  return (
+    <span aria-hidden="true" className="absolute block" style={wrapperStyle}>
+      <svg
+        viewBox={horizontal ? '0 0 12 6' : '0 0 6 12'}
+        width={horizontal ? longSide : shortSide}
+        height={horizontal ? shortSide : longSide}
+        className="overflow-visible"
+        preserveAspectRatio="none"
+      >
+        <path
+          d={path}
+          className="fill-popover stroke-border"
+          strokeWidth={1}
+          strokeLinejoin="round"
+        />
+        {/* Why: hide the join with the panel border so the panel edge
+            reads as continuous across the arrow's base. */}
+        <path d={maskPath} className="stroke-popover" strokeWidth={1.5} fill="none" />
+      </svg>
+    </span>
   )
 }
 
@@ -117,7 +272,7 @@ export function handleContextualTourOverlayKeyDown(event: KeyboardEvent<HTMLDivE
   if (event.key === 'Escape') {
     event.preventDefault()
     event.stopPropagation()
-    const skipButton = event.currentTarget.querySelector<HTMLButtonElement>('button')
+    const skipButton = event.currentTarget.querySelector<HTMLButtonElement>(SKIP_BUTTON_SELECTOR)
     skipButton?.click()
     return
   }
@@ -165,7 +320,10 @@ export function handleContextualTourGlobalKeyDown(event: globalThis.KeyboardEven
   if (event.key === 'Escape') {
     event.preventDefault()
     event.stopImmediatePropagation()
-    useAppStore.getState().dismissContextualTour(activeTourId)
+    const skipButton = focusRoot.querySelector<HTMLButtonElement>(SKIP_BUTTON_SELECTOR)
+    if (skipButton) {
+      skipButton.click()
+    }
     return
   }
 

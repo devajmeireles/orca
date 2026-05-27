@@ -2393,3 +2393,42 @@ html.onboarding-tour-start-transition::view-transition-new(root) {
   justify-content: flex-end;
   gap: 6px;
 }
+
+/* Why: contextual-tour highlight is sized to the target rect and reads
+   as a focus ring sitting on the surface. The inset shadow keeps the
+   crisp ring inside the element so it doesn't get clipped at viewport
+   edges; the outer shadow is a soft halo that blooms outward without
+   drawing a hard frame. */
+.contextual-tour-highlight {
+  pointer-events: none;
+  box-shadow:
+    inset 0 0 0 2px color-mix(in srgb, var(--ring) 80%, transparent),
+    0 0 0 2px color-mix(in srgb, var(--ring) 40%, transparent),
+    0 0 24px 6px color-mix(in srgb, var(--ring) 28%, transparent),
+    0 0 56px 16px color-mix(in srgb, var(--ring) 14%, transparent);
+  animation: contextual-tour-highlight-pulse 2.6s ease-in-out infinite;
+}
+
+@keyframes contextual-tour-highlight-pulse {
+  0%,
+  100% {
+    box-shadow:
+      inset 0 0 0 2px color-mix(in srgb, var(--ring) 80%, transparent),
+      0 0 0 2px color-mix(in srgb, var(--ring) 40%, transparent),
+      0 0 24px 6px color-mix(in srgb, var(--ring) 28%, transparent),
+      0 0 56px 16px color-mix(in srgb, var(--ring) 14%, transparent);
+  }
+  50% {
+    box-shadow:
+      inset 0 0 0 2px color-mix(in srgb, var(--ring) 95%, transparent),
+      0 0 0 2px color-mix(in srgb, var(--ring) 55%, transparent),
+      0 0 32px 10px color-mix(in srgb, var(--ring) 38%, transparent),
+      0 0 68px 22px color-mix(in srgb, var(--ring) 22%, transparent);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .contextual-tour-highlight {
+    animation: none;
+  }
+}

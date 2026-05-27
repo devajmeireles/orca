@@ -1,5 +1,4 @@
 export type ContextualTourId =
-  | 'right-sidebar'
   | 'workspace-board'
   | 'browser'
   | 'tasks'
@@ -21,27 +20,6 @@ export type ContextualTour = {
 }
 
 export const CONTEXTUAL_TOURS = [
-  {
-    id: 'right-sidebar',
-    steps: [
-      {
-        title: 'Use the sidebar for workspace context',
-        body: 'Open files, search, source control, checks, and SSH ports without leaving the workspace.',
-        targetSelector: '[data-contextual-tour-target="right-sidebar-shell"]',
-        requiredForStart: true
-      },
-      {
-        title: 'Switch tools from the activity buttons',
-        body: 'Pick the tool you need; Orca only shows buttons that apply to the current project.',
-        targetSelector: '[data-contextual-tour-target="right-sidebar-activity"]'
-      },
-      {
-        title: 'Keep the panel sized for the job',
-        body: 'Use the toggle or resize edge to make room while keeping the current tool ready.',
-        targetSelector: '[data-contextual-tour-target="right-sidebar-panel"]'
-      }
-    ]
-  },
   {
     id: 'workspace-board',
     steps: [

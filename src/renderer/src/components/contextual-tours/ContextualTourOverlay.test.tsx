@@ -1,13 +1,15 @@
 import { Children, isValidElement, type ReactElement, type ReactNode, type RefObject } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { ContextualTourId } from '../../../../shared/contextual-tours'
 import {
   ContextualTourOverlaySurface,
+  handleContextualTourGlobalKeyDown,
   handleContextualTourOverlayKeyDown,
   type ActiveTourRenderState
 } from './ContextualTourOverlaySurface'
 import { getContextualTourPanelHost } from './contextual-tour-gate'
+import { useAppStore } from '@/store'
 
 type ClickableElementProps = {
   children?: ReactNode
@@ -30,21 +32,34 @@ const baseRenderState: ActiveTourRenderState = {
   title: 'Choose the work source',
   body: 'Switch between connected providers and project filters without changing pages.',
   isLastStep: false,
+  isFirstStep: true,
   panelHost: null
 }
 
+afterEach(() => {
+  vi.restoreAllMocks()
+  vi.unstubAllGlobals()
+})
+
 function renderSurface(
   overrides: Partial<ActiveTourRenderState> = {},
-  callbacks: { onSkip?: (id: ContextualTourId) => void; onNext?: () => void } = {}
+  callbacks: {
+    onSkip?: (id: ContextualTourId) => void
+    onNext?: () => void
+    onBack?: () => void
+  } = {}
 ): ReactElement {
+  const renderState = { ...baseRenderState, ...overrides }
   return ContextualTourOverlaySurface({
     activeTourId: 'tasks',
-    renderState: { ...baseRenderState, ...overrides },
+    renderState,
     panelRef: { current: null } as RefObject<HTMLElement | null>,
     highlightStyle: { left: 6, top: 16, width: 108, height: 68 },
-    panelPosition: { left: 130, top: 20 },
-    panelHost: null,
+    panelPosition: { left: 130, top: 20, '--contextual-tour-arrow-offset': '40px' },
+    panelPlacement: 'right',
+    panelHost: renderState.panelHost,
     onSkip: callbacks.onSkip ?? vi.fn(),
+    onBack: callbacks.onBack ?? vi.fn(),
     onNext: callbacks.onNext ?? vi.fn(),
     onOverlayKeyDownCapture: handleContextualTourOverlayKeyDown
   })
@@ -69,11 +84,12 @@ function findElementByText(
   }
 
   const props = node.props as ClickableElementProps
-  if (props.children === text) {
+  const childrenArray = Children.toArray(props.children)
+  if (childrenArray.some((child) => child === text)) {
     return node as ReactElement<ClickableElementProps>
   }
 
-  for (const child of Children.toArray(props.children)) {
+  for (const child of childrenArray) {
     const match = findElementByText(child, text)
     if (match) {
       return match
@@ -86,7 +102,9 @@ describe('ContextualTourOverlaySurface', () => {
   it('renders visible progress and step copy', () => {
     const markup = renderToStaticMarkup(renderSurface())
 
-    expect(markup).toContain('1/3')
+    expect(markup).toContain('aria-valuenow="1"')
+    expect(markup).toContain('aria-valuemax="3"')
+    expect(markup).toContain('Step 1 of 3')
     expect(markup).toContain('Choose the work source')
     expect(markup).toContain('Switch between connected providers')
     expect(markup).toContain('Skip')
@@ -98,13 +116,32 @@ describe('ContextualTourOverlaySurface', () => {
       renderSurface({
         progress: { current: 2, total: 2 },
         title: 'Start from tracked work',
-        isLastStep: true
+        isLastStep: true,
+        isFirstStep: false
       })
     )
 
-    expect(markup).toContain('2/2')
+    expect(markup).toContain('aria-valuenow="2"')
+    expect(markup).toContain('aria-valuemax="2"')
     expect(markup).toContain('Start from tracked work')
     expect(markup).toContain('Done')
+  })
+
+  it('hides the Back button on the first visible step', () => {
+    const markup = renderToStaticMarkup(renderSurface({ isFirstStep: true }))
+    expect(markup).not.toContain('>Back<')
+  })
+
+  it('shows the Back button on later steps and wires the callback', () => {
+    const onBack = vi.fn()
+    const element = renderSurface(
+      { progress: { current: 2, total: 3 }, isFirstStep: false },
+      { onBack }
+    )
+    const backNode = findElementByText(element, 'Back')
+    expect(backNode).not.toBeNull()
+    backNode?.props.onClick?.()
+    expect(onBack).toHaveBeenCalledTimes(1)
   })
 
   it('wires Skip and Next callbacks', () => {
@@ -136,6 +173,79 @@ describe('ContextualTourOverlaySurface', () => {
     expect(preventDefault).toHaveBeenCalledTimes(1)
     expect(stopPropagation).toHaveBeenCalledTimes(1)
     expect(click).toHaveBeenCalledTimes(1)
+  })
+
+  it('handles global Escape through the panel button so telemetry callbacks run', () => {
+    const click = vi.fn()
+    const dismissContextualTour = vi.fn()
+    const preventDefault = vi.fn()
+    const stopImmediatePropagation = vi.fn()
+    const panel = {
+      querySelector: vi.fn(() => ({ click }))
+    }
+    const overlay = {}
+
+    vi.spyOn(useAppStore, 'getState').mockReturnValue({
+      activeContextualTourId: 'tasks',
+      dismissContextualTour
+    } as unknown as ReturnType<typeof useAppStore.getState>)
+    vi.stubGlobal('document', {
+      querySelector: vi.fn((selector: string) =>
+        selector === '[data-contextual-tour-overlay]'
+          ? overlay
+          : selector === '[data-contextual-tour-panel]'
+            ? panel
+            : null
+      )
+    })
+
+    handleContextualTourGlobalKeyDown({
+      key: 'Escape',
+      preventDefault,
+      stopImmediatePropagation
+    } as unknown as KeyboardEvent)
+
+    expect(preventDefault).toHaveBeenCalledTimes(1)
+    expect(stopImmediatePropagation).toHaveBeenCalledTimes(1)
+    expect(panel.querySelector).toHaveBeenCalledWith(
+      'button[aria-label^="Skip"], button[aria-label="Dismiss tour"]'
+    )
+    expect(click).toHaveBeenCalledTimes(1)
+    expect(dismissContextualTour).not.toHaveBeenCalled()
+  })
+
+  it('does not dismiss directly on global Escape when the panel button is missing', () => {
+    const dismissContextualTour = vi.fn()
+    const preventDefault = vi.fn()
+    const stopImmediatePropagation = vi.fn()
+    const panel = {
+      querySelector: vi.fn(() => null)
+    }
+    const overlay = {}
+
+    vi.spyOn(useAppStore, 'getState').mockReturnValue({
+      activeContextualTourId: 'tasks',
+      dismissContextualTour
+    } as unknown as ReturnType<typeof useAppStore.getState>)
+    vi.stubGlobal('document', {
+      querySelector: vi.fn((selector: string) =>
+        selector === '[data-contextual-tour-overlay]'
+          ? overlay
+          : selector === '[data-contextual-tour-panel]'
+            ? panel
+            : null
+      )
+    })
+
+    handleContextualTourGlobalKeyDown({
+      key: 'Escape',
+      preventDefault,
+      stopImmediatePropagation
+    } as unknown as KeyboardEvent)
+
+    expect(preventDefault).toHaveBeenCalledTimes(1)
+    expect(stopImmediatePropagation).toHaveBeenCalledTimes(1)
+    expect(dismissContextualTour).not.toHaveBeenCalled()
   })
 })
 
