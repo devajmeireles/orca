@@ -1,4 +1,4 @@
-import { VIRTUALIZED_SCROLL_ANCHOR_RECORD_EVENT } from './useVirtualizedScrollAnchor'
+import { VIRTUALIZED_SCROLL_ANCHOR_RECORD_EVENT } from './virtualizedScrollAnchorState'
 
 /**
  * Asks a mounted virtualized scroller (matched by selector) to snapshot its

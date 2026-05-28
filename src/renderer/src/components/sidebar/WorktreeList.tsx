@@ -100,11 +100,11 @@ import {
   getVisibleWorktreeBrowserActivityTabs,
   getVisibleWorktreeTerminalActivityTabs
 } from './visible-worktree-activity-inputs'
+import { useVirtualizedScrollAnchor } from '@/hooks/useVirtualizedScrollAnchor'
 import {
   VIRTUALIZED_SCROLL_ANCHOR_RECORD_EVENT,
-  useVirtualizedScrollAnchor,
   type VirtualizedScrollAnchor
-} from '@/hooks/useVirtualizedScrollAnchor'
+} from '@/hooks/virtualizedScrollAnchorState'
 import { activateAndRevealWorktree } from '@/lib/worktree-activation'
 import { getShortcutPlatform } from '@/lib/shortcut-platform'
 import { SCROLL_TO_CURRENT_WORKSPACE_REVEAL_REQUEST_EVENT } from '@/lib/scroll-to-current-workspace-status'

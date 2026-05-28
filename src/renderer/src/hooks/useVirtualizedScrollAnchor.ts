@@ -8,13 +8,13 @@ import {
 } from 'react'
 import type { Virtualizer } from '@tanstack/react-virtual'
 import { shouldCancelVirtualizedScrollOffsetRestore } from './virtualizedScrollOffsetRestore'
+import {
+  VIRTUALIZED_SCROLL_ANCHOR_RECORD_EVENT,
+  clampVirtualizedScrollAnchorOffset,
+  type VirtualizedScrollAnchor
+} from './virtualizedScrollAnchorState'
+import { resolveVirtualizedScrollAnchorKey } from './virtualizedScrollAnchorResolution'
 
-export type VirtualizedScrollAnchor = {
-  fallbackKeys?: readonly string[]
-  key: string
-  offset: number
-} | null
-export const VIRTUALIZED_SCROLL_ANCHOR_RECORD_EVENT = 'orca-record-virtualized-scroll-anchor'
 const RECORD_ANCHOR_SCROLL_IDLE_DELAY_MS = 150
 
 type UseVirtualizedScrollAnchorOptions<
@@ -69,11 +69,6 @@ export function useVirtualizedScrollAnchor<
     rows.forEach((row, index) => indexByKey.set(getRowKey(row), index))
     return indexByKey
   }, [getRowKey, rows])
-  const clampAnchorOffset = useCallback(
-    (offset: number) => Math.min(maxAnchorOffset, Math.max(0, offset)),
-    [maxAnchorOffset]
-  )
-
   const findDomAnchor = useCallback(
     (scrollElement: TScrollElement) => {
       if (!itemElementSelector || !getItemElementKey) {
@@ -106,12 +101,13 @@ export function useVirtualizedScrollAnchor<
       return {
         fallbackKeys: visibleItems.slice(1).map((item) => item.key),
         key: firstVisible.key,
-        offset: clampAnchorOffset(
-          Math.min(firstVisible.rect.height, visibleTop - firstVisible.rect.top)
+        offset: clampVirtualizedScrollAnchorOffset(
+          Math.min(firstVisible.rect.height, visibleTop - firstVisible.rect.top),
+          maxAnchorOffset
         )
       }
     },
-    [clampAnchorOffset, getItemElementKey, itemElementSelector, rowIndexByKey, topInset]
+    [getItemElementKey, itemElementSelector, maxAnchorOffset, rowIndexByKey, topInset]
   )
 
   const recordVirtualScrollAnchor = useCallback(
@@ -131,10 +127,10 @@ export function useVirtualizedScrollAnchor<
           .filter((row): row is TRow => row != null)
           .map(getRowKey),
         key: getRowKey(row),
-        offset: clampAnchorOffset(visibleTop - firstVisible.start)
+        offset: clampVirtualizedScrollAnchorOffset(visibleTop - firstVisible.start, maxAnchorOffset)
       }
     },
-    [anchorRef, clampAnchorOffset, getRowKey, rows, topInset, virtualizer]
+    [anchorRef, getRowKey, maxAnchorOffset, rows, topInset, virtualizer]
   )
 
   const recordScrollAnchor = useCallback(
@@ -266,16 +262,11 @@ export function useVirtualizedScrollAnchor<
       return
     }
 
-    const resolvedKey = rowIndexByKey.has(anchor.key)
-      ? anchor.key
-      : anchor.fallbackKeys?.find((key) => rowIndexByKey.has(key))
-    if (!resolvedKey) {
+    const resolvedAnchor = resolveVirtualizedScrollAnchorKey(anchor, rowIndexByKey)
+    if (!resolvedAnchor) {
       return
     }
-    const index = rowIndexByKey.get(resolvedKey)
-    if (index === undefined) {
-      return
-    }
+    const { index, key: resolvedKey } = resolvedAnchor
     const offset = resolvedKey === anchor.key ? anchor.offset : 0
 
     const restoreFromDomElement = (): boolean => {
