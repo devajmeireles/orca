@@ -54,8 +54,6 @@ function renderSurface(
     activeTourId: 'tasks',
     renderState,
     panelRef: { current: null } as RefObject<HTMLElement | null>,
-    spotlightRect: { left: 4, top: 14, width: 112, height: 72, radius: 8 },
-    spotlightHostRect: null,
     panelPosition: { left: 130, top: 20, '--contextual-tour-arrow-offset': '40px' },
     panelPlacement: 'right',
     panelHost: renderState.panelHost,

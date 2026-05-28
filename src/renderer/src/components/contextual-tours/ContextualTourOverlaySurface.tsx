@@ -30,8 +30,6 @@ type ContextualTourOverlaySurfaceProps = {
   activeTourId: ContextualTourId
   renderState: ActiveTourRenderState
   panelRef: RefObject<HTMLElement | null>
-  spotlightRect: SpotlightRect
-  spotlightHostRect: SpotlightRect | null
   panelPosition: PanelPositionStyle
   panelPlacement: ContextualTourPanelPlacement | null
   panelHost: HTMLElement | null
@@ -39,14 +37,6 @@ type ContextualTourOverlaySurfaceProps = {
   onBack: () => void
   onNext: () => void
   onOverlayKeyDownCapture: (event: KeyboardEvent<HTMLDivElement>) => void
-}
-
-export type SpotlightRect = {
-  top: number
-  left: number
-  width: number
-  height: number
-  radius: number
 }
 
 if (typeof window !== 'undefined') {
@@ -68,8 +58,6 @@ export function ContextualTourOverlaySurface({
   activeTourId,
   renderState,
   panelRef,
-  spotlightRect,
-  spotlightHostRect,
   panelPosition,
   panelPlacement,
   panelHost,
@@ -144,92 +132,20 @@ export function ContextualTourOverlaySurface({
     </section>
   )
 
-  const spotlight = panelHost ? (
-    spotlightHostRect ? (
-      <ContextualTourSpotlight rect={spotlightHostRect} hosted />
-    ) : null
-  ) : (
-    <ContextualTourSpotlight rect={spotlightRect} hosted={false} />
-  )
-
   return (
     <div
       className={cn(
-        // Why: the overlay must let pointer events reach the highlighted
-        // surface so the user can still notice the target while reading.
-        // Only the panel itself captures interaction.
+        // Why: tours are callouts, not modality. Let pointer events reach the
+        // underlying surface; only the panel itself captures interaction.
         'fixed inset-0 z-[70] pointer-events-none'
       )}
       data-contextual-tour-overlay=""
       role="presentation"
       onKeyDownCapture={onOverlayKeyDownCapture}
     >
-      {panelHost ? null : spotlight}
       <div className="pointer-events-auto">
-        {panelHost
-          ? createPortal(
-              <>
-                {spotlight}
-                {panel}
-              </>,
-              panelHost
-            )
-          : panel}
+        {panelHost ? createPortal(panel, panelHost) : panel}
       </div>
-    </div>
-  )
-}
-
-function ContextualTourSpotlight({
-  rect,
-  hosted
-}: {
-  rect: SpotlightRect
-  hosted: boolean
-}): JSX.Element {
-  if (hosted) {
-    return (
-      <div
-        aria-hidden="true"
-        data-contextual-tour-spotlight=""
-        data-contextual-tour-spotlight-hosted="true"
-        className="contextual-tour-hosted-scrim absolute"
-      />
-    )
-  }
-
-  // Why: an SVG mask scrim cuts a rounded-rect hole that follows the
-  // target's border-radius, so curved buttons don't leave un-dimmed
-  // corners between the target's curve and the cutout edge.
-  const maskId = 'contextual-tour-spotlight-mask-fixed'
-  return (
-    <div
-      aria-hidden="true"
-      data-contextual-tour-spotlight=""
-      className="contextual-tour-spotlight fixed"
-    >
-      <svg className="contextual-tour-spotlight-svg" preserveAspectRatio="none" aria-hidden="true">
-        <defs>
-          <mask id={maskId}>
-            <rect width="100%" height="100%" fill="white" />
-            <rect
-              x={rect.left}
-              y={rect.top}
-              width={rect.width}
-              height={rect.height}
-              rx={rect.radius}
-              ry={rect.radius}
-              fill="black"
-            />
-          </mask>
-        </defs>
-        <rect
-          width="100%"
-          height="100%"
-          className="contextual-tour-spotlight-fill"
-          mask={`url(#${maskId})`}
-        />
-      </svg>
     </div>
   )
 }
