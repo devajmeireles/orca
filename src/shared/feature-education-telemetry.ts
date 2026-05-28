@@ -4,7 +4,8 @@ export const FEATURE_EDUCATION_CONTEXTUAL_TOUR_IDS = [
   'workspace-board',
   'browser',
   'tasks',
-  'automations'
+  'automations',
+  'workspace-creation'
 ] as const satisfies readonly ContextualTourId[]
 
 export const FEATURE_EDUCATION_SOURCES = [
@@ -12,6 +13,8 @@ export const FEATURE_EDUCATION_SOURCES = [
   'browser_visible',
   'tasks_open',
   'automations_open',
+  'workspace_creation_visible',
+  'workspace_creation_modal',
   'unknown'
 ] as const
 

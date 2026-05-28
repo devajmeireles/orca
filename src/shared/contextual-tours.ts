@@ -1,4 +1,13 @@
-export type ContextualTourId = 'workspace-board' | 'browser' | 'tasks' | 'automations'
+export type ContextualTourId =
+  | 'workspace-board'
+  | 'browser'
+  | 'tasks'
+  | 'automations'
+  | 'workspace-creation'
+
+export type ContextualTourStepControl = {
+  kind: 'auto-rename-branch-from-work'
+}
 
 export type ContextualTourStep = {
   title: string
@@ -6,6 +15,7 @@ export type ContextualTourStep = {
   targetSelector: string
   requiredForStart?: boolean
   fallbackCopy?: string
+  control?: ContextualTourStepControl
 }
 
 export type ContextualTour = {
@@ -98,6 +108,29 @@ export const CONTEXTUAL_TOURS = [
         title: 'Run and inspect results',
         body: 'Use overview and runs to trigger work manually and review what happened.',
         targetSelector: '[data-contextual-tour-target="automations-runs"]'
+      }
+    ]
+  },
+  {
+    id: 'workspace-creation',
+    allowedActiveModals: ['new-workspace-composer'],
+    steps: [
+      {
+        title: 'Pick the code to work in',
+        body: 'Choose the project for this task so the workspace opens in the right codebase.',
+        targetSelector: '[data-contextual-tour-target="workspace-creation-project"]',
+        requiredForStart: true
+      },
+      {
+        title: 'Name it now or let Orca do it',
+        body: 'Type a name if you know it. Or leave the field blank and let Orca rename the workspace after the first agent message.',
+        targetSelector: '[data-contextual-tour-target="workspace-creation-name"]',
+        control: { kind: 'auto-rename-branch-from-work' }
+      },
+      {
+        title: 'Choose who starts the work',
+        body: 'Pick the agent you want, then create the workspace. Orca opens a separate place for this task.',
+        targetSelector: '[data-contextual-tour-target="workspace-creation-agent"]'
       }
     ]
   }

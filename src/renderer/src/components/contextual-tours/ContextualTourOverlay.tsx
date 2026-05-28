@@ -182,6 +182,7 @@ export function ContextualTourOverlay(): JSX.Element | null {
       progress,
       title: activeStep.title,
       body: getContextualTourStepCopy(activeStep),
+      control: activeStep.control,
       isLastStep: progress.current === progress.total,
       isFirstStep: progress.current === 1,
       panelHost: getContextualTourPanelHost(target.element)

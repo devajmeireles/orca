@@ -1130,14 +1130,20 @@ describe('createUISlice contextual tours', () => {
     expect(store.getState().contextualTourShownThisSession).toBe(false)
   })
 
-  it('blocks contextual tours while creation modals are open', () => {
+  it('allows only workspace creation over its workspace composer modal', () => {
     const store = createUIStore()
-    stubContextualTourTargets(['[data-contextual-tour-target="tasks-source-filters"]'])
+    stubContextualTourTargets([
+      '[data-contextual-tour-target="tasks-source-filters"]',
+      '[data-contextual-tour-target="workspace-creation-project"]'
+    ])
     store.getState().hydratePersistedUI(makeAutoTourEligibleUI())
 
     store.getState().openModal('new-workspace-composer')
     store.getState().requestContextualTour('tasks', 'tasks_open')
     expect(store.getState().activeContextualTourId).toBeNull()
+
+    store.getState().requestContextualTour('workspace-creation', 'workspace_creation_modal')
+    expect(store.getState().activeContextualTourId).toBe('workspace-creation')
   })
 
   it('advances across visible steps and leaves completion to the overlay', () => {

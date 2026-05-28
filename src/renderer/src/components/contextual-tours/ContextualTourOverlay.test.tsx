@@ -126,6 +126,20 @@ describe('ContextualTourOverlaySurface', () => {
     expect(markup).toContain('Done')
   })
 
+  it('renders configured step controls inside the tour panel', () => {
+    const markup = renderToStaticMarkup(
+      renderSurface({
+        control: { kind: 'auto-rename-branch-from-work' },
+        title: 'Name it now or let Orca do it',
+        body: 'Type a name if you know it.'
+      })
+    )
+
+    expect(markup).toContain('Auto-name from first message')
+    expect(markup).toContain('role="switch"')
+    expect(markup).toContain('Auto-name workspace from first agent message')
+  })
+
   it('hides the Back button on the first visible step', () => {
     const markup = renderToStaticMarkup(renderSurface({ isFirstStep: true }))
     expect(markup).not.toContain('>Back<')

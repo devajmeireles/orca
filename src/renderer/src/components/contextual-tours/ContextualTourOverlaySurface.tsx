@@ -4,7 +4,10 @@ import { ArrowLeft, ArrowRight } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 import { useAppStore } from '@/store'
-import type { ContextualTourId } from '../../../../shared/contextual-tours'
+import type {
+  ContextualTourId,
+  ContextualTourStepControl
+} from '../../../../shared/contextual-tours'
 import type { ContextualTourPanelPlacement } from './contextual-tour-gate'
 
 const FOCUSABLE_SELECTOR =
@@ -17,6 +20,7 @@ export type ActiveTourRenderState = {
   progress: { current: number; total: number }
   title: string
   body: string
+  control?: ContextualTourStepControl
   isLastStep: boolean
   isFirstStep: boolean
   panelHost: HTMLElement | null
@@ -101,6 +105,7 @@ export function ContextualTourOverlaySurface({
           {renderState.title}
         </h2>
         <p className="mt-1.5 text-xs leading-5 text-muted-foreground">{renderState.body}</p>
+        {renderState.control ? <ContextualTourControl control={renderState.control} /> : null}
         <div className="mt-3.5 flex items-center justify-between gap-3">
           <ContextualTourProgressDots
             current={renderState.progress.current}
@@ -145,6 +150,57 @@ export function ContextualTourOverlaySurface({
     >
       <div className="pointer-events-auto">
         {panelHost ? createPortal(panel, panelHost) : panel}
+      </div>
+    </div>
+  )
+}
+
+function ContextualTourControl({
+  control
+}: {
+  control: ContextualTourStepControl
+}): JSX.Element | null {
+  switch (control.kind) {
+    case 'auto-rename-branch-from-work':
+      return <AutoRenameBranchFromWorkControl />
+    default:
+      return null
+  }
+}
+
+function AutoRenameBranchFromWorkControl(): JSX.Element {
+  const enabled = useAppStore((s) => s.settings?.autoRenameBranchFromWork === true)
+  const updateSettings = useAppStore((s) => s.updateSettings)
+
+  return (
+    <div className="mt-3 rounded-md border border-border/70 bg-muted/35 px-3 py-2.5">
+      <div className="flex items-center justify-between gap-3">
+        <div className="min-w-0">
+          <div className="text-xs font-medium text-foreground">Auto-name from first message</div>
+          <div className="mt-0.5 text-[11px] leading-4 text-muted-foreground">
+            Works when you leave the generated name unchanged.
+          </div>
+        </div>
+        <button
+          type="button"
+          role="switch"
+          aria-checked={enabled}
+          aria-label="Auto-name workspace from first agent message"
+          onClick={() => {
+            void updateSettings({ autoRenameBranchFromWork: !enabled })
+          }}
+          className={cn(
+            'relative inline-flex h-5 w-9 shrink-0 cursor-pointer items-center rounded-full border border-transparent transition-colors',
+            enabled ? 'bg-foreground' : 'bg-muted-foreground/30'
+          )}
+        >
+          <span
+            className={cn(
+              'pointer-events-none block size-3.5 rounded-full bg-background shadow-sm transition-transform',
+              enabled ? 'translate-x-4' : 'translate-x-0.5'
+            )}
+          />
+        </button>
       </div>
     </div>
   )

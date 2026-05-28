@@ -6,7 +6,8 @@ const SEEN_FIRST_RUN_CONTEXTUAL_TOUR_IDS = [
   'workspace-board',
   'browser',
   'tasks',
-  'automations'
+  'automations',
+  'workspace-creation'
 ] as const
 const SEEN_FIRST_RUN_FEATURE_INTERACTION_TIMESTAMP = Date.parse('2026-01-01T00:00:00.000Z')
 
