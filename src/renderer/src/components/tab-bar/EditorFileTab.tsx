@@ -18,6 +18,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger
 } from '@/components/ui/dropdown-menu'
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { basename, normalizeRelativePath } from '@/lib/path'
 import { getEditorDisplayLabel } from '@/components/editor/editor-labels'
 import { renameFileOnDisk } from '@/lib/rename-file'
@@ -177,6 +178,7 @@ export default function EditorFileTab({
       ? null
       : (statusByRelativePath.get(normalizeRelativePath(file.relativePath)) ?? null)
   const tabStatusColor = tabStatus ? STATUS_COLORS[tabStatus] : undefined
+  const tabLabel = getEditorDisplayLabel(file)
 
   useEffect(() => {
     const closeMenu = (): void => setMenuOpen(false)
@@ -198,6 +200,143 @@ export default function EditorFileTab({
     return () => window.removeEventListener('blur', dismiss)
   }, [menuOpen])
 
+  const tabRoot = (
+    <div
+      ref={setNodeRef}
+      {...attributes}
+      {...listeners}
+      className={`group relative flex items-center h-full px-1.5 text-xs cursor-pointer select-none shrink-0 outline-none focus:outline-none focus-visible:outline-none border-t ${hasTabsToRight ? 'border-r' : ''} border-border bg-card ${getDropIndicatorClasses(dropIndicator ?? null)} ${
+        isActive ? 'text-foreground' : 'text-muted-foreground hover:text-foreground'
+      }`}
+      onPointerDown={(e) => {
+        if (e.button !== 0) {
+          return
+        }
+        onActivate()
+        listeners?.onPointerDown?.(e)
+      }}
+      onDoubleClick={() => {
+        if (file.isPreview && onPin) {
+          onPin()
+        }
+      }}
+      onMouseDown={(e) => {
+        if (e.button === 1) {
+          e.preventDefault()
+        }
+      }}
+      onMouseUp={preventMiddleButtonDefault}
+      onAuxClick={(e) => {
+        if (e.button === 1) {
+          e.preventDefault()
+          e.stopPropagation()
+          onClose()
+        }
+      }}
+    >
+      {isActive && <span className={ACTIVE_TAB_INDICATOR_CLASSES} aria-hidden />}
+      {isConflictReview ? (
+        <ShieldAlert
+          className={`w-3 h-3 mr-1 shrink-0 ${isActive ? 'text-orange-400' : 'text-orange-400/70'}`}
+        />
+      ) : isDiff ? (
+        <GitCompareArrows
+          className={`w-3 h-3 mr-1 shrink-0 ${isActive ? 'text-foreground' : 'text-muted-foreground'}`}
+        />
+      ) : isMarkdownPreviewTab ? (
+        <Eye
+          className={`w-3.5 h-3.5 mr-1.5 shrink-0 ${isActive ? 'text-foreground' : 'text-muted-foreground'}`}
+        />
+      ) : (
+        <FileIcon
+          className={`w-3 h-3 mr-1 shrink-0 ${isActive ? 'text-foreground' : 'text-muted-foreground'}`}
+        />
+      )}
+      <span className="mr-1 flex min-w-0 items-baseline gap-1">
+        {isRenaming ? (
+          <input
+            ref={renameInputRef}
+            defaultValue={basename(file.filePath)}
+            // Tiny border to make the edit affordance obvious without
+            // changing overall tab height. Size matches the label span.
+            className="truncate max-w-[80px] bg-transparent text-xs text-foreground outline-none border border-ring rounded-sm px-1 py-0"
+            onPointerDown={(e) => e.stopPropagation()}
+            onMouseDown={(e) => e.stopPropagation()}
+            onClick={(e) => e.stopPropagation()}
+            onDoubleClick={(e) => e.stopPropagation()}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                e.preventDefault()
+                e.stopPropagation()
+                commitRename()
+              } else if (e.key === 'Escape') {
+                e.preventDefault()
+                e.stopPropagation()
+                renameCancelledRef.current = true
+                setIsRenaming(false)
+              }
+            }}
+            onBlur={commitRename}
+          />
+        ) : (
+          <span
+            className={`truncate max-w-[80px]${file.isPreview ? ' italic' : ''}${file.externalMutation ? ' line-through' : ''}`}
+            style={tabStatusColor ? { color: tabStatusColor } : undefined}
+            onDoubleClick={(e) => {
+              // Why: the outer tab's onDoubleClick pins preview tabs. Scope
+              // rename to the filename text only so pin-on-dblclick still
+              // works anywhere else on the tab chrome (matching VS Code).
+              if (!canRename) {
+                return
+              }
+              e.stopPropagation()
+              setIsRenaming(true)
+            }}
+          >
+            {tabLabel}
+          </span>
+        )}
+        {file.externalMutation && !isRenaming && (
+          <span className="shrink-0 text-[10px] leading-none font-semibold tracking-wide text-muted-foreground">
+            {file.externalMutation}
+          </span>
+        )}
+        {tabStatus && !isRenaming && !file.externalMutation && (
+          <span
+            className="shrink-0 text-[10px] leading-none font-semibold tracking-wide"
+            style={{ color: tabStatusColor }}
+          >
+            {STATUS_LABELS[tabStatus]}
+          </span>
+        )}
+      </span>
+      {/* Dirty dot and close button share the same slot to prevent tab width shift during auto-save.
+         When dirty: dot is shown, close button appears on hover (replacing the dot).
+         When clean: close button is shown normally (visible on active tab, on hover for others). */}
+      <div className="relative flex items-center justify-center w-4 h-4 shrink-0">
+        {file.isDirty && (
+          <span className="absolute size-1.5 rounded-full bg-foreground/60 group-hover:hidden" />
+        )}
+        <button
+          className={`flex items-center justify-center w-4 h-4 rounded-sm ${
+            file.isDirty
+              ? 'hidden group-hover:flex text-muted-foreground hover:text-foreground hover:bg-muted'
+              : isActive
+                ? 'text-muted-foreground hover:text-foreground hover:bg-muted'
+                : 'text-transparent group-hover:text-muted-foreground hover:!text-foreground hover:!bg-muted'
+          }`}
+          onPointerDown={(e) => e.stopPropagation()}
+          onClick={(e) => {
+            e.stopPropagation()
+            onClose()
+          }}
+        >
+          <X className="w-3 h-3" />
+        </button>
+      </div>
+    </div>
+  )
+
   return (
     <>
       <div
@@ -208,140 +347,20 @@ export default function EditorFileTab({
           setMenuOpen(true)
         }}
       >
-        <div
-          ref={setNodeRef}
-          {...attributes}
-          {...listeners}
-          className={`group relative flex items-center h-full px-1.5 text-xs cursor-pointer select-none shrink-0 outline-none focus:outline-none focus-visible:outline-none border-t ${hasTabsToRight ? 'border-r' : ''} border-border bg-card ${getDropIndicatorClasses(dropIndicator ?? null)} ${
-            isActive ? 'text-foreground' : 'text-muted-foreground hover:text-foreground'
-          }`}
-          onPointerDown={(e) => {
-            if (e.button !== 0) {
-              return
-            }
-            onActivate()
-            listeners?.onPointerDown?.(e)
-          }}
-          onDoubleClick={() => {
-            if (file.isPreview && onPin) {
-              onPin()
-            }
-          }}
-          onMouseDown={(e) => {
-            if (e.button === 1) {
-              e.preventDefault()
-            }
-          }}
-          onMouseUp={preventMiddleButtonDefault}
-          onAuxClick={(e) => {
-            if (e.button === 1) {
-              e.preventDefault()
-              e.stopPropagation()
-              onClose()
-            }
-          }}
-        >
-          {isActive && <span className={ACTIVE_TAB_INDICATOR_CLASSES} aria-hidden />}
-          {isConflictReview ? (
-            <ShieldAlert
-              className={`w-3 h-3 mr-1 shrink-0 ${isActive ? 'text-orange-400' : 'text-orange-400/70'}`}
-            />
-          ) : isDiff ? (
-            <GitCompareArrows
-              className={`w-3 h-3 mr-1 shrink-0 ${isActive ? 'text-foreground' : 'text-muted-foreground'}`}
-            />
-          ) : isMarkdownPreviewTab ? (
-            <Eye
-              className={`w-3.5 h-3.5 mr-1.5 shrink-0 ${isActive ? 'text-foreground' : 'text-muted-foreground'}`}
-            />
-          ) : (
-            <FileIcon
-              className={`w-3 h-3 mr-1 shrink-0 ${isActive ? 'text-foreground' : 'text-muted-foreground'}`}
-            />
-          )}
-          <span className="mr-1 flex min-w-0 items-baseline gap-1">
-            {isRenaming ? (
-              <input
-                ref={renameInputRef}
-                defaultValue={basename(file.filePath)}
-                // Tiny border to make the edit affordance obvious without
-                // changing overall tab height. Size matches the label span.
-                className="truncate max-w-[80px] bg-transparent text-xs text-foreground outline-none border border-ring rounded-sm px-1 py-0"
-                onPointerDown={(e) => e.stopPropagation()}
-                onMouseDown={(e) => e.stopPropagation()}
-                onClick={(e) => e.stopPropagation()}
-                onDoubleClick={(e) => e.stopPropagation()}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') {
-                    e.preventDefault()
-                    e.stopPropagation()
-                    commitRename()
-                  } else if (e.key === 'Escape') {
-                    e.preventDefault()
-                    e.stopPropagation()
-                    renameCancelledRef.current = true
-                    setIsRenaming(false)
-                  }
-                }}
-                onBlur={commitRename}
-              />
-            ) : (
-              <span
-                className={`truncate max-w-[80px]${file.isPreview ? ' italic' : ''}${file.externalMutation ? ' line-through' : ''}`}
-                style={tabStatusColor ? { color: tabStatusColor } : undefined}
-                onDoubleClick={(e) => {
-                  // Why: the outer tab's onDoubleClick pins preview tabs. Scope
-                  // rename to the filename text only so pin-on-dblclick still
-                  // works anywhere else on the tab chrome (matching VS Code).
-                  if (!canRename) {
-                    return
-                  }
-                  e.stopPropagation()
-                  setIsRenaming(true)
-                }}
-              >
-                {getEditorDisplayLabel(file)}
-              </span>
-            )}
-            {file.externalMutation && !isRenaming && (
-              <span className="shrink-0 text-[10px] leading-none font-semibold tracking-wide text-muted-foreground">
-                {file.externalMutation}
-              </span>
-            )}
-            {tabStatus && !isRenaming && !file.externalMutation && (
-              <span
-                className="shrink-0 text-[10px] leading-none font-semibold tracking-wide"
-                style={{ color: tabStatusColor }}
-              >
-                {STATUS_LABELS[tabStatus]}
-              </span>
-            )}
-          </span>
-          {/* Dirty dot and close button share the same slot to prevent tab width shift during auto-save.
-             When dirty: dot is shown, close button appears on hover (replacing the dot).
-             When clean: close button is shown normally (visible on active tab, on hover for others). */}
-          <div className="relative flex items-center justify-center w-4 h-4 shrink-0">
-            {file.isDirty && (
-              <span className="absolute size-1.5 rounded-full bg-foreground/60 group-hover:hidden" />
-            )}
-            <button
-              className={`flex items-center justify-center w-4 h-4 rounded-sm ${
-                file.isDirty
-                  ? 'hidden group-hover:flex text-muted-foreground hover:text-foreground hover:bg-muted'
-                  : isActive
-                    ? 'text-muted-foreground hover:text-foreground hover:bg-muted'
-                    : 'text-transparent group-hover:text-muted-foreground hover:!text-foreground hover:!bg-muted'
-              }`}
-              onPointerDown={(e) => e.stopPropagation()}
-              onClick={(e) => {
-                e.stopPropagation()
-                onClose()
-              }}
+        {isRenaming || menuOpen ? (
+          tabRoot
+        ) : (
+          <Tooltip>
+            <TooltipTrigger asChild>{tabRoot}</TooltipTrigger>
+            <TooltipContent
+              side="bottom"
+              sideOffset={6}
+              className="max-w-80 whitespace-normal break-words text-left"
             >
-              <X className="w-3 h-3" />
-            </button>
-          </div>
-        </div>
+              {tabLabel}
+            </TooltipContent>
+          </Tooltip>
+        )}
       </div>
 
       <DropdownMenu open={menuOpen} onOpenChange={setMenuOpen} modal={false}>
