@@ -14,15 +14,12 @@ import {
 import { getContextualTourPanelCssPosition } from './contextual-tour-panel-position'
 
 describe('contextual tour gate', () => {
-  it('allows workspace creation only over its own creation modals', () => {
-    const workspaceCreation = getContextualTour('workspace-creation')
+  it('blocks tours while another modal is active', () => {
     const tasks = getContextualTour('tasks')
 
-    expect(isContextualTourAllowedForModal(workspaceCreation, 'new-workspace-composer')).toBe(true)
-    expect(isContextualTourAllowedForModal(workspaceCreation, 'add-repo')).toBe(true)
-    expect(isContextualTourAllowedForModal(workspaceCreation, 'quick-open')).toBe(false)
     expect(isContextualTourAllowedForModal(tasks, 'none')).toBe(true)
     expect(isContextualTourAllowedForModal(tasks, 'new-workspace-composer')).toBe(false)
+    expect(isContextualTourAllowedForModal(tasks, 'add-repo')).toBe(false)
   })
 
   it('does not start when the required first target is missing', () => {

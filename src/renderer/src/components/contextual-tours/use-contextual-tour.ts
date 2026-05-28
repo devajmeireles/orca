@@ -7,8 +7,7 @@ const TOUR_SOURCES = {
   'workspace-board': 'workspace_board_visible',
   browser: 'browser_visible',
   tasks: 'tasks_open',
-  automations: 'automations_open',
-  'workspace-creation': 'workspace_creation_visible'
+  automations: 'automations_open'
 } satisfies Record<ContextualTourId, string>
 
 export function useContextualTour(

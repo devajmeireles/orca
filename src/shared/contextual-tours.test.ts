@@ -8,13 +8,7 @@ import {
 
 describe('contextual tour definitions', () => {
   it('defines the required tours with three concise steps each', () => {
-    const expectedIds: ContextualTourId[] = [
-      'workspace-board',
-      'browser',
-      'tasks',
-      'automations',
-      'workspace-creation'
-    ]
+    const expectedIds: ContextualTourId[] = ['workspace-board', 'browser', 'tasks', 'automations']
 
     expect(CONTEXTUAL_TOURS.map((tour) => tour.id)).toEqual(expectedIds)
     for (const tour of CONTEXTUAL_TOURS) {
@@ -29,13 +23,12 @@ describe('contextual tour definitions', () => {
     }
   })
 
-  it('keeps workspace creation as the only modal-allowed tour', () => {
+  it('keeps contextual tours out of modal-only flows', () => {
     const modalTours = (CONTEXTUAL_TOURS as readonly ContextualTour[]).filter(
       (tour) => tour.allowedActiveModals?.length
     )
 
-    expect(modalTours.map((tour) => tour.id)).toEqual(['workspace-creation'])
-    expect(modalTours[0]?.allowedActiveModals).toEqual(['new-workspace-composer', 'add-repo'])
+    expect(modalTours).toEqual([])
   })
 
   it('normalizes persisted ids by removing unknowns and duplicates', () => {
@@ -48,6 +41,6 @@ describe('contextual tour definitions', () => {
         null,
         'workspace-creation'
       ])
-    ).toEqual(['tasks', 'browser', 'workspace-creation'])
+    ).toEqual(['tasks', 'browser'])
   })
 })

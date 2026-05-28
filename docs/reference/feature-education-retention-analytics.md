@@ -32,7 +32,7 @@ Emitted once when a contextual tour first renders a measured target.
 
 Payload:
 
-- `tour_id`: `workspace-board`, `browser`, `tasks`, `automations`, or `workspace-creation`
+- `tour_id`: `workspace-board`, `browser`, `tasks`, or `automations`
 - `source`: bounded source enum from `src/shared/feature-education-telemetry.ts`
 - `was_feature_previously_interacted`: boolean from local education state at the moment the tour is shown
 
@@ -122,7 +122,6 @@ Question: Do users later use the feature taught by the tour?
 
 Build funnels from tour events to real product events:
 
-- `workspace-creation`: `contextual_tour_outcome` -> `workspace_created`
 - `tasks`: `contextual_tour_outcome` -> workspace creation from task-linked flows where existing telemetry exposes the source; if the current event is insufficient, add a targeted task-started-workspace event.
 - `browser`: `contextual_tour_outcome` -> browser grab/annotation events. If these do not exist, add targeted events for the concrete actions, not a broad feature-interaction event.
 - `automations`: `contextual_tour_outcome` -> automation creation/run events. If these do not exist, add targeted events for create/run.

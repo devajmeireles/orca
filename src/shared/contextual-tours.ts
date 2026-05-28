@@ -1,9 +1,4 @@
-export type ContextualTourId =
-  | 'workspace-board'
-  | 'browser'
-  | 'tasks'
-  | 'automations'
-  | 'workspace-creation'
+export type ContextualTourId = 'workspace-board' | 'browser' | 'tasks' | 'automations'
 
 export type ContextualTourStep = {
   title: string
@@ -103,28 +98,6 @@ export const CONTEXTUAL_TOURS = [
         title: 'Run and inspect results',
         body: 'Use overview and runs to trigger work manually and review what happened.',
         targetSelector: '[data-contextual-tour-target="automations-runs"]'
-      }
-    ]
-  },
-  {
-    id: 'workspace-creation',
-    allowedActiveModals: ['new-workspace-composer', 'add-repo'],
-    steps: [
-      {
-        title: 'Add the code Orca should work on',
-        body: 'Pick a local folder, clone a repo URL, or connect to a remote machine. Orca needs a project before it can create workspaces.',
-        targetSelector: '[data-contextual-tour-target="workspace-creation-source"]',
-        requiredForStart: true
-      },
-      {
-        title: 'Review advanced options',
-        body: 'Use Advanced or setup-step options for scripts, existing worktrees, notes, or workspace details.',
-        targetSelector: '[data-contextual-tour-target="workspace-creation-setup"]'
-      },
-      {
-        title: 'Create when the inputs are ready',
-        body: 'Start the workspace after the project, name, agent, and setup choices look right.',
-        targetSelector: '[data-contextual-tour-target="workspace-creation-action"]'
       }
     ]
   }
