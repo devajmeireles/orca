@@ -479,7 +479,15 @@ const setupScriptPromptShownSchema = z
 const setupScriptPromptActionSchema = z
   .object({
     ...setupScriptPromptContextSchema,
-    action: z.enum(['import_completed', 'import_failed', 'configure_clicked', 'dismissed'])
+    action: z.enum([
+      'import_completed',
+      'import_failed',
+      'configure_clicked',
+      'dismissed',
+      'generate_setup_clicked',
+      'generate_setup_completed',
+      'generate_setup_failed'
+    ])
   })
   .strict()
   .superRefine(validateSetupScriptPromptProvider)

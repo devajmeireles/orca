@@ -4,14 +4,16 @@
 // creation or removal state.
 
 import { ipcMain } from 'electron'
-import { join } from 'path'
 import type { Store } from '../persistence'
 import { isFolderRepo } from '../../shared/repo-kind'
 import { getSshFilesystemProvider } from '../providers/ssh-filesystem-dispatch'
+import { isENOENT } from './filesystem-auth'
+import { joinWorktreeRelativePath } from '../runtime/runtime-relative-paths'
 import {
   hasHooksFile,
   hasUnrecognizedOrcaYamlKeys,
   loadHooks,
+  parseOrcaYaml,
   readIssueCommand,
   writeIssueCommand
 } from '../hooks'
@@ -24,7 +26,7 @@ export function registerHooksHandlers(store: Store): void {
   ipcMain.handle('hooks:check', async (_event, args: { repoId: string }) => {
     const repo = store.getRepo(args.repoId)
     if (!repo || isFolderRepo(repo)) {
-      return { hasHooks: false, hooks: null, mayNeedUpdate: false }
+      return { status: 'ok', hasHooks: false, hooks: null, mayNeedUpdate: false }
     }
 
     // Why: remote repos read orca.yaml via the SSH filesystem provider.
@@ -33,18 +35,23 @@ export function registerHooksHandlers(store: Store): void {
     if (repo.connectionId) {
       const fsProvider = getSshFilesystemProvider(repo.connectionId)
       if (!fsProvider) {
-        return { hasHooks: false, hooks: null, mayNeedUpdate: false }
+        return { status: 'error', hasHooks: false, hooks: null, mayNeedUpdate: false }
       }
       try {
-        const result = await fsProvider.readFile(join(repo.path, '.orca.yaml'))
+        const result = await fsProvider.readFile(joinWorktreeRelativePath(repo.path, 'orca.yaml'))
         if (result.isBinary) {
-          return { hasHooks: false, hooks: null, mayNeedUpdate: false }
+          return { status: 'ok', hasHooks: false, hooks: null, mayNeedUpdate: false }
         }
         const { parse } = await import('yaml')
         const parsed = parse(result.content)
-        return { hasHooks: true, hooks: parsed, mayNeedUpdate: false }
-      } catch {
-        return { hasHooks: false, hooks: null, mayNeedUpdate: false }
+        return { status: 'ok', hasHooks: true, hooks: parsed, mayNeedUpdate: false }
+      } catch (error) {
+        return {
+          status: isENOENT(error) ? 'ok' : 'error',
+          hasHooks: false,
+          hooks: null,
+          mayNeedUpdate: false
+        }
       }
     }
 
@@ -56,6 +63,7 @@ export function registerHooksHandlers(store: Store): void {
     // instead of implying the file is broken.
     const mayNeedUpdate = has && !hooks && hasUnrecognizedOrcaYamlKeys(repo.path)
     return {
+      status: 'ok',
       hasHooks: has,
       hooks,
       mayNeedUpdate
@@ -66,6 +74,7 @@ export function registerHooksHandlers(store: Store): void {
     const repo = store.getRepo(args.repoId)
     if (!repo || isFolderRepo(repo)) {
       return {
+        status: 'ok',
         localContent: null,
         sharedContent: null,
         effectiveContent: null,
@@ -76,32 +85,50 @@ export function registerHooksHandlers(store: Store): void {
 
     if (repo.connectionId) {
       const fsProvider = getSshFilesystemProvider(repo.connectionId)
+      const localFilePath = joinWorktreeRelativePath(repo.path, '.orca/issue-command')
       if (!fsProvider) {
         return {
+          status: 'error',
           localContent: null,
           sharedContent: null,
           effectiveContent: null,
-          localFilePath: '',
+          localFilePath,
           source: 'none' as const
         }
       }
+      let status: 'ok' | 'error' = 'ok'
+      let localContent: string | null = null
+      let sharedContent: string | null = null
       try {
-        const result = await fsProvider.readFile(join(repo.path, '.orca', 'issue-command'))
-        return {
-          localContent: result.isBinary ? null : result.content,
-          sharedContent: null,
-          effectiveContent: result.isBinary ? null : result.content,
-          localFilePath: join(repo.path, '.orca', 'issue-command'),
-          source: 'local' as const
+        const result = await fsProvider.readFile(localFilePath)
+        localContent = result.isBinary ? null : result.content.trim() || null
+      } catch (error) {
+        if (!isENOENT(error)) {
+          status = 'error'
         }
-      } catch {
-        return {
-          localContent: null,
-          sharedContent: null,
-          effectiveContent: null,
-          localFilePath: '',
-          source: 'none' as const
+      }
+      try {
+        const result = await fsProvider.readFile(joinWorktreeRelativePath(repo.path, 'orca.yaml'))
+        sharedContent = result.isBinary
+          ? null
+          : parseOrcaYaml(result.content)?.issueCommand?.trim() || null
+      } catch (error) {
+        if (!isENOENT(error)) {
+          status = 'error'
         }
+      }
+      const effectiveContent = localContent ?? sharedContent
+      return {
+        status: localContent ? 'ok' : status,
+        localContent,
+        sharedContent,
+        effectiveContent,
+        localFilePath,
+        source: localContent
+          ? ('local' as const)
+          : sharedContent
+            ? ('shared' as const)
+            : ('none' as const)
       }
     }
 
@@ -119,9 +146,35 @@ export function registerHooksHandlers(store: Store): void {
       if (repo.connectionId) {
         const fsProvider = getSshFilesystemProvider(repo.connectionId)
         if (!fsProvider) {
+          throw new Error(
+            'Remote filesystem unavailable. Reconnect the SSH target before retrying.'
+          )
+        }
+        const issueCommandPath = joinWorktreeRelativePath(repo.path, '.orca/issue-command')
+        const trimmed = args.content.trim()
+        if (!trimmed) {
+          await fsProvider.deletePath(issueCommandPath, false).catch((error: unknown) => {
+            if (!isENOENT(error)) {
+              throw error
+            }
+          })
           return
         }
-        await fsProvider.writeFile(join(repo.path, '.orca', 'issue-command'), args.content)
+        await fsProvider.createDir(joinWorktreeRelativePath(repo.path, '.orca'))
+        const gitignorePath = joinWorktreeRelativePath(repo.path, '.gitignore')
+        try {
+          const result = await fsProvider.readFile(gitignorePath)
+          if (!result.isBinary && !/^\.orca\/?$/m.test(result.content)) {
+            const separator = result.content.endsWith('\n') ? '' : '\n'
+            await fsProvider.writeFile(gitignorePath, `${result.content}${separator}.orca\n`)
+          }
+        } catch (error) {
+          if (!isENOENT(error)) {
+            throw error
+          }
+          await fsProvider.writeFile(gitignorePath, '.orca\n')
+        }
+        await fsProvider.writeFile(issueCommandPath, `${trimmed}\n`)
         return
       }
 

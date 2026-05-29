@@ -912,7 +912,9 @@ export const createWorktreeSlice: StateCreator<AppState, [], [], WorktreeSlice> 
     branchNameOverride,
     workspaceStatus,
     linkedGitLabMR,
-    linkedGitLabIssue
+    linkedGitLabIssue,
+    startup,
+    runtimeStartupPrompt
   ) => {
     const retryableConflictPatterns = [
       /already exists locally/i,
@@ -973,6 +975,7 @@ export const createWorktreeSlice: StateCreator<AppState, [], [], WorktreeSlice> 
                     setupDecision,
                     sparseCheckout,
                     ...(displayName ? { displayName } : {}),
+                    ...(telemetrySource ? { telemetrySource } : {}),
                     ...(linkedIssue !== undefined ? { linkedIssue } : {}),
                     ...(linkedPR !== undefined ? { linkedPR } : {}),
                     ...(pushTarget ? { pushTarget } : {}),
@@ -981,7 +984,20 @@ export const createWorktreeSlice: StateCreator<AppState, [], [], WorktreeSlice> 
                     ...(manualOrder !== undefined ? { manualOrder } : {}),
                     ...(workspaceStatus !== undefined ? { workspaceStatus } : {}),
                     ...(linkedGitLabMR !== undefined ? { linkedGitLabMR } : {}),
-                    ...(linkedGitLabIssue !== undefined ? { linkedGitLabIssue } : {})
+                    ...(linkedGitLabIssue !== undefined ? { linkedGitLabIssue } : {}),
+                    ...(startup
+                      ? {
+                          startupCommand: startup.command,
+                          ...(startup.env ? { startupEnv: startup.env } : {}),
+                          activate: true
+                        }
+                      : {}),
+                    ...(runtimeStartupPrompt
+                      ? {
+                          startupPrompt: runtimeStartupPrompt,
+                          activate: true
+                        }
+                      : {})
                   },
                   { timeoutMs: 10 * 60_000 }
                 )

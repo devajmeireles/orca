@@ -1737,6 +1737,7 @@ describe('OrcaRuntimeService', () => {
 
     try {
       await expect(runtime.checkRepoHooks('id:repo-1')).resolves.toMatchObject({
+        status: 'ok',
         hasHooks: true,
         mayNeedUpdate: false
       })
@@ -1763,6 +1764,37 @@ describe('OrcaRuntimeService', () => {
       'C:\\remote\\repo\\.gitignore',
       'node_modules\n.orca\n'
     )
+  })
+
+  it('reports SSH hook check read failures without inferring missing hooks', async () => {
+    const remoteStore = {
+      ...store,
+      getRepos: () => [
+        {
+          id: TEST_REPO_ID,
+          path: '/remote/repo',
+          displayName: 'repo',
+          badgeColor: 'blue',
+          addedAt: 1,
+          connectionId: 'ssh-1'
+        }
+      ]
+    }
+    const fsProvider = {
+      readFile: vi.fn().mockRejectedValue(new Error('relay disconnected'))
+    }
+    registerSshFilesystemProvider('ssh-1', fsProvider as never)
+    const runtime = new OrcaRuntimeService(remoteStore as never)
+
+    try {
+      await expect(runtime.checkRepoHooks('id:repo-1')).resolves.toMatchObject({
+        status: 'error',
+        hasHooks: false,
+        hooks: null
+      })
+    } finally {
+      unregisterSshFilesystemProvider('ssh-1')
+    }
   })
 
   it('resolves SSH issue commands from shared orca.yaml and deletes empty overrides', async () => {
@@ -1821,6 +1853,99 @@ describe('OrcaRuntimeService', () => {
       '/remote/repo/.orca/issue-command',
       expect.anything()
     )
+  })
+
+  it('keeps runtime SSH issue-command local overrides usable when shared read fails', async () => {
+    const remoteStore = {
+      ...store,
+      getRepos: () => [
+        {
+          id: TEST_REPO_ID,
+          path: '/remote/repo',
+          displayName: 'repo',
+          badgeColor: 'blue',
+          addedAt: 1,
+          connectionId: 'ssh-1'
+        }
+      ]
+    }
+    const fsProvider = {
+      readFile: vi.fn(async (filePath: string) => {
+        if (filePath.endsWith('/.orca/issue-command')) {
+          return { content: 'local command\n', isBinary: false }
+        }
+        throw new Error('shared read failed')
+      })
+    }
+    registerSshFilesystemProvider('ssh-1', fsProvider as never)
+    const runtime = new OrcaRuntimeService(remoteStore as never)
+
+    try {
+      await expect(runtime.readRepoIssueCommand('id:repo-1')).resolves.toMatchObject({
+        status: 'ok',
+        localContent: 'local command',
+        sharedContent: null,
+        effectiveContent: 'local command',
+        source: 'local'
+      })
+    } finally {
+      unregisterSshFilesystemProvider('ssh-1')
+    }
+  })
+
+  it('rejects SSH issue-command writes when the runtime filesystem provider is unavailable', async () => {
+    const remoteStore = {
+      ...store,
+      getRepos: () => [
+        {
+          id: TEST_REPO_ID,
+          path: '/remote/repo',
+          displayName: 'repo',
+          badgeColor: 'blue',
+          addedAt: 1,
+          connectionId: 'ssh-1'
+        }
+      ]
+    }
+    const runtime = new OrcaRuntimeService(remoteStore as never)
+
+    await expect(runtime.writeRepoIssueCommand('id:repo-1', 'Ship it')).rejects.toThrow(
+      'Remote filesystem unavailable'
+    )
+  })
+
+  it('does not overwrite remote .gitignore on runtime SSH issue-command read failures', async () => {
+    const remoteStore = {
+      ...store,
+      getRepos: () => [
+        {
+          id: TEST_REPO_ID,
+          path: '/remote/repo',
+          displayName: 'repo',
+          badgeColor: 'blue',
+          addedAt: 1,
+          connectionId: 'ssh-1'
+        }
+      ]
+    }
+    const fsProvider = {
+      createDir: vi.fn().mockResolvedValue(undefined),
+      readFile: vi.fn().mockRejectedValue(new Error('relay disconnected')),
+      writeFile: vi.fn().mockResolvedValue(undefined),
+      deletePath: vi.fn().mockResolvedValue(undefined)
+    }
+    registerSshFilesystemProvider('ssh-1', fsProvider as never)
+    const runtime = new OrcaRuntimeService(remoteStore as never)
+
+    try {
+      await expect(runtime.writeRepoIssueCommand('id:repo-1', 'Ship it')).rejects.toThrow(
+        'relay disconnected'
+      )
+    } finally {
+      unregisterSshFilesystemProvider('ssh-1')
+    }
+
+    expect(fsProvider.writeFile).not.toHaveBeenCalled()
   })
 
   it('allows host integration slug helpers for SSH repos through provider-aware GitHub clients', async () => {
@@ -7528,6 +7653,112 @@ describe('OrcaRuntimeService', () => {
     await vi.waitFor(() => {
       expect(write).toHaveBeenCalledWith('pty-startup-draft', `\x1b[200~${draftUrl}\x1b[201~`)
     })
+  })
+
+  it('builds startup prompts on the runtime host for managed worktree creates', async () => {
+    detectInstalledAgentsMock.mockResolvedValue(['codex'])
+    const metaById: Record<string, WorktreeMeta> = {}
+    const runtimeStore = {
+      ...store,
+      getSettings: () => ({
+        ...store.getSettings(),
+        defaultTuiAgent: 'codex' as const,
+        agentCmdOverrides: { codex: 'codex --profile runtime' }
+      }),
+      getAllWorktreeMeta: () => metaById,
+      getWorktreeMeta: (worktreeId: string) => metaById[worktreeId],
+      setWorktreeMeta: (worktreeId: string, meta: Partial<WorktreeMeta>) => {
+        metaById[worktreeId] = { ...(metaById[worktreeId] ?? makeWorktreeMeta()), ...meta }
+        return metaById[worktreeId]
+      }
+    }
+    const runtime = new OrcaRuntimeService(runtimeStore as never)
+    const spawn = vi.fn().mockResolvedValue({ id: 'pty-startup-prompt' })
+    runtime.setPtyController({
+      spawn,
+      write: () => true,
+      kill: () => true,
+      getForegroundProcess: async () => null
+    })
+    runtime.setNotifier({
+      worktreesChanged: vi.fn(),
+      reposChanged: vi.fn(),
+      activateWorktree: vi.fn(),
+      createTerminal: vi.fn(),
+      revealTerminalSession: vi.fn().mockResolvedValue({ tabId: 'tab-startup-prompt' }),
+      splitTerminal: vi.fn(),
+      renameTerminal: vi.fn(),
+      focusTerminal: vi.fn(),
+      closeTerminal: vi.fn(),
+      sleepWorktree: vi.fn(),
+      terminalFitOverrideChanged: vi.fn(),
+      terminalDriverChanged: vi.fn()
+    })
+    runtime.attachWindow(1)
+
+    computeWorktreePathMock.mockReturnValue('/tmp/workspaces/runtime-startup-prompt')
+    ensurePathWithinWorkspaceMock.mockReturnValue('/tmp/workspaces/runtime-startup-prompt')
+    vi.mocked(listWorktrees).mockResolvedValue([
+      {
+        path: '/tmp/workspaces/runtime-startup-prompt',
+        head: 'def',
+        branch: 'runtime-startup-prompt',
+        isBare: false,
+        isMainWorktree: false
+      }
+    ])
+
+    const result = await runtime.createManagedWorktree({
+      repoSelector: 'id:repo-1',
+      name: 'runtime-startup-prompt',
+      startupPrompt: 'Inspect the repo and add orca.yaml.',
+      createdWithAgent: 'codex',
+      activate: true
+    })
+
+    expect(spawn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        cwd: '/tmp/workspaces/runtime-startup-prompt',
+        command: "codex --profile runtime 'Inspect the repo and add orca.yaml.'",
+        worktreeId: result.worktree.id
+      })
+    )
+    expect(detectInstalledAgentsMock).toHaveBeenCalled()
+    expect(metaById[result.worktree.id]).toMatchObject({ createdWithAgent: 'codex' })
+  })
+
+  it('rejects startup prompts before creating when the selected runtime agent is undetected', async () => {
+    detectInstalledAgentsMock.mockResolvedValue(['claude'])
+    const runtimeStore = {
+      ...store,
+      getSettings: () => ({
+        ...store.getSettings(),
+        defaultTuiAgent: 'codex' as const,
+        agentCmdOverrides: { codex: 'codex --profile runtime' }
+      })
+    }
+    const runtime = new OrcaRuntimeService(runtimeStore as never)
+    const spawn = vi.fn().mockResolvedValue({ id: 'pty-startup-prompt' })
+    runtime.setPtyController({
+      spawn,
+      write: () => true,
+      kill: () => true,
+      getForegroundProcess: async () => null
+    })
+
+    await expect(
+      runtime.createManagedWorktree({
+        repoSelector: 'id:repo-1',
+        name: 'runtime-startup-prompt',
+        startupPrompt: 'Inspect the repo and add orca.yaml.',
+        createdWithAgent: 'codex',
+        activate: true
+      })
+    ).rejects.toThrow('Could not build a startup command for the selected agent.')
+
+    expect(detectInstalledAgentsMock).toHaveBeenCalled()
+    expect(spawn).not.toHaveBeenCalled()
+    expect(addWorktree).not.toHaveBeenCalled()
   })
 
   it('rejects explicit startup commands for disabled selected agents', async () => {
