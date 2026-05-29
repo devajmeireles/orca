@@ -47,6 +47,7 @@ import type {
   ExternalAutomationJob,
   ExternalAutomationManager,
   ExternalAutomationRun,
+  AutomationPrecheck,
   AutomationRun,
   AutomationUpdateInput
 } from '../../../../shared/automations-types'
@@ -129,6 +130,18 @@ function parseDraftTime(time: string): { hour: number; minute: number } {
   return {
     hour: Number.isFinite(rawHour) ? rawHour : 9,
     minute: Number.isFinite(rawMinute) ? rawMinute : 0
+  }
+}
+
+function buildDraftPrecheck(draft: AutomationDraft): AutomationPrecheck | null {
+  const command = draft.precheckCommand.trim()
+  if (!command) {
+    return null
+  }
+  const rawTimeout = Number(draft.precheckTimeoutSeconds)
+  return {
+    command,
+    timeoutSeconds: Number.isFinite(rawTimeout) ? rawTimeout : 60
   }
 }
 
@@ -215,6 +228,14 @@ function getAutomationRunContent(run: AutomationRun): string {
   const savedOutput = run.outputSnapshot?.content.trim()
   if (savedOutput) {
     return run.outputSnapshot?.content ?? savedOutput
+  }
+  if (run.precheckResult) {
+    const output = [run.precheckResult.stderr.trim(), run.precheckResult.stdout.trim()]
+      .filter(Boolean)
+      .join('\n\n')
+    if (output) {
+      return output
+    }
   }
   return run.error ?? run.usage?.unavailableMessage ?? 'No output content available.'
 }
@@ -322,6 +343,8 @@ export default function AutomationsPage(): React.JSX.Element {
     workspaceId: '',
     baseBranch: '',
     reuseSession: false,
+    precheckCommand: '',
+    precheckTimeoutSeconds: '60',
     preset: 'weekdays',
     time: DEFAULT_TIME,
     dayOfWeek: '1',
@@ -704,6 +727,8 @@ export default function AutomationsPage(): React.JSX.Element {
       workspaceId: target.workspaceId,
       baseBranch: '',
       reuseSession: false,
+      precheckCommand: '',
+      precheckTimeoutSeconds: '60',
       preset: 'weekdays',
       time: DEFAULT_TIME,
       dayOfWeek: '1',
@@ -756,6 +781,8 @@ export default function AutomationsPage(): React.JSX.Element {
       workspaceId: latest.workspaceId ?? '',
       baseBranch: latest.baseBranch ?? '',
       reuseSession: latest.workspaceMode === 'existing' && latest.reuseSession,
+      precheckCommand: latest.precheck?.command ?? '',
+      precheckTimeoutSeconds: String(latest.precheck?.timeoutSeconds ?? 60),
       preset: schedule?.preset ?? (hasCustomSchedule ? 'custom' : 'weekdays'),
       time: schedule ? formatTimeInput(schedule.hour, schedule.minute) : DEFAULT_TIME,
       dayOfWeek: String(schedule?.dayOfWeek ?? 1),
@@ -801,6 +828,8 @@ export default function AutomationsPage(): React.JSX.Element {
       workspaceId,
       baseBranch: '',
       reuseSession: false,
+      precheckCommand: '',
+      precheckTimeoutSeconds: '60',
       preset: hasCustomSchedule ? 'custom' : 'weekdays',
       time: DEFAULT_TIME,
       dayOfWeek: '1',
@@ -955,6 +984,7 @@ export default function AutomationsPage(): React.JSX.Element {
       const missedRunGraceMinutes = Number.isFinite(rawMissedRunGraceMinutes)
         ? Math.max(0, rawMissedRunGraceMinutes)
         : 720
+      const precheck = buildDraftPrecheck(draft)
       let currentAutomation = editingAutomationId
         ? (automations.find((automation) => automation.id === editingAutomationId) ?? null)
         : null
@@ -971,6 +1001,7 @@ export default function AutomationsPage(): React.JSX.Element {
       const updates: AutomationUpdateInput = {
         name: draft.name,
         prompt: draft.prompt,
+        precheck,
         agentId: draft.agentId,
         projectId: draft.projectId,
         workspaceMode: draft.workspaceMode,
@@ -993,6 +1024,7 @@ export default function AutomationsPage(): React.JSX.Element {
         : await window.api.automations.create({
             name: draft.name,
             prompt: draft.prompt,
+            precheck,
             agentId: draft.agentId,
             projectId: draft.projectId,
             workspaceMode: draft.workspaceMode,

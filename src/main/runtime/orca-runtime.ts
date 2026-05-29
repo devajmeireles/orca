@@ -1571,6 +1571,7 @@ export class OrcaRuntimeService {
     return this.store.createAutomation({
       name: input.name,
       prompt: input.prompt,
+      precheck: input.precheck,
       agentId: input.agentId,
       projectId: target.projectId,
       workspaceMode: target.workspaceMode,
@@ -1596,6 +1597,9 @@ export class OrcaRuntimeService {
     }
     if (hasRuntimeAutomationUpdateValue(updates, 'prompt')) {
       patch.prompt = updates.prompt
+    }
+    if (hasRuntimeAutomationUpdateValue(updates, 'precheck')) {
+      patch.precheck = updates.precheck
     }
     if (hasRuntimeAutomationUpdateValue(updates, 'agentId')) {
       patch.agentId = updates.agentId

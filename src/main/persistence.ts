@@ -21,6 +21,7 @@ import type {
   Automation,
   AutomationCreateInput,
   AutomationDispatchResult,
+  AutomationPrecheckResult,
   AutomationRunOutputSnapshot,
   AutomationRun,
   AutomationRunTrigger,
@@ -30,6 +31,7 @@ import {
   latestAutomationOccurrenceAtOrBefore,
   nextAutomationOccurrenceAfter
 } from '../shared/automation-schedules'
+import { normalizeAutomationPrecheck } from '../shared/automation-precheck'
 import type {
   PersistedState,
   Repo,
@@ -368,9 +370,43 @@ function normalizeAutomationRunOutputSnapshot(
   }
 }
 
+function normalizeAutomationPrecheckResult(
+  value: AutomationPrecheckResult | null | undefined
+): AutomationPrecheckResult | null {
+  if (!value || typeof value.command !== 'string' || !value.command.trim()) {
+    return null
+  }
+  const startedAt =
+    typeof value.startedAt === 'number' && Number.isFinite(value.startedAt)
+      ? value.startedAt
+      : Date.now()
+  const completedAt =
+    typeof value.completedAt === 'number' && Number.isFinite(value.completedAt)
+      ? value.completedAt
+      : startedAt
+  return {
+    command: value.command.trim(),
+    exitCode:
+      typeof value.exitCode === 'number' && Number.isFinite(value.exitCode) ? value.exitCode : null,
+    timedOut: value.timedOut === true,
+    durationMs:
+      typeof value.durationMs === 'number' && Number.isFinite(value.durationMs)
+        ? Math.max(0, value.durationMs)
+        : Math.max(0, completedAt - startedAt),
+    stdout: typeof value.stdout === 'string' ? value.stdout : '',
+    stderr: typeof value.stderr === 'string' ? value.stderr : '',
+    stdoutTruncated: value.stdoutTruncated === true,
+    stderrTruncated: value.stderrTruncated === true,
+    error: typeof value.error === 'string' && value.error.trim() ? value.error : null,
+    startedAt,
+    completedAt
+  }
+}
+
 function normalizeAutomationSessionReuse(automation: Automation): Automation {
   return {
     ...automation,
+    precheck: normalizeAutomationPrecheck(automation.precheck),
     reuseSession: automation.workspaceMode === 'existing' && automation.reuseSession === true
   }
 }
@@ -2420,9 +2456,12 @@ export class Store {
 
   listAutomationRuns(automationId?: string): AutomationRun[] {
     const runs = this.state.automationRuns ?? []
-    return [
-      ...(automationId ? runs.filter((run) => run.automationId === automationId) : runs)
-    ].sort((left, right) => right.createdAt - left.createdAt)
+    return [...(automationId ? runs.filter((run) => run.automationId === automationId) : runs)]
+      .map((run) => ({
+        ...run,
+        precheckResult: normalizeAutomationPrecheckResult(run.precheckResult)
+      }))
+      .sort((left, right) => right.createdAt - left.createdAt)
   }
 
   createAutomation(input: AutomationCreateInput): Automation {
@@ -2433,6 +2472,7 @@ export class Store {
       id: randomUUID(),
       name: input.name.trim() || 'Untitled automation',
       prompt: input.prompt,
+      precheck: normalizeAutomationPrecheck(input.precheck),
       agentId: input.agentId,
       projectId: input.projectId,
       executionTargetType,
@@ -2476,6 +2516,9 @@ export class Store {
       ...updates,
       name:
         updates.name !== undefined ? updates.name.trim() || 'Untitled automation' : current.name,
+      precheck: Object.hasOwn(updates, 'precheck')
+        ? normalizeAutomationPrecheck(updates.precheck)
+        : normalizeAutomationPrecheck(current.precheck),
       projectId: repoId,
       executionTargetType,
       executionTargetId: executionTargetType === 'ssh' ? (repo?.connectionId ?? '') : 'local',
@@ -2545,6 +2588,7 @@ export class Store {
       chatSessionId: null,
       terminalSessionId: null,
       outputSnapshot: null,
+      precheckResult: null,
       usage: null,
       error: null,
       startedAt: null,
@@ -2582,6 +2626,9 @@ export class Store {
       outputSnapshot: Object.hasOwn(result, 'outputSnapshot')
         ? normalizeAutomationRunOutputSnapshot(result.outputSnapshot)
         : normalizeAutomationRunOutputSnapshot(current.outputSnapshot),
+      precheckResult: Object.hasOwn(result, 'precheckResult')
+        ? normalizeAutomationPrecheckResult(result.precheckResult)
+        : normalizeAutomationPrecheckResult(current.precheckResult),
       usage: Object.hasOwn(result, 'usage') ? (result.usage ?? null) : (current.usage ?? null),
       error: result.error ?? null,
       startedAt: current.startedAt ?? now,
