@@ -181,6 +181,9 @@ export default function CombinedDiffViewer({
   const [clearNotesDialogOpen, setClearNotesDialogOpen] = useState(false)
   const [isClearingNotes, setIsClearingNotes] = useState(false)
   const [notesCopied, setNotesCopied] = useState(false)
+  // Why: copy feedback is created by the copy action, so the same handler owns
+  // its reset timer instead of repairing copied state after render.
+  const notesCopiedResetTimerRef = useRef<number | null>(null)
   const [fileTreeCollapsed, setFileTreeCollapsedState] = useState(() =>
     getInitialCombinedDiffFileTreeCollapsed(settings?.combinedDiffFileTreeVisibleByDefault)
   )
@@ -868,21 +871,20 @@ export default function CombinedDiffViewer({
     }
   }, [diffCommentCount, isClearingNotes])
 
-  useEffect(() => {
-    if (!notesCopied) {
-      return
-    }
-    const handle = window.setTimeout(() => setNotesCopied(false), 1500)
-    return () => window.clearTimeout(handle)
-  }, [notesCopied])
-
   const handleCopyNotes = useCallback(async (): Promise<void> => {
     if (diffCommentCount === 0) {
       return
     }
     try {
       await window.api.ui.writeClipboardText(diffCommentsPrompt)
+      if (notesCopiedResetTimerRef.current !== null) {
+        window.clearTimeout(notesCopiedResetTimerRef.current)
+      }
       setNotesCopied(true)
+      notesCopiedResetTimerRef.current = window.setTimeout(() => {
+        setNotesCopied(false)
+        notesCopiedResetTimerRef.current = null
+      }, 1500)
     } catch {
       // Why: clipboard writes can fail while the app is not focused; this
       // mirrors the sidebar notes action and keeps the popover non-blocking.
