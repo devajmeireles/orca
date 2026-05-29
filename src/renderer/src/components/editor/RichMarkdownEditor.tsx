@@ -102,6 +102,13 @@ const richMarkdownExtensions = createRichMarkdownExtensions({
   includePlaceholder: true
 })
 
+function clampMenuSelectionIndex(index: number, itemCount: number): number {
+  if (itemCount <= 0) {
+    return 0
+  }
+  return Math.min(Math.max(index, 0), itemCount - 1)
+}
+
 function runRichMarkdownContextCommand(
   command: RichMarkdownContextMenuCommand,
   editor: Editor,
@@ -520,10 +527,18 @@ export default function RichMarkdownEditor({
   })
   const scrollContainerRef = useRef<HTMLDivElement | null>(null)
   const [slashMenu, setSlashMenu] = useState<SlashMenuState | null>(null)
-  const [selectedCommandIndex, setSelectedCommandIndex] = useState(0)
+  const [slashSelection, setSlashSelection] = useState<{ query: string | null; index: number }>({
+    query: null,
+    index: 0
+  })
   const [docLinkMenu, setDocLinkMenu] = useState<DocLinkMenuState | null>(null)
   const [emojiMenu, setEmojiMenu] = useState<{ left: number; top: number } | null>(null)
-  const [selectedDocLinkIndex, setSelectedDocLinkIndex] = useState(0)
+  const [docLinkSelection, setDocLinkSelection] = useState<{ query: string | null; index: number }>(
+    {
+      query: null,
+      index: 0
+    }
+  )
   const isMac = navigator.userAgent.includes('Mac')
   const lastCommittedMarkdownRef = useRef(content)
   const slashMenuRef = useRef<SlashMenuState | null>(null)
@@ -613,6 +628,44 @@ export default function RichMarkdownEditor({
   isEditingLinkRef.current = isEditingLink
   annotationPopoverRef.current = annotationPopover
   canAnnotateRichMarkdownRef.current = canAnnotateRichMarkdown
+  slashMenuRef.current = slashMenu
+  docLinkMenuRef.current = docLinkMenu
+
+  // Why: selection belongs to the active menu query so query changes can reset
+  // and clamp during render without a post-render repair Effect.
+  const setSelectedCommandIndex = useCallback<React.Dispatch<React.SetStateAction<number>>>(
+    (nextIndex) => {
+      setSlashSelection((current) => {
+        const query = slashMenuRef.current?.query ?? null
+        const optionCount = filteredSlashCommandsRef.current.length
+        const currentIndex =
+          current.query === query ? clampMenuSelectionIndex(current.index, optionCount) : 0
+        const resolvedIndex = typeof nextIndex === 'function' ? nextIndex(currentIndex) : nextIndex
+        return {
+          query,
+          index: clampMenuSelectionIndex(resolvedIndex, optionCount)
+        }
+      })
+    },
+    []
+  )
+
+  const setSelectedDocLinkIndex = useCallback<React.Dispatch<React.SetStateAction<number>>>(
+    (nextIndex) => {
+      setDocLinkSelection((current) => {
+        const query = docLinkMenuRef.current?.query ?? null
+        const rowCount = filteredDocLinkRowsRef.current.length
+        const currentIndex =
+          current.query === query ? clampMenuSelectionIndex(current.index, rowCount) : 0
+        const resolvedIndex = typeof nextIndex === 'function' ? nextIndex(currentIndex) : nextIndex
+        return {
+          query,
+          index: clampMenuSelectionIndex(resolvedIndex, rowCount)
+        }
+      })
+    },
+    []
+  )
 
   const flushPendingSerialization = useCallback(() => {
     if (serializeTimerRef.current === null) {
@@ -1290,28 +1343,13 @@ export default function RichMarkdownEditor({
     })
   }, [slashMenu?.query])
 
-  useEffect(() => {
-    slashMenuRef.current = slashMenu
-  }, [slashMenu])
-  useEffect(() => {
-    filteredSlashCommandsRef.current = filteredSlashCommands
-  }, [filteredSlashCommands])
-  useEffect(() => {
-    selectedCommandIndexRef.current = selectedCommandIndex
-  }, [selectedCommandIndex])
-  useEffect(() => {
-    setSelectedCommandIndex(0)
-  }, [slashMenu?.query])
-  useEffect(() => {
-    if (filteredSlashCommands.length === 0) {
-      setSelectedCommandIndex(0)
-      return
-    }
-
-    setSelectedCommandIndex((currentIndex) =>
-      Math.min(currentIndex, filteredSlashCommands.length - 1)
-    )
-  }, [filteredSlashCommands.length])
+  const slashMenuQuery = slashMenu?.query ?? null
+  const selectedCommandIndex =
+    slashSelection.query === slashMenuQuery
+      ? clampMenuSelectionIndex(slashSelection.index, filteredSlashCommands.length)
+      : 0
+  filteredSlashCommandsRef.current = filteredSlashCommands
+  selectedCommandIndexRef.current = selectedCommandIndex
 
   // Why: memo key is the `markdownDocuments` prop (stable reference from parent),
   // not `editor.storage.markdownDocLink.documents`. The storage mirror is mutated
@@ -1329,22 +1367,13 @@ export default function RichMarkdownEditor({
     return { docLinkRows: rows, docLinkTotalMatches: matches.length }
   }, [docLinkMenu, markdownDocuments])
 
-  useEffect(() => {
-    docLinkMenuRef.current = docLinkMenu
-  }, [docLinkMenu])
-  useEffect(() => {
-    filteredDocLinkRowsRef.current = docLinkRows
-  }, [docLinkRows])
-  useEffect(() => {
-    selectedDocLinkIndexRef.current = selectedDocLinkIndex
-  }, [selectedDocLinkIndex])
-  useEffect(() => {
-    if (docLinkRows.length === 0) {
-      setSelectedDocLinkIndex(0)
-      return
-    }
-    setSelectedDocLinkIndex((currentIndex) => Math.min(currentIndex, docLinkRows.length - 1))
-  }, [docLinkRows.length])
+  const docLinkMenuQuery = docLinkMenu?.query ?? null
+  const selectedDocLinkIndex =
+    docLinkSelection.query === docLinkMenuQuery
+      ? clampMenuSelectionIndex(docLinkSelection.index, docLinkRows.length)
+      : 0
+  filteredDocLinkRowsRef.current = docLinkRows
+  selectedDocLinkIndexRef.current = selectedDocLinkIndex
 
   useEffect(() => {
     if (!editor) {
