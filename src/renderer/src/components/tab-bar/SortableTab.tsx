@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useSortable } from '@dnd-kit/sortable'
-import { X, Minimize2, Columns2, Rows2 } from 'lucide-react'
+import { X, Minimize2, Columns2, Rows2, Pin, PinOff } from 'lucide-react'
 import { ShellIcon } from './shell-icons'
 import { AgentIcon } from '@/lib/agent-catalog'
 import { stripLeadingAgentTitleDecoration } from '@/lib/agent-title-decoration'
@@ -30,6 +30,7 @@ type SortableTabProps = {
   tabCount: number
   hasTabsToRight: boolean
   isActive: boolean
+  isPinned: boolean
   isExpanded: boolean
   onActivate: (tabId: string) => void
   onClose: (tabId: string) => void
@@ -37,6 +38,7 @@ type SortableTabProps = {
   onCloseToRight: (tabId: string) => void
   onSetCustomTitle: (tabId: string, title: string | null) => void
   onSetTabColor: (tabId: string, color: string | null) => void
+  onTogglePin: () => void
   onToggleExpand: (tabId: string) => void
   onSplitGroup: (direction: 'left' | 'right' | 'up' | 'down', sourceVisibleTabId: string) => void
   dragData: TabDragItemData
@@ -63,6 +65,7 @@ export default function SortableTab({
   tabCount,
   hasTabsToRight,
   isActive,
+  isPinned,
   isExpanded,
   onActivate,
   onClose,
@@ -70,6 +73,7 @@ export default function SortableTab({
   onCloseToRight,
   onSetCustomTitle,
   onSetTabColor,
+  onTogglePin,
   onToggleExpand,
   onSplitGroup,
   dragData,
@@ -198,6 +202,7 @@ export default function SortableTab({
       data-testid="sortable-tab"
       data-tab-id={tab.id}
       data-tab-title={tabTitle}
+      data-pinned={isPinned ? 'true' : 'false'}
       // Why: expose the active/inactive flag as a DOM attribute so E2E specs
       // can assert on user-observable selection state without reading the
       // Zustand store. A store-only "is this tab active?" round-trip would
@@ -247,6 +252,9 @@ export default function SortableTab({
         if (e.button === 1) {
           e.preventDefault()
           e.stopPropagation()
+          if (isPinned) {
+            return
+          }
           onClose(tab.id)
         }
       }}
@@ -295,6 +303,9 @@ export default function SortableTab({
         >
           <ShellIcon shell={shellForIcon} size={12} />
         </span>
+      )}
+      {isPinned && !isEditing && (
+        <Pin className="mr-1 size-3 shrink-0 text-muted-foreground" aria-hidden />
       )}
       {isEditing ? (
         <Input
@@ -364,7 +375,7 @@ export default function SortableTab({
           <Minimize2 className="w-3 h-3" />
         </button>
       )}
-      {!isEditing && (
+      {!isEditing && !isPinned && (
         <button
           className={`flex items-center justify-center w-4 h-4 rounded-sm shrink-0 ${
             isActive
@@ -442,7 +453,18 @@ export default function SortableTab({
             Split Right
           </DropdownMenuItem>
           <DropdownMenuSeparator />
-          <DropdownMenuItem onSelect={() => onClose(tab.id)}>Close</DropdownMenuItem>
+          <DropdownMenuItem onSelect={onTogglePin}>
+            {isPinned ? (
+              <PinOff className="mr-1.5 size-3.5" />
+            ) : (
+              <Pin className="mr-1.5 size-3.5" />
+            )}
+            {isPinned ? 'Unpin Tab' : 'Pin Tab'}
+          </DropdownMenuItem>
+          <DropdownMenuSeparator />
+          <DropdownMenuItem onSelect={() => !isPinned && onClose(tab.id)} disabled={isPinned}>
+            Close
+          </DropdownMenuItem>
           <DropdownMenuItem onSelect={() => onCloseOthers(tab.id)} disabled={tabCount <= 1}>
             Close Others
           </DropdownMenuItem>

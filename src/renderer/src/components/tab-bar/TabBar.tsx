@@ -9,6 +9,7 @@ import { FilePlus, FileText, Globe, Plus, TerminalSquare } from 'lucide-react'
 import { toast } from 'sonner'
 import type {
   BrowserTab as BrowserTabState,
+  Tab,
   TerminalTab,
   TuiAgent,
   WorkspaceVisibleTabType
@@ -58,6 +59,7 @@ const NEW_TAB_MENU_TERMINAL_FOCUS_TIMEOUT_MS = 5000
 type GitStatusEntries = ReturnType<typeof useAppStore.getState>['gitStatusByWorktree'][string]
 const EMPTY_GIT_STATUS_ENTRIES: GitStatusEntries = []
 const EMPTY_AGENT_CMD_OVERRIDES: Partial<Record<TuiAgent, string>> = {}
+const EMPTY_UNIFIED_TABS: readonly Tab[] = []
 
 type TabBarProps = {
   tabs: (TerminalTab & { unifiedTabId?: string })[]
@@ -107,13 +109,21 @@ type TabItem =
       type: 'terminal'
       id: string
       unifiedTabId: string
+      isPinned: boolean
       data: TerminalTab & { unifiedTabId?: string }
     }
-  | { type: 'editor'; id: string; unifiedTabId: string; data: OpenFile & { tabId?: string } }
+  | {
+      type: 'editor'
+      id: string
+      unifiedTabId: string
+      isPinned: boolean
+      data: OpenFile & { tabId?: string }
+    }
   | {
       type: 'browser'
       id: string
       unifiedTabId: string
+      isPinned: boolean
       data: BrowserTabState & { tabId?: string }
     }
 
@@ -125,6 +135,20 @@ function getTabDragLabel(item: TabItem, generatedTitlesEnabled: boolean): string
     return getBrowserTabLabel(item.data)
   }
   return getEditorDisplayLabel(item.data)
+}
+
+function createUnifiedTabLookup(tabs: readonly Tab[], groupId: string): Map<string, Tab> {
+  const lookup = new Map<string, Tab>()
+  for (const tab of tabs) {
+    if (tab.groupId !== groupId) {
+      continue
+    }
+    lookup.set(tab.id, tab)
+    if (tab.contentType === 'terminal' || tab.contentType === 'browser') {
+      lookup.set(tab.entityId, tab)
+    }
+  }
+  return lookup
 }
 
 function TabBarInner({
@@ -172,6 +196,10 @@ function TabBarInner({
   const gitStatusEntries = useAppStore(
     (s) => s.gitStatusByWorktree[worktreeId] ?? EMPTY_GIT_STATUS_ENTRIES
   )
+  const unifiedTabs = useAppStore((s) => s.unifiedTabsByWorktree[worktreeId] ?? EMPTY_UNIFIED_TABS)
+  const pinTab = useAppStore((s) => s.pinTab)
+  const unpinTab = useAppStore((s) => s.unpinTab)
+  const activeGroupIdForWorktree = useAppStore((s) => s.activeGroupIdByWorktree[worktreeId])
   const defaultWindowsShell = useAppStore(
     (s) => s.settings?.terminalWindowsShell ?? 'powershell.exe'
   )
@@ -233,9 +261,13 @@ function TabBarInner({
   const shouldShowWindowsShellMenu =
     (isWindows || windowsTerminalCapabilities.hostPlatform === 'win32') &&
     !worktreeHasRemoteConnection
-  const resolvedGroupId = groupId ?? worktreeId
+  const resolvedGroupId = groupId ?? activeGroupIdForWorktree ?? worktreeId
 
   const statusByRelativePath = useMemo(() => buildStatusMap(gitStatusEntries), [gitStatusEntries])
+  const unifiedTabByVisibleId = useMemo(
+    () => createUnifiedTabLookup(unifiedTabs, resolvedGroupId),
+    [resolvedGroupId, unifiedTabs]
+  )
 
   // Why: Electron <webview> elements run in a separate process, so clicking
   // inside one never dispatches a pointerdown on the renderer document.
@@ -494,32 +526,52 @@ function TabBarInner({
     for (const id of ids) {
       const terminal = terminalMap.get(id)
       if (terminal) {
+        const unifiedTab = unifiedTabByVisibleId.get(id)
         items.push({
           type: 'terminal',
           id,
-          unifiedTabId: terminal.unifiedTabId ?? terminal.id,
+          unifiedTabId: terminal.unifiedTabId ?? unifiedTab?.id ?? terminal.id,
+          isPinned: unifiedTab?.isPinned === true,
           data: terminal
         })
         continue
       }
       const file = editorMap.get(id)
       if (file) {
-        items.push({ type: 'editor', id, unifiedTabId: file.tabId ?? file.id, data: file })
+        const unifiedTab = unifiedTabByVisibleId.get(id) ?? unifiedTabByVisibleId.get(file.id)
+        items.push({
+          type: 'editor',
+          id,
+          unifiedTabId: file.tabId ?? unifiedTab?.id ?? file.id,
+          isPinned: unifiedTab?.isPinned === true,
+          data: file
+        })
         continue
       }
       const browserTab = browserMap.get(id)
       if (browserTab) {
+        const unifiedTab = unifiedTabByVisibleId.get(id)
         items.push({
           type: 'browser',
           id,
-          unifiedTabId: browserTab.tabId ?? browserTab.id,
+          unifiedTabId: browserTab.tabId ?? unifiedTab?.id ?? browserTab.id,
+          isPinned: unifiedTab?.isPinned === true,
           data: browserTab
         })
         continue
       }
     }
     return items
-  }, [tabBarOrder, terminalIds, editorFileIds, browserTabIds, terminalMap, editorMap, browserMap])
+  }, [
+    tabBarOrder,
+    terminalIds,
+    editorFileIds,
+    browserTabIds,
+    terminalMap,
+    editorMap,
+    browserMap,
+    unifiedTabByVisibleId
+  ])
 
   const sortableIds = useMemo(() => orderedItems.map((item) => item.id), [orderedItems])
 
@@ -535,6 +587,18 @@ function TabBarInner({
     }
     return indicators
   }, [activeIndicator, orderedItems])
+
+  const togglePinned = (item: TabItem): void => {
+    if (item.isPinned) {
+      unpinTab(item.unifiedTabId)
+      return
+    }
+    if (item.type === 'editor' && onPinFile) {
+      onPinFile(item.data.id, item.unifiedTabId)
+      return
+    }
+    pinTab(item.unifiedTabId)
+  }
 
   // Horizontal wheel scrolling for the tab strip
   const tabStripRef = useRef<HTMLDivElement>(null)
@@ -693,6 +757,7 @@ function TabBarInner({
                   tabCount={orderedItems.length}
                   hasTabsToRight={index < orderedItems.length - 1}
                   isActive={activeTabType === 'terminal' && item.id === activeTabId}
+                  isPinned={item.isPinned}
                   isExpanded={expandedPaneByTabId[item.id] === true}
                   onActivate={onActivate}
                   onClose={onClose}
@@ -700,6 +765,7 @@ function TabBarInner({
                   onCloseToRight={onCloseToRight}
                   onSetCustomTitle={onSetCustomTitle}
                   onSetTabColor={onSetTabColor}
+                  onTogglePin={() => togglePinned(item)}
                   onToggleExpand={onTogglePaneExpand}
                   onSplitGroup={(direction, sourceVisibleTabId) =>
                     onCreateSplitGroup?.(direction, sourceVisibleTabId)
@@ -715,6 +781,7 @@ function TabBarInner({
                   key={item.id}
                   tab={item.data}
                   isActive={activeTabType === 'browser' && activeBrowserTabId === item.id}
+                  isPinned={item.isPinned}
                   hasTabsToRight={index < orderedItems.length - 1}
                   onActivate={() => onActivateBrowserTab?.(item.id)}
                   onClose={() => onCloseBrowserTab?.(item.id)}
@@ -723,6 +790,7 @@ function TabBarInner({
                     onCreateSplitGroup?.(direction, sourceVisibleTabId)
                   }
                   onDuplicate={() => onDuplicateBrowserTab?.(item.id)}
+                  onTogglePin={() => togglePinned(item)}
                   dragData={dragData}
                   dropIndicator={dropIndicatorByVisibleId.get(item.id) ?? null}
                 />
@@ -733,6 +801,7 @@ function TabBarInner({
                 key={item.id}
                 file={item.data}
                 isActive={activeTabType === 'editor' && activeFileId === item.id}
+                isPinned={item.isPinned}
                 hasTabsToRight={index < orderedItems.length - 1}
                 statusByRelativePath={statusByRelativePath}
                 onActivate={() => onActivateFile?.(item.id)}
@@ -740,6 +809,7 @@ function TabBarInner({
                 onCloseToRight={() => onCloseToRight(item.id)}
                 onCloseAll={() => onCloseAllFiles?.()}
                 onPin={() => onPinFile?.(item.data.id, item.data.tabId)}
+                onTogglePin={() => togglePinned(item)}
                 onSplitGroup={(direction, sourceVisibleTabId) =>
                   onCreateSplitGroup?.(direction, sourceVisibleTabId)
                 }

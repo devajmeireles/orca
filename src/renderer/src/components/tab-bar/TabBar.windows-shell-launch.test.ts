@@ -9,13 +9,19 @@ const appStoreSnapshot: {
   activeRuntimeEnvironmentId: string | null
   repos: { id: string; connectionId?: string | null }[]
   worktreesByRepo: Record<string, { id: string; repoId: string }[]>
+  unifiedTabsByWorktree: Record<string, unknown[]>
+  activeGroupIdByWorktree: Record<string, string>
 } = {
   activeTabId: null,
   activeTabType: null,
   activeRuntimeEnvironmentId: null,
   repos: [],
-  worktreesByRepo: {}
+  worktreesByRepo: {},
+  unifiedTabsByWorktree: {},
+  activeGroupIdByWorktree: {}
 }
+const pinTabMock: (tabId: string) => void = vi.fn()
+const unpinTabMock: (tabId: string) => void = vi.fn()
 
 const useAppStoreMock = vi.fn(
   (
@@ -25,6 +31,10 @@ const useAppStoreMock = vi.fn(
       gitStatusByWorktree: Record<string, never[]>
       repos: { id: string; connectionId?: string | null }[]
       worktreesByRepo: Record<string, { id: string; repoId: string }[]>
+      unifiedTabsByWorktree: Record<string, unknown[]>
+      activeGroupIdByWorktree: Record<string, string>
+      pinTab: typeof pinTabMock
+      unpinTab: typeof unpinTabMock
       settings: {
         terminalWindowsShell: 'powershell.exe' | 'cmd.exe' | 'wsl.exe' | 'git-bash'
         terminalWindowsPowerShellImplementation: 'auto' | 'powershell.exe' | 'pwsh.exe'
@@ -38,6 +48,10 @@ const useAppStoreMock = vi.fn(
       gitStatusByWorktree: {},
       repos: appStoreSnapshot.repos,
       worktreesByRepo: appStoreSnapshot.worktreesByRepo,
+      unifiedTabsByWorktree: appStoreSnapshot.unifiedTabsByWorktree,
+      activeGroupIdByWorktree: appStoreSnapshot.activeGroupIdByWorktree,
+      pinTab: pinTabMock,
+      unpinTab: unpinTabMock,
       settings: {
         terminalWindowsShell: 'powershell.exe',
         terminalWindowsPowerShellImplementation: 'pwsh.exe',
@@ -91,6 +105,10 @@ useAppStoreExport.getState = vi.fn(() => ({
   gitStatusByWorktree: {},
   repos: appStoreSnapshot.repos,
   worktreesByRepo: appStoreSnapshot.worktreesByRepo,
+  unifiedTabsByWorktree: appStoreSnapshot.unifiedTabsByWorktree,
+  activeGroupIdByWorktree: appStoreSnapshot.activeGroupIdByWorktree,
+  pinTab: pinTabMock,
+  unpinTab: unpinTabMock,
   settings: {
     terminalWindowsShell: 'powershell.exe',
     terminalWindowsPowerShellImplementation: 'pwsh.exe',
@@ -247,6 +265,8 @@ describe('TabBar PowerShell launch wiring', () => {
     appStoreSnapshot.activeRuntimeEnvironmentId = null
     appStoreSnapshot.repos = []
     appStoreSnapshot.worktreesByRepo = {}
+    appStoreSnapshot.unifiedTabsByWorktree = {}
+    appStoreSnapshot.activeGroupIdByWorktree = {}
     vi.stubGlobal('navigator', { userAgent: 'Windows' })
   })
 
