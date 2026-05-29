@@ -1,4 +1,5 @@
 import type { GlobalSettings } from '../../../shared/types'
+import type { RuntimeTerminalSend } from '../../../shared/runtime-types'
 import { RuntimeRpcCallError, callRuntimeRpc, getActiveRuntimeTarget } from './runtime-rpc-client'
 import {
   getRemoteRuntimePtyEnvironmentId,
@@ -106,13 +107,21 @@ export async function sendRuntimePtyInputVerified(
     : getActiveRuntimeTarget(settings)
   const terminal = getRemoteRuntimeTerminalHandle(ptyId)
   if (target.kind !== 'environment' || !terminal) {
-    window.api.pty.write(ptyId, data)
-    return true
+    const accepted = await window.api.pty.writeAccepted(ptyId, data)
+    if (!accepted) {
+      window.api.pty.write(ptyId, data)
+    }
+    return accepted
   }
 
   try {
-    await callRuntimeRpc(target, 'terminal.send', { terminal, text: data }, { timeoutMs: 15_000 })
-    return true
+    const result = await callRuntimeRpc<{ send: RuntimeTerminalSend }>(
+      target,
+      'terminal.send',
+      { terminal, text: data, client: { id: 'orca-desktop', type: 'desktop' } },
+      { timeoutMs: 15_000 }
+    )
+    return result.send.accepted === true
   } catch (error) {
     if (isTerminalGoneError(error)) {
       return false

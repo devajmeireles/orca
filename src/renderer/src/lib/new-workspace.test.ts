@@ -1,5 +1,48 @@
-import { describe, expect, it } from 'vitest'
-import { getWorkspaceSeedName, isGitLabIssueUrl } from './new-workspace'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+
+const {
+  mockInspectRuntimeTerminalProcess,
+  mockSendRuntimePtyInputVerified,
+  mockPasteDraftWhenAgentReady,
+  mockTrack,
+  store
+} = vi.hoisted(() => ({
+  mockInspectRuntimeTerminalProcess: vi.fn(),
+  mockSendRuntimePtyInputVerified: vi.fn(),
+  mockPasteDraftWhenAgentReady: vi.fn(),
+  mockTrack: vi.fn(),
+  store: {
+    settings: {},
+    activeTabIdByWorktree: { 'wt-1': 'tab-1' } as Record<string, string>,
+    tabsByWorktree: { 'wt-1': [{ id: 'tab-1' }] } as Record<string, { id: string }[]>,
+    ptyIdsByTabId: { 'tab-1': ['pty-1'] } as Record<string, string[]>
+  }
+}))
+
+vi.mock('@/store', () => ({
+  useAppStore: {
+    getState: () => store
+  }
+}))
+
+vi.mock('@/runtime/runtime-terminal-inspection', () => ({
+  inspectRuntimeTerminalProcess: mockInspectRuntimeTerminalProcess,
+  sendRuntimePtyInputVerified: mockSendRuntimePtyInputVerified
+}))
+
+vi.mock('@/lib/agent-paste-draft', () => ({
+  pasteDraftWhenAgentReady: mockPasteDraftWhenAgentReady
+}))
+
+vi.mock('@/lib/telemetry', () => ({
+  track: mockTrack
+}))
+
+import {
+  ensureAgentStartupInTerminal,
+  getWorkspaceSeedName,
+  isGitLabIssueUrl
+} from './new-workspace'
 
 describe('getWorkspaceSeedName', () => {
   it('prefers an explicit name', () => {
@@ -122,5 +165,114 @@ describe('isGitLabIssueUrl', () => {
 
   it('does not classify GitHub issue URLs as GitLab issues', () => {
     expect(isGitLabIssueUrl('https://github.com/group/project/issues/123')).toBe(false)
+  })
+})
+
+describe('ensureAgentStartupInTerminal prompt telemetry', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    store.settings = {}
+    store.activeTabIdByWorktree = { 'wt-1': 'tab-1' }
+    store.tabsByWorktree = { 'wt-1': [{ id: 'tab-1' }] }
+    store.ptyIdsByTabId = { 'tab-1': ['pty-1'] }
+    mockInspectRuntimeTerminalProcess.mockResolvedValue({
+      foregroundProcess: 'aider',
+      hasChildProcesses: true
+    })
+    mockSendRuntimePtyInputVerified.mockResolvedValue(true)
+    mockPasteDraftWhenAgentReady.mockResolvedValue(true)
+  })
+
+  it('tracks after a follow-up prompt is accepted by the terminal runtime', async () => {
+    await ensureAgentStartupInTerminal({
+      worktreeId: 'wt-1',
+      startup: {
+        agent: 'aider',
+        launchCommand: 'aider',
+        expectedProcess: 'aider',
+        followupPrompt: 'fix the spinner'
+      },
+      promptTelemetry: {
+        agent_kind: 'aider',
+        launch_source: 'new_workspace_composer',
+        request_kind: 'new'
+      }
+    })
+
+    expect(mockSendRuntimePtyInputVerified).toHaveBeenCalledWith({}, 'pty-1', 'fix the spinner\r')
+    expect(mockTrack).toHaveBeenCalledWith('agent_prompt_sent', {
+      agent_kind: 'aider',
+      launch_source: 'new_workspace_composer',
+      request_kind: 'new'
+    })
+  })
+
+  it('does not track when follow-up prompt delivery is rejected by the terminal runtime', async () => {
+    mockSendRuntimePtyInputVerified.mockResolvedValue(false)
+
+    await ensureAgentStartupInTerminal({
+      worktreeId: 'wt-1',
+      startup: {
+        agent: 'aider',
+        launchCommand: 'aider',
+        expectedProcess: 'aider',
+        followupPrompt: 'fix the spinner'
+      },
+      promptTelemetry: {
+        agent_kind: 'aider',
+        launch_source: 'new_workspace_composer',
+        request_kind: 'new'
+      }
+    })
+
+    expect(mockTrack).not.toHaveBeenCalledWith('agent_prompt_sent', expect.anything())
+  })
+
+  it('does not track when follow-up prompt delivery rejects', async () => {
+    mockSendRuntimePtyInputVerified.mockRejectedValue(new Error('runtime timeout'))
+
+    await expect(
+      ensureAgentStartupInTerminal({
+        worktreeId: 'wt-1',
+        startup: {
+          agent: 'aider',
+          launchCommand: 'aider',
+          expectedProcess: 'aider',
+          followupPrompt: 'fix the spinner'
+        },
+        promptTelemetry: {
+          agent_kind: 'aider',
+          launch_source: 'new_workspace_composer',
+          request_kind: 'new'
+        }
+      })
+    ).resolves.toBeUndefined()
+
+    expect(mockTrack).not.toHaveBeenCalledWith('agent_prompt_sent', expect.anything())
+  })
+
+  it('does not track draft prompt delivery as a sent prompt', async () => {
+    await ensureAgentStartupInTerminal({
+      worktreeId: 'wt-1',
+      startup: {
+        agent: 'claude',
+        launchCommand: 'claude',
+        expectedProcess: 'claude',
+        followupPrompt: null,
+        draftPrompt: 'review this before sending'
+      },
+      promptTelemetry: {
+        agent_kind: 'claude-code',
+        launch_source: 'new_workspace_composer',
+        request_kind: 'new'
+      }
+    })
+
+    expect(mockPasteDraftWhenAgentReady).toHaveBeenCalledWith({
+      tabId: 'tab-1',
+      content: 'review this before sending',
+      agent: 'claude'
+    })
+    expect(mockTrack).not.toHaveBeenCalledWith('agent_prompt_sent', expect.anything())
   })
 })
