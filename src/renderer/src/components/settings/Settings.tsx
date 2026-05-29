@@ -65,6 +65,7 @@ import {
   getInitialMountedSectionIds,
   getRuntimeTargetIdentity
 } from './settings-load-performance'
+import { getPendingSettingsNavigationAction } from './settings-pending-navigation'
 
 const SETTINGS_NAV_GROUPS = [
   { id: 'setup', title: 'Set Up' },
@@ -561,39 +562,54 @@ function Settings(): React.JSX.Element {
   useEffect(() => {
     const scrollTargetId = pendingScrollTargetRef.current
     const pendingNavSectionId = pendingNavSectionRef.current
+    const container = contentScrollRef.current
+    const scrollTargetExists = Boolean(
+      scrollTargetId &&
+      pendingNavSectionId &&
+      (scrollTargetId === pendingNavSectionId || getSettingsScrollTarget(scrollTargetId, container))
+    )
+    const pendingAction = getPendingSettingsNavigationAction({
+      scrollTargetId,
+      pendingNavSectionId,
+      activeSectionId,
+      visibleSectionIds,
+      query: settingsSearchQuery,
+      scrollTargetExists
+    })
 
-    if (scrollTargetId && pendingNavSectionId && settingsSearchQuery.trim() !== '') {
+    if (pendingAction.type === 'clear-search') {
       setSettingsSearchQuery('')
       return
     }
 
-    if (scrollTargetId && pendingNavSectionId && visibleSectionIds.has(pendingNavSectionId)) {
+    if (pendingAction.type === 'activate-section') {
       // Why: inactive Settings panes no longer render in the empty-search view.
       // Activate the pane first, then wait for the next render before looking
       // for any subsection target inside it.
-      if (activeSectionId !== pendingNavSectionId) {
-        setActiveSectionId(pendingNavSectionId)
-        return
-      }
-      const container = contentScrollRef.current
+      setActiveSectionId(pendingAction.sectionId)
+      return
+    }
+
+    if (pendingAction.type === 'wait-for-target') {
+      // Why: target navigation can arrive before a lazy subsection row has
+      // mounted; keep the pending refs alive until the target commits.
+      return
+    }
+
+    if (pendingAction.type === 'scroll-to-target') {
       if (container) {
         container.scrollTo({ top: 0 })
       }
       // Why: deep links can target a row inside the pane; the pane itself is
       // already in view because the sidebar swap rendered just it.
-      if (scrollTargetId !== pendingNavSectionId) {
-        // Why: target navigation can arrive before the lazy section has mounted;
-        // keep the pending refs alive until the mounted-section update commits.
-        if (!getSettingsScrollTarget(scrollTargetId, container)) {
-          return
-        }
+      if (pendingAction.scrollTargetId !== pendingAction.sectionId) {
         const scrollToSubsection = (): void => {
-          scrollSubsectionIntoView(scrollTargetId, contentScrollRef.current)
+          scrollSubsectionIntoView(pendingAction.scrollTargetId, contentScrollRef.current)
         }
         scrollToSubsection()
         requestAnimationFrame(scrollToSubsection)
       }
-      setActiveSectionId(pendingNavSectionId)
+      setActiveSectionId(pendingAction.sectionId)
       pendingNavSectionRef.current = null
       pendingScrollTargetRef.current = null
       return
