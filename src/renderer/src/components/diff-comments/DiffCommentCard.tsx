@@ -1,5 +1,5 @@
 import { CornerDownLeft, Pencil, Trash } from 'lucide-react'
-import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
+import { useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 import { Button } from '@/components/ui/button'
 import { getDiffCommentLineLabel } from '@/lib/diff-comment-compat'
 import { cn } from '@/lib/utils'
@@ -80,20 +80,11 @@ export function DiffCommentCard({
     onContentResizeRef.current?.()
   }, [editing])
 
-  const editingPrevRef = useRef(editing)
-  useEffect(() => {
-    if (editingPrevRef.current === editing) {
-      return
-    }
-    editingPrevRef.current = editing
-    // Why: when the editor opens or closes the card's height changes (textarea
-    // + footer vs single body block). Ping the decorator so it re-measures and
-    // resizes the Monaco view zone — otherwise the card clips the next line.
-    // Skip the initial mount: the zone's heightInPx estimate is intentionally
-    // close to actual on first paint to avoid a layout pass before the user
-    // interacts; firing here would re-layout every card on creation.
-    onContentResizeRef.current?.()
-  }, [editing])
+  const scheduleContentResize = (): void => {
+    // Why: closing edit mode removes the textarea/footer before Monaco can
+    // re-measure the view zone. Wait for React to commit the body-only card.
+    requestAnimationFrame(() => onContentResizeRef.current?.())
+  }
 
   const handleStartEdit = (): void => {
     setDraft(body)
@@ -103,6 +94,7 @@ export function DiffCommentCard({
   const handleCancel = (): void => {
     setEditing(false)
     setDraft(body)
+    scheduleContentResize()
   }
 
   const trimmedDraft = draft.trim()
@@ -118,6 +110,7 @@ export function DiffCommentCard({
       const ok = await onSubmitEdit(trimmedDraft)
       if (ok) {
         setEditing(false)
+        scheduleContentResize()
       }
     } catch (err) {
       // Why: surface the error in the console but keep the editor open with
