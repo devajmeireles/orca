@@ -75,6 +75,11 @@ import {
   type RichMarkdownAnnotationHighlightRange
 } from './rich-markdown-annotation-highlight'
 import {
+  getRichMarkdownLineRangeFromBlocks,
+  getRichMarkdownRangeBounds,
+  getRichMarkdownRangeStart
+} from './rich-markdown-range-bounds'
+import {
   shouldExpandRichMarkdownReviewRail,
   stackRichMarkdownReviewNotePositions,
   type RichMarkdownReviewNotePosition
@@ -460,10 +465,7 @@ function getRichMarkdownCommentAnchorTop(
     // Why: range notes should sort by the start of the selected text. Anchoring
     // to the end puts overlapping ranges with the same final line in creation
     // order, so a 43-45 card can render above a 41-45 card.
-    const anchorPos =
-      ranges.length > 0
-        ? Math.min(...ranges.map((range) => Math.min(range.from, range.to)))
-        : block.from
+    const anchorPos = getRichMarkdownRangeStart(ranges) ?? block.from
     const coords = editor.view.coordsAtPos(
       Math.max(1, Math.min(anchorPos, editor.state.doc.content.size))
     )
@@ -479,13 +481,8 @@ function getRichMarkdownSelectionRange(editor: Editor): RichMarkdownComposerStat
   const selectedBlocks = empty
     ? blocks.filter((block) => block.from <= from && from <= block.to)
     : blocks.filter((block) => from <= block.to && to >= block.from)
-  const targetBlocks = selectedBlocks.length > 0 ? selectedBlocks : [blocks[0]]
-  const startLine = Math.min(...targetBlocks.map((block) => block.startLine))
-  const lineNumber = Math.max(...targetBlocks.map((block) => block.endLine))
-  return {
-    lineNumber,
-    startLine: startLine === lineNumber ? undefined : startLine
-  }
+  const targetBlocks = selectedBlocks.length > 0 ? selectedBlocks : [blocks[0]!]
+  return getRichMarkdownLineRangeFromBlocks(targetBlocks) ?? { lineNumber: 1 }
 }
 
 function hasRichMarkdownCommentForRange(
@@ -938,8 +935,11 @@ export default function RichMarkdownEditor({
       if (ranges.length === 0) {
         return
       }
-      const from = Math.min(...ranges.map((range) => Math.min(range.from, range.to)))
-      const to = Math.max(...ranges.map((range) => Math.max(range.from, range.to)))
+      const bounds = getRichMarkdownRangeBounds(ranges)
+      if (!bounds) {
+        return
+      }
+      const { from, to } = bounds
       const maxPos = ed.state.doc.content.size
       const startCoords = ed.view.coordsAtPos(Math.max(1, Math.min(from, maxPos)))
       const endCoords = ed.view.coordsAtPos(Math.max(1, Math.min(to, maxPos)))
