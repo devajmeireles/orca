@@ -49,8 +49,10 @@ describe('DaemonClient', () => {
 
   function startMockDaemon(opts?: {
     onControlMessage?: (msg: unknown) => string | null
+    onHello?: (msg: HelloMessage) => void
     onStreamHello?: (msg: HelloMessage) => void
     rejectVersion?: boolean
+    suppressHelloResponse?: boolean
   }): Promise<void> {
     return new Promise((resolve) => {
       server = createServer((socket) => {
@@ -69,6 +71,10 @@ describe('DaemonClient', () => {
 
             if (msg.type === 'hello') {
               const hello = msg as HelloMessage
+              opts?.onHello?.(hello)
+              if (opts?.suppressHelloResponse) {
+                return
+              }
               if (opts?.rejectVersion) {
                 socket.write(encodeNdjson({ type: 'hello', ok: false, error: 'Version mismatch' }))
                 return
@@ -129,6 +135,34 @@ describe('DaemonClient', () => {
 
       client = new DaemonClient({ socketPath, tokenPath })
       await expect(client.ensureConnected()).rejects.toThrow()
+    })
+
+    it('times out when the daemon never answers hello', async () => {
+      let resolveHello: () => void = () => {}
+      const helloReceived = new Promise<void>((resolve) => {
+        resolveHello = resolve
+      })
+      await startMockDaemon({
+        suppressHelloResponse: true,
+        onHello: resolveHello
+      })
+
+      vi.useFakeTimers()
+      try {
+        client = new DaemonClient({ socketPath, tokenPath })
+        const outcomePromise = client
+          .ensureConnected()
+          .then(() => 'connected')
+          .catch((error: Error) => error.message)
+
+        await helloReceived
+        await vi.advanceTimersByTimeAsync(5000)
+        const outcome = await Promise.race([outcomePromise, Promise.resolve('pending')])
+
+        expect(outcome).toBe('Hello response timed out')
+      } finally {
+        vi.useRealTimers()
+      }
     })
   })
 
