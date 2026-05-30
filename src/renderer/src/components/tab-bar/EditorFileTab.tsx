@@ -113,6 +113,7 @@ export default function EditorFileTab({
   const [menuPoint, setMenuPoint] = useState({ x: 0, y: 0 })
   const [isRenaming, setIsRenaming] = useState(false)
   const renameInputRef = useRef<HTMLInputElement>(null)
+  const renameFocusFrameRef = useRef<number | null>(null)
   const skipMenuFocusRestoreRef = useRef(false)
   // Escape fires setIsRenaming(false), which unmounts the input. The browser
   // still fires focusout as the focused node is removed, so onBlur can invoke
@@ -162,19 +163,30 @@ export default function EditorFileTab({
 
   const setRenameInputElement = useCallback(
     (input: HTMLInputElement | null) => {
+      if (renameFocusFrameRef.current !== null) {
+        cancelAnimationFrame(renameFocusFrameRef.current)
+        renameFocusFrameRef.current = null
+      }
       renameInputRef.current = input
       if (!input) {
         return
       }
-      // Why: rename should open with the basename selected before the user types.
-      input.focus()
-      const name = basename(file.filePath)
-      const dotIndex = name.lastIndexOf('.')
-      if (dotIndex > 0) {
-        input.setSelectionRange(0, dotIndex)
-      } else {
-        input.select()
-      }
+      // Why: Radix closes the context menu after onSelect; defer focus so its
+      // teardown cannot steal focus back or blur-commit the newly mounted input.
+      renameFocusFrameRef.current = requestAnimationFrame(() => {
+        renameFocusFrameRef.current = null
+        if (renameInputRef.current !== input) {
+          return
+        }
+        input.focus()
+        const name = basename(file.filePath)
+        const dotIndex = name.lastIndexOf('.')
+        if (dotIndex > 0) {
+          input.setSelectionRange(0, dotIndex)
+        } else {
+          input.select()
+        }
+      })
     },
     [file.filePath]
   )
