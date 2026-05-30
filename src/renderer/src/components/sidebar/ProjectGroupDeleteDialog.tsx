@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react'
+import React, { useCallback, useRef, useState } from 'react'
 import {
   Dialog,
   DialogContent,
@@ -26,11 +26,10 @@ export function ProjectGroupDeleteDialog({
   const [wasOpen, setWasOpen] = useState(open)
   const mountedRef = useRef(true)
 
-  useEffect(() => {
-    mountedRef.current = true
-    return () => {
-      mountedRef.current = false
-    }
+  const handleDialogContentRef = useCallback((node: HTMLDivElement | null): void => {
+    // Why: deleting can resolve after the dialog closes; the content ref keeps
+    // late completions from mutating stale dialog state without an Effect.
+    mountedRef.current = node !== null
   }, [])
 
   // Why: opening the dialog must clear a stale in-flight state before the
@@ -71,7 +70,11 @@ export function ProjectGroupDeleteDialog({
         onOpenChange(nextOpen)
       }}
     >
-      <DialogContent className="max-w-sm sm:max-w-sm" showCloseButton={false}>
+      <DialogContent
+        ref={handleDialogContentRef}
+        className="max-w-sm sm:max-w-sm"
+        showCloseButton={false}
+      >
         <DialogHeader>
           <DialogTitle className="text-sm">Delete Project Group</DialogTitle>
           <DialogDescription className="text-xs">

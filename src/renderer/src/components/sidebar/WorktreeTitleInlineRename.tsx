@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react'
+import React, { useCallback, useRef, useState } from 'react'
 import { LoaderCircle } from 'lucide-react'
 import { toast } from 'sonner'
 import { Input } from '@/components/ui/input'
@@ -46,11 +46,10 @@ export function WorktreeTitleInlineRename({
   const [value, setValue] = useState(displayName)
   const [saving, setSaving] = useState(false)
 
-  useEffect(() => {
-    mountedRef.current = true
-    return () => {
-      mountedRef.current = false
-    }
+  const handleRootRef = useCallback((node: HTMLSpanElement | null): void => {
+    // Why: rename can resolve after this inline title unmounts; the rendered
+    // root owns that stale-write guard without a mount-only Effect.
+    mountedRef.current = node !== null
   }, [])
 
   const setEditingMode = useCallback(
@@ -144,6 +143,7 @@ export function WorktreeTitleInlineRename({
   if (editing) {
     return (
       <span
+        ref={handleRootRef}
         className={cn(
           'relative grid min-w-0 truncate leading-tight text-foreground',
           showUnreadEmphasis ? 'font-semibold' : 'font-normal',
@@ -187,6 +187,7 @@ export function WorktreeTitleInlineRename({
 
   const title = (
     <span
+      ref={handleRootRef}
       className={cn(
         'block min-w-0 truncate leading-tight text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-sidebar-ring',
         showUnreadEmphasis ? 'font-semibold' : 'font-normal',

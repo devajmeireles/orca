@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useId, useRef, useState } from 'react'
+import React, { useCallback, useId, useRef, useState } from 'react'
 import {
   Dialog,
   DialogContent,
@@ -38,11 +38,10 @@ export function ProjectGroupNameDialog({
   const mountedRef = useRef(true)
   const trimmedName = name.trim()
 
-  useEffect(() => {
-    mountedRef.current = true
-    return () => {
-      mountedRef.current = false
-    }
+  const handleDialogContentRef = useCallback((node: HTMLDivElement | null): void => {
+    // Why: save can finish after the dialog closes; the content ref keeps late
+    // completions from mutating stale dialog state without an Effect.
+    mountedRef.current = node !== null
   }, [])
 
   // Why: the input should mount already seeded and selectable for the active
@@ -80,6 +79,7 @@ export function ProjectGroupNameDialog({
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
+        ref={handleDialogContentRef}
         className="max-w-sm sm:max-w-sm"
         onOpenAutoFocus={(event) => {
           event.preventDefault()
