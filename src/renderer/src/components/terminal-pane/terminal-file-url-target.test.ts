@@ -4,7 +4,9 @@ import { resolveTerminalFileUrlTarget } from './terminal-file-url-target'
 describe('resolveTerminalFileUrlTarget', () => {
   it('resolves UNC file URLs with line and column anchors', () => {
     expect(
-      resolveTerminalFileUrlTarget(new URL('file://Server/Share/Repo/src/app.ts#L12C3'))
+      resolveTerminalFileUrlTarget(new URL('file://Server/Share/Repo/src/app.ts#L12C3'), {
+        allowUncHost: true
+      })
     ).toEqual({
       filePath: '//server/Share/Repo/src/app.ts',
       line: 12,

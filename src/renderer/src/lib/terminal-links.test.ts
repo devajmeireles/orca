@@ -20,6 +20,13 @@ describe('terminal path helpers', () => {
     expect(
       toWorktreeRelativePath('//server/share/repo/src/file.ts', '\\\\server\\share\\repo')
     ).toBe('src/file.ts')
+
+    expect(isPathInsideWorktree('//server/share/repo/src/file.ts', '//Server/Share/Repo')).toBe(
+      true
+    )
+    expect(toWorktreeRelativePath('//server/share/repo/src/file.ts', '//Server/Share/Repo')).toBe(
+      'src/file.ts'
+    )
   })
 
   describe('extractTerminalFileLinks bare-filename tokens', () => {
