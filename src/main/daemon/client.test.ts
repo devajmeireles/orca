@@ -48,6 +48,8 @@ describe('DaemonClient', () => {
   })
 
   function startMockDaemon(opts?: {
+    closeOnConnect?: boolean
+    closeOnHello?: boolean
     onControlMessage?: (msg: unknown) => string | null
     onHello?: (msg: HelloMessage) => void
     onStreamHello?: (msg: HelloMessage) => void
@@ -56,6 +58,11 @@ describe('DaemonClient', () => {
   }): Promise<void> {
     return new Promise((resolve) => {
       server = createServer((socket) => {
+        if (opts?.closeOnConnect) {
+          socket.destroy()
+          return
+        }
+
         let buffer = ''
         socket.on('data', (chunk) => {
           buffer += chunk.toString()
@@ -72,6 +79,10 @@ describe('DaemonClient', () => {
             if (msg.type === 'hello') {
               const hello = msg as HelloMessage
               opts?.onHello?.(hello)
+              if (opts?.closeOnHello) {
+                socket.destroy()
+                return
+              }
               if (opts?.suppressHelloResponse) {
                 return
               }
@@ -163,6 +174,22 @@ describe('DaemonClient', () => {
       } finally {
         vi.useRealTimers()
       }
+    })
+
+    it('rejects when the daemon closes before hello completes', async () => {
+      await startMockDaemon({ closeOnHello: true })
+
+      client = new DaemonClient({ socketPath, tokenPath })
+      await expect(client.ensureConnected()).rejects.toThrow(
+        'Connection closed before hello response'
+      )
+    })
+
+    it('rejects when the daemon closes immediately after connect', async () => {
+      await startMockDaemon({ closeOnConnect: true })
+
+      client = new DaemonClient({ socketPath, tokenPath })
+      await expect(client.ensureConnected()).rejects.toThrow()
     })
   })
 
