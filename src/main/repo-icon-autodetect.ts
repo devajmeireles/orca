@@ -75,17 +75,18 @@ function extractIconHref(source: string): string | null {
   return source.match(LINK_ICON_HTML_RE)?.[1] ?? source.match(LINK_ICON_OBJECT_RE)?.[1] ?? null
 }
 
-function normalizeIconRelativePath(relativePath: string): string | null {
-  const normalized = relativePath.replace(/\\/g, '/').trim()
+function normalizeIconHrefPath(href: string): string | null {
+  const normalized = href.replace(/\\/g, '/').trim()
   if (
     !normalized ||
-    normalized.startsWith('/') ||
     normalized.includes('\0') ||
+    normalized.startsWith('//') ||
     /^[A-Za-z][A-Za-z0-9+.-]*:/.test(normalized)
   ) {
     return null
   }
-  const segments = normalized.split('/').filter((segment) => segment && segment !== '.')
+  const rootRelativePath = normalized.replace(/^\/+/, '')
+  const segments = rootRelativePath.split('/').filter((segment) => segment && segment !== '.')
   if (segments.length === 0 || segments.some((segment) => segment === '..')) {
     return null
   }
@@ -93,15 +94,15 @@ function normalizeIconRelativePath(relativePath: string): string | null {
 }
 
 function iconHrefCandidates(href: string): string[] {
-  const clean = href.replace(/^\/+/, '')
-  const candidates: string[] = []
-  for (const candidate of [`public/${clean}`, clean]) {
-    // Why: icon hrefs are repo-controlled input; never let detection probe above
-    // the selected repo root while looking for a best-effort visual.
-    const normalized = normalizeIconRelativePath(candidate)
-    if (normalized && !candidates.includes(normalized)) {
-      candidates.push(normalized)
-    }
+  // Why: icon hrefs are repo-controlled input; reject unsafe shapes before
+  // adding repo-local lookup prefixes so URL-like hrefs cannot be reinterpreted.
+  const clean = normalizeIconHrefPath(href)
+  if (!clean) {
+    return []
+  }
+  const candidates = [`public/${clean}`, clean]
+  if (candidates[0] === candidates[1]) {
+    return [candidates[0]]
   }
   return candidates
 }

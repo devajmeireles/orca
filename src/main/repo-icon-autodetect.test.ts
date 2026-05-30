@@ -88,6 +88,30 @@ describe('detectRepoIcon', () => {
     })
   })
 
+  it('does not reinterpret URL-like icon hrefs as repo-local paths', async () => {
+    const repoPath = await makeTempRepoDir()
+    await mkdir(join(repoPath, 'public', 'https:', 'cdn.example.com'), { recursive: true })
+    await writeFile(
+      join(repoPath, 'index.html'),
+      '<link rel="icon" href="https://cdn.example.com/icon.png">'
+    )
+    await writeFile(
+      join(repoPath, 'public', 'https:', 'cdn.example.com', 'icon.png'),
+      Buffer.from(PNG_1X1_BASE64, 'base64')
+    )
+    await writeFile(
+      join(repoPath, 'package.json'),
+      JSON.stringify({ homepage: 'https://app.example.com/docs' })
+    )
+
+    await expect(detectRepoIcon({ repoPath, kind: 'folder' })).resolves.toEqual({
+      type: 'image',
+      src: 'https://www.google.com/s2/favicons?domain=app.example.com&sz=64',
+      source: 'favicon',
+      label: 'Website favicon'
+    })
+  })
+
   it('falls back to the GitHub owner avatar for GitHub repos', async () => {
     const repoPath = await makeTempRepoDir()
     await gitExecFileAsync(['init'], { cwd: repoPath })
