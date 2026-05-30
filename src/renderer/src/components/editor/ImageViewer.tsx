@@ -112,6 +112,7 @@ export default function ImageViewer({
               onLoad={(event) => {
                 const img = event.currentTarget
                 setImageDimensions({ width: img.naturalWidth, height: img.naturalHeight })
+                setFailedPreviewSrc(null)
               }}
               // Why: track the failed source identity, not a boolean, so a new
               // image retries immediately without waiting for an Effect reset.
