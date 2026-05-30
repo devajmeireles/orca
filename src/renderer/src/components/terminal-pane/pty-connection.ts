@@ -187,11 +187,17 @@ function hasAgentNotificationDetail(entry: AgentStatusEntry | undefined): boolea
   )
 }
 
-function canDispatchAgentNotificationAfterGrace(entry: AgentStatusEntry | undefined): boolean {
+function canDispatchAgentNotificationAfterGrace(
+  entry: AgentStatusEntry | undefined,
+  options: { allowDoneDetailAfterGrace?: boolean } = {}
+): boolean {
   // Why: hook-backed goal/mission loops can report `done` between milestones.
   // User-input states may notify as soon as detail arrives, but `done` waits
   // for the max quiet window so resumed work can cancel the pending banner.
-  return hasAgentNotificationDetail(entry) && entry?.state !== 'done'
+  return (
+    hasAgentNotificationDetail(entry) &&
+    (entry?.state !== 'done' || options.allowDoneDetailAfterGrace === true)
+  )
 }
 
 function recordPtyConnectDiagnostic(message: string): void {
@@ -665,7 +671,10 @@ export function connectPanePty(
     getPtyId: () => transport.getPtyId(),
     getSettings: () => useAppStore.getState().settings,
     inspectProcess: inspectRuntimeTerminalProcess,
-    dispatchCompletion: (title) => scheduleAgentTaskCompleteNotification(title),
+    dispatchCompletion: (title, meta) =>
+      scheduleAgentTaskCompleteNotification(title, {
+        allowDoneDetailAfterGrace: meta?.quietedHookDone
+      }),
     shouldPollProcessCadence: () =>
       isAgentTaskCompleteNotificationEnabled() && deps.isVisibleRef.current,
     isLive: () => {
@@ -913,7 +922,8 @@ export function connectPanePty(
 
   const hasPendingAgentTaskCompleteNotification = (): boolean =>
     isAgentTaskCompleteNotificationEnabled() &&
-    (agentTaskCompleteNotificationGraceTimer !== null ||
+    (agentCompletionCoordinator.hasPendingHookDoneCompletion() ||
+      agentTaskCompleteNotificationGraceTimer !== null ||
       agentTaskCompleteNotificationMaxTimer !== null ||
       agentTaskCompleteStatusUnsubscribe !== null)
 
@@ -953,7 +963,10 @@ export function connectPanePty(
     return enabled
   }
 
-  const scheduleAgentTaskCompleteNotification = (title: string): void => {
+  const scheduleAgentTaskCompleteNotification = (
+    title: string,
+    options: { allowDoneDetailAfterGrace?: boolean } = {}
+  ): void => {
     if (!syncAgentTaskCompleteNotificationEnabled()) {
       return
     }
@@ -986,7 +999,7 @@ export function connectPanePty(
         return
       }
       const entry = useAppStore.getState().agentStatusByPaneKey[cacheKey]
-      if (canDispatchAgentNotificationAfterGrace(entry)) {
+      if (canDispatchAgentNotificationAfterGrace(entry, options)) {
         dispatch()
       }
     }
@@ -1142,6 +1155,9 @@ export function connectPanePty(
       currentState.setAgentStatus(cacheKey, payload, title)
       if (syncAgentTaskCompleteNotificationEnabled()) {
         agentCompletionCoordinator.observeHookStatus(payload)
+      }
+      if (payload.state === 'working' && pendingTerminalBellNotification) {
+        scheduleTerminalBellNotification()
       }
     }
   }
