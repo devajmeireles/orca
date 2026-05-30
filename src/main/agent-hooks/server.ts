@@ -50,6 +50,7 @@ import {
 } from '../../shared/agent-interrupt-intent'
 import { parseLegacyNumericPaneKey, parsePaneKey } from '../../shared/stable-pane-id'
 import type { LegacyPaneKeyAliasEntry } from '../../shared/types'
+import { claudeWorkflowIndex } from './claude-workflow-index'
 
 export type { AgentHookSource }
 
@@ -1038,6 +1039,11 @@ export class AgentHookServer {
 
         trackEmptyPaneKeyHook(body)
         const aliasedBody = this.normalizeHookBodyPaneKeyAlias(body)
+        if (source === 'claude') {
+          // Why: Claude workflow file pointers are present only in the raw hook
+          // body; the normalized status intentionally drops them before IPC.
+          claudeWorkflowIndex.processRawHookBody({ body: aliasedBody, connectionId: null })
+        }
         const normalized = normalizeHookPayload(this.state, source, aliasedBody, this.env)
         if (normalized) {
           const enriched = this.applyNormalizedStatus(normalized)

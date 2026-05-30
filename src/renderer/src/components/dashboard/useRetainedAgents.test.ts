@@ -16,6 +16,8 @@ function makeAgentRow(args: { paneKey: string; state: AgentStatusState; interrup
   }
 
   return {
+    kind: 'agent' as const,
+    rowId: args.paneKey,
     paneKey: args.paneKey,
     entry,
     tab: {

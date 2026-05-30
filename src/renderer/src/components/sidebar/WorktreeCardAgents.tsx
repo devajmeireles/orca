@@ -52,26 +52,36 @@ type AgentLineageModel = {
   childrenByParentPaneKey: Map<string, DashboardAgentRowData[]>
 }
 
+function rowKey(agent: DashboardAgentRowData): string {
+  return agent.rowId ?? agent.paneKey
+}
+
+function rowParentKey(agent: DashboardAgentRowData): string | undefined {
+  return (
+    agent.parentRowId ?? ('entry' in agent ? agent.entry.orchestration?.parentPaneKey : undefined)
+  )
+}
+
 function buildAgentLineageModel(agents: DashboardAgentRowData[]): AgentLineageModel {
-  const agentPaneKeys = new Set(agents.map((agent) => agent.paneKey))
+  const agentRowIds = new Set(agents.map(rowKey))
   const childrenByParentPaneKey = new Map<string, DashboardAgentRowData[]>()
-  const childPaneKeys = new Set<string>()
+  const childRowIds = new Set<string>()
 
   for (const agent of agents) {
-    const parentPaneKey = agent.entry.orchestration?.parentPaneKey
-    if (!parentPaneKey || !agentPaneKeys.has(parentPaneKey)) {
+    const parentRowId = rowParentKey(agent)
+    if (!parentRowId || !agentRowIds.has(parentRowId)) {
       continue
     }
-    childPaneKeys.add(agent.paneKey)
-    const siblings = childrenByParentPaneKey.get(parentPaneKey)
+    childRowIds.add(rowKey(agent))
+    const siblings = childrenByParentPaneKey.get(parentRowId)
     if (siblings) {
       siblings.push(agent)
     } else {
-      childrenByParentPaneKey.set(parentPaneKey, [agent])
+      childrenByParentPaneKey.set(parentRowId, [agent])
     }
   }
 
-  const rootAgents = agents.filter((agent) => !childPaneKeys.has(agent.paneKey))
+  const rootAgents = agents.filter((agent) => !childRowIds.has(rowKey(agent)))
   if (rootAgents.length === 0 && agents.length > 0) {
     // Why: malformed orchestration metadata can theoretically form a cycle.
     // Keep every row visible instead of recursing forever or hiding the list.
@@ -83,13 +93,14 @@ function buildAgentLineageModel(agents: DashboardAgentRowData[]): AgentLineageMo
     agent: DashboardAgentRowData,
     ancestorPaneKeys: ReadonlySet<string> = new Set()
   ): void => {
-    if (reachablePaneKeys.has(agent.paneKey) || ancestorPaneKeys.has(agent.paneKey)) {
+    const key = rowKey(agent)
+    if (reachablePaneKeys.has(key) || ancestorPaneKeys.has(key)) {
       return
     }
-    reachablePaneKeys.add(agent.paneKey)
+    reachablePaneKeys.add(key)
     const descendantAncestorPaneKeys = new Set(ancestorPaneKeys)
-    descendantAncestorPaneKeys.add(agent.paneKey)
-    for (const childAgent of childrenByParentPaneKey.get(agent.paneKey) ?? []) {
+    descendantAncestorPaneKeys.add(key)
+    for (const childAgent of childrenByParentPaneKey.get(key) ?? []) {
       markReachable(childAgent, descendantAncestorPaneKeys)
     }
   }
@@ -98,14 +109,15 @@ function buildAgentLineageModel(agents: DashboardAgentRowData[]): AgentLineageMo
   }
 
   for (const agent of agents) {
-    if (reachablePaneKeys.has(agent.paneKey)) {
+    const key = rowKey(agent)
+    if (reachablePaneKeys.has(key)) {
       continue
     }
     // Why: a partial cycle alongside a valid root has no true root, so it
     // would otherwise disappear. Render malformed participants as flat rows
     // and drop their child edges, matching the dashboard lineage fallback.
     rootAgents.push(agent)
-    childrenByParentPaneKey.delete(agent.paneKey)
+    childrenByParentPaneKey.delete(key)
   }
 
   return { rootAgents, childrenByParentPaneKey }
@@ -130,6 +142,10 @@ const WorktreeCardAgentsBody = React.memo(function WorktreeCardAgentsBody({
   const unvisitedByPaneKey = useMemo(() => {
     const out: Record<string, boolean> = {}
     for (const a of agents) {
+      if (a.kind !== 'agent') {
+        out[a.paneKey] = false
+        continue
+      }
       const ackAt = acknowledgedAgentsByPaneKey[a.paneKey] ?? 0
       out[a.paneKey] = ackAt < a.entry.stateStartedAt
     }
@@ -137,9 +153,13 @@ const WorktreeCardAgentsBody = React.memo(function WorktreeCardAgentsBody({
   }, [agents, acknowledgedAgentsByPaneKey])
 
   const handleDismissAgent = useCallback(
-    (paneKey: string) => {
-      dropAgentStatus(paneKey)
-      dismissRetainedAgent(paneKey)
+    (id: string) => {
+      if (id.startsWith('claude-workflow:')) {
+        useAppStore.getState().dismissClaudeWorkflowRun(id)
+        return
+      }
+      dropAgentStatus(id)
+      dismissRetainedAgent(id)
     },
     [dropAgentStatus, dismissRetainedAgent]
   )
@@ -225,18 +245,21 @@ const WorktreeCardAgentsBody = React.memo(function WorktreeCardAgentsBody({
     agent: DashboardAgentRowData,
     ancestorPaneKeys: ReadonlySet<string> = new Set()
   ): React.ReactNode => {
-    if (ancestorPaneKeys.has(agent.paneKey)) {
+    const key = rowKey(agent)
+    if (ancestorPaneKeys.has(key)) {
       // Why: orchestration metadata is external state and can be malformed.
       // Bail out of repeated ancestors instead of recursing forever.
       return null
     }
-    const childAgents = childrenByParentPaneKey.get(agent.paneKey) ?? []
+    const childAgents = childrenByParentPaneKey.get(key) ?? []
     const hasChildAgents = childAgents.length > 0
-    const expanded = expandedLineageParents.has(agent.paneKey)
+    const expanded =
+      expandedLineageParents.has(key) ||
+      (agent.kind === 'workflow' && hasChildAgents && agent.state !== 'done')
     const descendantAncestorPaneKeys = new Set(ancestorPaneKeys)
-    descendantAncestorPaneKeys.add(agent.paneKey)
+    descendantAncestorPaneKeys.add(key)
     return (
-      <React.Fragment key={agent.paneKey}>
+      <React.Fragment key={key}>
         <DashboardAgentRow
           agent={agent}
           onDismiss={handleDismissAgent}
@@ -261,13 +284,11 @@ const WorktreeCardAgentsBody = React.memo(function WorktreeCardAgentsBody({
           // disclosure stripe below it. Variant B in the mockups.
           childAgentCount={hasChildAgents ? childAgents.length : undefined}
           childAgentsExpanded={expanded}
-          onToggleChildAgents={
-            hasChildAgents ? () => toggleLineageParent(agent.paneKey) : undefined
-          }
+          onToggleChildAgents={hasChildAgents ? () => toggleLineageParent(key) : undefined}
           // Why: keep leaf rows aligned with parent rows in the same card —
           // see anyRootHasChildren above.
           reserveDisclosureGutter={anyRootHasChildren && !hasChildAgents}
-          isFocusedPane={agent.paneKey === focusedAgentPaneKey}
+          isFocusedPane={(agent.activationPaneKey ?? agent.paneKey) === focusedAgentPaneKey}
           // Why: the disclosure variant uses chevron + indentation to show
           // hierarchy. The legacy L-connector / vertical-trunk decorations
           // are pinned to a fixed left offset that doesn't match the

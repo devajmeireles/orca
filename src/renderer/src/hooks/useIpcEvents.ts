@@ -44,6 +44,7 @@ import {
   normalizeAgentStatusPayload,
   type AgentStatusIpcPayload
 } from '../../../shared/agent-status-types'
+import type { ClaudeWorkflowSnapshot } from '../../../shared/claude-workflow-status'
 import { isGitRepoKind } from '../../../shared/repo-kind'
 import { TOGGLE_FLOATING_TERMINAL_EVENT } from '@/lib/floating-terminal'
 import { focusTerminalTabSurface } from '@/lib/focus-terminal-tab-surface'
@@ -2144,6 +2145,41 @@ export function useIpcEvents(): void {
 
     let snapshotRequestedForReadyWindow = false
     let snapshotRequestId = 0
+    let workflowSnapshotRequestedForReadyWindow = false
+    let workflowSnapshotRequestId = 0
+    const applyClaudeWorkflowSnapshot = (snapshot: ClaudeWorkflowSnapshot): void => {
+      const store = useAppStore.getState()
+      if (!store.workspaceSessionReady) {
+        return
+      }
+      store.setClaudeWorkflowSnapshot(snapshot)
+    }
+    const requestClaudeWorkflowSnapshotIfReady = (): void => {
+      const store = useAppStore.getState()
+      if (!store.workspaceSessionReady) {
+        workflowSnapshotRequestedForReadyWindow = false
+        return
+      }
+      if (workflowSnapshotRequestedForReadyWindow) {
+        return
+      }
+      const getSnapshot = window.api.claudeWorkflows?.getSnapshot
+      if (typeof getSnapshot !== 'function') {
+        return
+      }
+      workflowSnapshotRequestedForReadyWindow = true
+      const requestId = ++workflowSnapshotRequestId
+      void getSnapshot()
+        .then((snapshot) => {
+          if (requestId !== workflowSnapshotRequestId) {
+            return
+          }
+          applyClaudeWorkflowSnapshot(snapshot)
+        })
+        .catch((err) => {
+          console.warn('[claude-workflows] failed to load startup snapshot:', err)
+        })
+    }
     const requestAgentStatusSnapshotIfReady = (): void => {
       const store = useAppStore.getState()
       if (!store.workspaceSessionReady) {
@@ -2226,15 +2262,23 @@ export function useIpcEvents(): void {
     if (unsubscribeMigrationUnsupportedClear) {
       unsubs.push(unsubscribeMigrationUnsupportedClear)
     }
+    const unsubscribeClaudeWorkflows = window.api.claudeWorkflows?.onDidUpdate?.((snapshot) => {
+      applyClaudeWorkflowSnapshot(snapshot)
+    })
+    if (unsubscribeClaudeWorkflows) {
+      unsubs.push(unsubscribeClaudeWorkflows)
+    }
 
     // Why: the main hook server is the durable source of truth. Pull a
     // snapshot only after workspace tabs are ready, so early startup pushes
     // can be safely ignored instead of buffered against partially hydrated
     // renderer state.
     requestAgentStatusSnapshotIfReady()
+    requestClaudeWorkflowSnapshotIfReady()
     unsubs.push(
       useAppStore.subscribe(() => {
         requestAgentStatusSnapshotIfReady()
+        requestClaudeWorkflowSnapshotIfReady()
         flushPendingAgentStatuses()
         syncAgentHookCompletionNotificationSettings()
       })

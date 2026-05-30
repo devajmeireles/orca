@@ -1,3 +1,6 @@
+/* eslint-disable max-lines -- Why: the row derivation tests cover live,
+   retained, migration-unsupported, lineage, and Claude workflow virtual rows
+   in one fixture set so selector stability regressions are easier to spot. */
 import { describe, expect, it } from 'vitest'
 import {
   AGENT_STATUS_STALE_AFTER_MS,
@@ -8,6 +11,7 @@ import type { TerminalTab } from '../../../../shared/types'
 import type { RetainedAgentEntry } from '@/store/slices/agent-status'
 import {
   buildWorktreeAgentRows,
+  selectClaudeWorkflowRunsForWorktree,
   selectLiveAgentStatusEntriesForWorktree,
   selectMigrationUnsupportedEntriesForWorktree,
   selectRetainedAgentEntriesForWorktree
@@ -89,7 +93,8 @@ describe('buildWorktreeAgentRows', () => {
     })
 
     expect(rows).toHaveLength(1)
-    expect(rows[0].entry).toBe(liveEntry)
+    expect(rows[0].kind).toBe('agent')
+    expect(rows[0].kind === 'agent' ? rows[0].entry : null).toBe(liveEntry)
     expect(rows[0].startedAt).toBe(2000)
   })
 
@@ -115,6 +120,69 @@ describe('buildWorktreeAgentRows', () => {
     const done = rows.find((r) => r.paneKey === PANE_KEY_2)
     expect(working?.state).toBe('idle')
     expect(done?.state).toBe('done')
+  })
+
+  it('adds Claude workflow group rows with synthetic ids and parent-pane activation', () => {
+    const rows = applyAgentRowLineage(
+      buildWorktreeAgentRows({
+        tabs: [makeTab('tab-1')],
+        entries: [makeEntry(PANE_KEY_1, 1000, { state: 'working' })],
+        retained: [],
+        workflows: [
+          {
+            id: 'claude-workflow:run-1',
+            parentPaneKey: PANE_KEY_1,
+            parentTabId: 'tab-1',
+            worktreeId: 'wt-1',
+            connectionId: null,
+            runId: 'run-1',
+            label: 'Review workflow',
+            state: 'working',
+            startedAt: 1100,
+            updatedAt: 1200,
+            phaseSummary: 'planning -> review',
+            agents: [
+              {
+                id: 'agent-1',
+                label: 'Plan reviewer',
+                state: 'working',
+                startedAt: 1150,
+                updatedAt: 1200,
+                lastMessage: 'Checking plan'
+              }
+            ],
+            phases: [],
+            counts: {
+              total: 1,
+              done: 0,
+              working: 1,
+              waiting: 0,
+              blocked: 0,
+              error: 0
+            }
+          }
+        ],
+        now: 2000
+      })
+    )
+
+    expect(rows.map((row) => row.rowId)).toEqual([
+      PANE_KEY_1,
+      'claude-workflow:run-1',
+      'claude-workflow:run-1:agent:agent-1'
+    ])
+    expect(rows[1]).toMatchObject({
+      kind: 'workflow',
+      paneKey: 'claude-workflow:run-1',
+      parentRowId: PANE_KEY_1,
+      activationPaneKey: PANE_KEY_1,
+      activationTabId: 'tab-1',
+      dismissId: 'claude-workflow:run-1'
+    })
+    expect(rows[2]).toMatchObject({
+      kind: 'workflow-agent',
+      parentRowId: 'claude-workflow:run-1'
+    })
   })
 })
 
@@ -329,5 +397,21 @@ describe('selectRetainedAgentEntriesForWorktree', () => {
     expect(secondWt1).toBe(firstWt1)
     expect(secondWt2).not.toBe(firstWt2)
     expect(secondWt2[0]?.startedAt).toBe(1100)
+  })
+})
+
+describe('selectClaudeWorkflowRunsForWorktree', () => {
+  it('returns stable empty references for worktrees without Claude workflow runs', () => {
+    const state = {
+      tabsByWorktree: {},
+      agentStatusByPaneKey: {},
+      migrationUnsupportedByPtyId: {},
+      retainedAgentsByPaneKey: {},
+      claudeWorkflowRunsById: {}
+    }
+
+    expect(selectClaudeWorkflowRunsForWorktree(state, 'wt-1')).toBe(
+      selectClaudeWorkflowRunsForWorktree(state, 'wt-2')
+    )
   })
 })

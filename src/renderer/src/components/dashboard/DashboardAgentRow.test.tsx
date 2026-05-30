@@ -4,14 +4,14 @@ import type { AgentStatusEntry } from '../../../../shared/agent-status-types'
 import type { TerminalTab } from '../../../../shared/types'
 import { TooltipProvider } from '../ui/tooltip'
 import DashboardAgentRow from './DashboardAgentRow'
-import type { DashboardAgentRow as DashboardAgentRowData } from './useDashboardData'
+import type { DashboardRealAgentRow } from './useDashboardData'
 
 const NOW = 120_000
 
 function makeAgent(
-  overrides: Partial<DashboardAgentRowData> = {},
+  overrides: Partial<DashboardRealAgentRow> = {},
   entryOverrides: Partial<AgentStatusEntry> = {}
-): DashboardAgentRowData {
+): DashboardRealAgentRow {
   const paneKey = overrides.paneKey ?? 'tab-1:leaf-1'
   const tab: TerminalTab = {
     id: 'tab-1',
@@ -35,6 +35,8 @@ function makeAgent(
   }
 
   return {
+    kind: 'agent',
+    rowId: paneKey,
     paneKey,
     entry,
     tab,
@@ -45,7 +47,7 @@ function makeAgent(
   }
 }
 
-function renderRow(agent: DashboardAgentRowData): string {
+function renderRow(agent: DashboardRealAgentRow): string {
   return renderToStaticMarkup(
     <TooltipProvider>
       <DashboardAgentRow

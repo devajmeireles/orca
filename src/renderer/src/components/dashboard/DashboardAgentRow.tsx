@@ -1,3 +1,6 @@
+/* eslint-disable max-lines -- Why: DashboardAgentRow owns the compact agent row
+   presentation for live agents and Claude workflow virtual rows; splitting
+   would scatter tightly-coupled row layout, expansion, and dismissal behavior. */
 import React, { useState, useCallback } from 'react'
 import { X, Wrench, ChevronDown } from 'lucide-react'
 import { cn } from '@/lib/utils'
@@ -49,6 +52,9 @@ function formatTimeAgo(ts: number, now: number): string {
 // drift away from the true transition moment. For past dones, stateHistory
 // entries already store the per-transition `startedAt` so we read it directly.
 function lastEnteredDoneAt(agent: DashboardAgentRowData): number | null {
+  if (agent.kind !== 'agent') {
+    return agent.state === 'done' ? agent.startedAt : null
+  }
   const entry = agent.entry
   if (entry.state === 'done') {
     return entry.stateStartedAt
@@ -62,7 +68,7 @@ function lastEnteredDoneAt(agent: DashboardAgentRowData): number | null {
 }
 
 function stateDotTooltipLabel(agent: DashboardAgentRowData, dotState: AgentDotState): string {
-  if (agent.entry.interrupted === true) {
+  if (agent.kind === 'agent' && agent.entry.interrupted === true) {
     return 'Interrupted by user'
   }
   return agentStateLabel(dotState)
@@ -149,9 +155,9 @@ const DashboardAgentRow = React.memo(function DashboardAgentRow({
   const handleDismiss = useCallback(
     (e: React.MouseEvent) => {
       e.stopPropagation()
-      onDismiss(agent.paneKey)
+      onDismiss(agent.dismissId ?? agent.paneKey)
     },
-    [onDismiss, agent.paneKey]
+    [onDismiss, agent.dismissId, agent.paneKey]
   )
   // Why: the chevron toggles expand-collapse and must not propagate — clicks
   // on it would otherwise bubble to the row's activate handler and navigate
@@ -182,13 +188,25 @@ const DashboardAgentRow = React.memo(function DashboardAgentRow({
   const handleActivate = useCallback(
     (e: React.MouseEvent) => {
       e.stopPropagation()
-      onActivate(agent.tab.id, agent.paneKey)
+      const activationTabId =
+        agent.activationTabId ?? (agent.kind === 'agent' ? agent.tab.id : undefined)
+      const activationPaneKey =
+        agent.activationPaneKey ?? (agent.kind === 'agent' ? agent.paneKey : undefined)
+      if (!activationTabId || !activationPaneKey) {
+        return
+      }
+      onActivate(activationTabId, activationPaneKey)
     },
-    [onActivate, agent.tab.id, agent.paneKey]
+    [onActivate, agent]
   )
   const startedAt = agent.startedAt > 0 ? agent.startedAt : null
   const doneAt = lastEnteredDoneAt(agent)
-  const prompt = agent.entry.prompt.trim()
+  const prompt =
+    agent.kind === 'agent'
+      ? agent.entry.prompt.trim()
+      : agent.kind === 'workflow'
+        ? agent.label.trim()
+        : agent.label.trim()
   // Why: `agent.entry.prompt` is normalized to '' when the prompt is unknown
   // (fresh agent, missing telemetry). Rendering the row with an empty primary
   // slot would collapse the text column and leave the row with no human-
@@ -202,10 +220,14 @@ const DashboardAgentRow = React.memo(function DashboardAgentRow({
   // fields on `state === 'working'`. The assistant message is the opposite
   // — it's the reply, most useful on `done`, so we always show it.
   const isWorking = agent.state === 'working'
-  const toolName = isWorking ? (agent.entry.toolName?.trim() ?? '') : ''
-  const toolInput = isWorking ? (agent.entry.toolInput?.trim() ?? '') : ''
-  const lastAssistantMessage = agent.entry.lastAssistantMessage?.trim() ?? ''
-  const isInterrupted = agent.entry.interrupted === true
+  const showToolSlot = isWorking && agent.kind === 'agent'
+  const toolName = showToolSlot ? (agent.entry.toolName?.trim() ?? '') : ''
+  const toolInput = showToolSlot ? (agent.entry.toolInput?.trim() ?? '') : ''
+  const lastAssistantMessage =
+    agent.kind === 'agent'
+      ? (agent.entry.lastAssistantMessage?.trim() ?? '')
+      : (agent.secondaryText?.trim() ?? '')
+  const isInterrupted = agent.kind === 'agent' && agent.entry.interrupted === true
   const lineage = agent.lineage
   const isLineageChild = lineage?.depth === 1
   const lineageChildCount = lineage?.childCount ?? 0
@@ -221,6 +243,9 @@ const DashboardAgentRow = React.memo(function DashboardAgentRow({
   // explanation without competing with the prompt or timestamp.
   const dotState: AgentDotState = isInterrupted ? 'interrupted' : asDotState(agent.state)
   const dotTooltipLabel = stateDotTooltipLabel(agent, dotState)
+  const isRoutable =
+    agent.kind === 'agent' ||
+    (typeof agent.activationTabId === 'string' && typeof agent.activationPaneKey === 'string')
 
   // Why: always show the chevron to keep the row's right edge stable — a
   // conditional control would appear/disappear as agent content grows and
@@ -254,7 +279,8 @@ const DashboardAgentRow = React.memo(function DashboardAgentRow({
         // Why: inline agent rows sit inside a hoverable workspace card, so
         // their hover wash must stay softer than the parent card highlight.
         // The focused-pane state reuses the same class via data attribute.
-        'cursor-pointer rounded-sm worktree-agent-row-hover'
+        'rounded-sm worktree-agent-row-hover',
+        isRoutable && 'cursor-pointer'
       )}
       data-focused-agent-pane={isFocusedPane ? 'true' : undefined}
       title={tsParts.length > 0 ? tsParts.join(' • ') : undefined}
@@ -470,7 +496,7 @@ const DashboardAgentRow = React.memo(function DashboardAgentRow({
           slot must be a real line box instead of whitespace that can collapse.
           Tool slot only reserves height while working, since done/blocked rows
           shouldn't show a dangling wrench. */}
-      {isWorking && (
+      {showToolSlot && (
         <div
           data-agent-row-tool-slot=""
           className="mt-0.5 min-w-0 pl-5 text-[10px] leading-snug text-muted-foreground/70"

@@ -23,41 +23,41 @@ export function applyAgentRowLineage(rows: DashboardAgentRow[]): DashboardAgentR
     return rows.map((row) => ({ ...row, lineage: ROOT_LINEAGE }))
   }
 
-  const rowsByPaneKey = new Map(rows.map((row) => [row.paneKey, row]))
-  const childrenByParentPaneKey = new Map<string, DashboardAgentRow[]>()
-  const childPaneKeys = new Set<string>()
+  const rowsById = new Map(rows.map((row) => [row.rowId, row]))
+  const childrenByParentRowId = new Map<string, DashboardAgentRow[]>()
+  const childRowIds = new Set<string>()
 
   for (const row of rows) {
-    const parentPaneKey = row.entry.orchestration?.parentPaneKey
-    if (!parentPaneKey || !rowsByPaneKey.has(parentPaneKey)) {
+    const parentRowId = row.parentRowId
+    if (!parentRowId || !rowsById.has(parentRowId)) {
       continue
     }
-    childPaneKeys.add(row.paneKey)
-    const siblings = childrenByParentPaneKey.get(parentPaneKey)
+    childRowIds.add(row.rowId)
+    const siblings = childrenByParentRowId.get(parentRowId)
     if (siblings) {
       siblings.push(row)
     } else {
-      childrenByParentPaneKey.set(parentPaneKey, [row])
+      childrenByParentRowId.set(parentRowId, [row])
     }
   }
 
-  if (childPaneKeys.size === 0) {
+  if (childRowIds.size === 0) {
     return rows.map((row) => ({ ...row, lineage: ROOT_LINEAGE }))
   }
 
   const ordered: DashboardAgentRowWithLineage[] = []
   const emitted = new Set<string>()
   const emitRow = (row: DashboardAgentRow, lineage: AgentRowLineagePresentation): boolean => {
-    if (emitted.has(row.paneKey)) {
+    if (emitted.has(row.rowId)) {
       return false
     }
-    emitted.add(row.paneKey)
+    emitted.add(row.rowId)
     ordered.push({ ...row, lineage })
     return true
   }
 
   const emitSubtree = (row: DashboardAgentRow, lineage: AgentRowLineagePresentation): void => {
-    const children = childrenByParentPaneKey.get(row.paneKey) ?? []
+    const children = childrenByParentRowId.get(row.rowId) ?? []
     if (!emitRow(row, { ...lineage, childCount: children.length })) {
       return
     }
@@ -75,7 +75,7 @@ export function applyAgentRowLineage(rows: DashboardAgentRow[]): DashboardAgentR
   }
 
   for (const row of rows) {
-    if (childPaneKeys.has(row.paneKey)) {
+    if (childRowIds.has(row.rowId)) {
       continue
     }
     emitSubtree(row, ROOT_LINEAGE)

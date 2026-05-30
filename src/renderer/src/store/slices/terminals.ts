@@ -1527,6 +1527,7 @@ export const createTerminalSlice: StateCreator<AppState, [], [], TerminalSlice> 
     // "done" row. Sweep by worktreeId because retained snapshots can outlive
     // their original tab.
     get().dropAgentStatusByWorktree(worktreeId)
+    get().dismissClaudeWorkflowRunsByWorktree(worktreeId)
 
     if (ptyIds.length === 0) {
       return

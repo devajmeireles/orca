@@ -4,8 +4,10 @@ import type {
   AgentStatusIpcPayload,
   MigrationUnsupportedPtyEntry
 } from '../../shared/agent-status-types'
+import type { ClaudeWorkflowSnapshot } from '../../shared/claude-workflow-status'
 import type { AgentInterruptInferenceRequest } from '../../shared/agent-interrupt-intent'
 import { agentHookServer, isValidPaneKey } from '../agent-hooks/server'
+import { claudeWorkflowIndex } from '../agent-hooks/claude-workflow-index'
 import { ampHookService } from '../amp/hook-service'
 import {
   clearMigrationUnsupportedPtysForPaneKey,
@@ -47,11 +49,13 @@ export function registerAgentHookHandlers(): void {
   ipcMain.removeHandler('agentStatus:getSnapshot')
   ipcMain.removeHandler('agentStatus:inferInterrupt')
   ipcMain.removeHandler('agentStatus:getMigrationUnsupportedSnapshot')
+  ipcMain.removeHandler('claudeWorkflows:getSnapshot')
   // Why: agentStatus:drop is sent fire-and-forget from the renderer via
   // ipcRenderer.send(); we listen with ipcMain.on (not handle) so we don't
   // round-trip a response. Removing first keeps re-registration safe even
   // though the module-level registered guard already prevents re-entry today.
   ipcMain.removeAllListeners('agentStatus:drop')
+  ipcMain.removeAllListeners('claudeWorkflows:drop')
   ipcMain.on('agentStatus:drop', (_event, paneKey: unknown) => {
     if (typeof paneKey !== 'string' || !isValidPaneKey(paneKey)) {
       return
@@ -71,6 +75,20 @@ export function registerAgentHookHandlers(): void {
     // Why: the renderer pulls this after workspace hydration, so startup cannot
     // lose replayed statuses while its local store is still empty.
     return agentHookServer.getStatusSnapshot()
+  })
+  ipcMain.handle('claudeWorkflows:getSnapshot', (): ClaudeWorkflowSnapshot => {
+    return claudeWorkflowIndex.getSnapshot()
+  })
+  ipcMain.on('claudeWorkflows:drop', (_event, idOrWorktree: unknown) => {
+    if (typeof idOrWorktree !== 'string' || idOrWorktree.trim().length === 0) {
+      return
+    }
+    const value = idOrWorktree.trim()
+    if (value.startsWith('worktree:')) {
+      claudeWorkflowIndex.dropRunsByWorktree(value.slice('worktree:'.length))
+      return
+    }
+    claudeWorkflowIndex.dropRun(value)
   })
   ipcMain.handle('agentStatus:inferInterrupt', (_event, request: unknown): boolean => {
     if (typeof request !== 'object' || request === null) {

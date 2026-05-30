@@ -11,19 +11,27 @@ import {
 import type { Repo, Worktree, TerminalTab } from '../../../../shared/types'
 import { parsePaneKey } from '../../../../shared/stable-pane-id'
 import { migrationUnsupportedToAgentStatusEntry } from '@/lib/migration-unsupported-agent-entry'
+import type {
+  ClaudeWorkflowAgentSummary,
+  ClaudeWorkflowRunSummary
+} from '../../../../shared/claude-workflow-status'
 
 // ─── Shared data types ────────────────────────────────────────────────────────
 
-export type DashboardAgentRow = {
+export type DashboardAgentRowBase = {
+  kind: 'agent' | 'workflow' | 'workflow-agent'
+  rowId: string
   paneKey: string
-  entry: AgentStatusEntry
-  tab: TerminalTab
   agentType: AgentType
   state: AgentStatusState | 'idle'
   /** When this agent first began reporting status. Derived from the oldest
    *  stateHistory entry, falling back to updatedAt when no history exists yet.
    *  Used to sort agents by when they started. */
   startedAt: number
+  parentRowId?: string
+  activationPaneKey?: string
+  activationTabId?: string
+  dismissId?: string
   lineage?: {
     depth: 0 | 1
     isFirstSibling: boolean
@@ -31,6 +39,34 @@ export type DashboardAgentRow = {
     childCount: number
   }
 }
+
+export type DashboardRealAgentRow = DashboardAgentRowBase & {
+  kind: 'agent'
+  entry: AgentStatusEntry
+  tab: TerminalTab
+}
+
+export type DashboardWorkflowRow = DashboardAgentRowBase & {
+  kind: 'workflow'
+  workflow: ClaudeWorkflowRunSummary
+  label: string
+  secondaryText?: string
+  tab?: TerminalTab
+}
+
+export type DashboardWorkflowAgentRow = DashboardAgentRowBase & {
+  kind: 'workflow-agent'
+  workflow: ClaudeWorkflowRunSummary
+  workflowAgent: ClaudeWorkflowAgentSummary
+  label: string
+  secondaryText?: string
+  tab?: TerminalTab
+}
+
+export type DashboardAgentRow =
+  | DashboardRealAgentRow
+  | DashboardWorkflowRow
+  | DashboardWorkflowAgentRow
 
 // Why: the shape here is deliberately minimal. The per-card rendering pipeline
 // is separate (WorktreeCardAgents + useWorktreeAgentRows read retained entries
@@ -79,11 +115,14 @@ function buildAgentRowsForWorktree(
         !isFresh &&
         (entry.state === 'working' || entry.state === 'blocked' || entry.state === 'waiting')
       rows.push({
+        kind: 'agent',
+        rowId: entry.paneKey,
         paneKey: entry.paneKey,
         entry,
         tab,
         agentType: entry.agentType ?? 'unknown',
         state: shouldDecay ? 'idle' : entry.state,
+        parentRowId: entry.orchestration?.parentPaneKey,
         // Why: the oldest stateHistory entry's startedAt is the agent's original
         // "first seen" timestamp. When history is empty the entry has never
         // transitioned state, so stateStartedAt (the moment the current — and
@@ -100,12 +139,70 @@ function buildAgentRowsForWorktree(
   return rows
 }
 
+function workflowStateToAgentState(state: ClaudeWorkflowRunSummary['state']): AgentStatusState {
+  return state === 'error' ? 'blocked' : state
+}
+
+export function buildClaudeWorkflowRowsForWorktree(args: {
+  worktreeId: string
+  workflows: ClaudeWorkflowRunSummary[]
+  tabs: TerminalTab[]
+}): DashboardAgentRow[] {
+  const rows: DashboardAgentRow[] = []
+  const tabById = new Map(args.tabs.map((tab) => [tab.id, tab]))
+  for (const workflow of args.workflows) {
+    const parsed = parsePaneKey(workflow.parentPaneKey)
+    const parentTabId = workflow.parentTabId ?? parsed?.tabId
+    const parentTab = parentTabId ? tabById.get(parentTabId) : undefined
+    const parentPaneExists = parentTab !== undefined && parsed !== null
+    const workflowRowId = workflow.id
+    const state = workflowStateToAgentState(workflow.state)
+    rows.push({
+      kind: 'workflow',
+      rowId: workflowRowId,
+      paneKey: workflowRowId,
+      workflow,
+      tab: parentTab,
+      agentType: 'claude',
+      state,
+      startedAt: workflow.startedAt,
+      parentRowId: parentPaneExists ? workflow.parentPaneKey : undefined,
+      activationPaneKey: parentPaneExists ? workflow.parentPaneKey : undefined,
+      activationTabId: parentPaneExists ? parentTabId : undefined,
+      dismissId: workflow.id,
+      label: workflow.label,
+      secondaryText: workflow.phaseSummary
+    })
+    for (const agent of workflow.agents) {
+      rows.push({
+        kind: 'workflow-agent',
+        rowId: `${workflow.id}:agent:${agent.id}`,
+        paneKey: `${workflow.id}:agent:${agent.id}`,
+        workflow,
+        workflowAgent: agent,
+        tab: parentTab,
+        agentType: 'claude',
+        state: workflowStateToAgentState(agent.state),
+        startedAt: agent.startedAt,
+        parentRowId: workflowRowId,
+        activationPaneKey: parentPaneExists ? workflow.parentPaneKey : undefined,
+        activationTabId: parentPaneExists ? parentTabId : undefined,
+        dismissId: workflow.id,
+        label: agent.label,
+        secondaryText: agent.lastMessage
+      })
+    }
+  }
+  return rows
+}
+
 function buildDashboardData(
   repos: Repo[],
   worktreesByRepo: Record<string, Worktree[]>,
   tabsByWorktree: Record<string, TerminalTab[]>,
   agentStatusByPaneKey: Record<string, AgentStatusEntry>,
   migrationUnsupportedByPtyId: Record<string, MigrationUnsupportedPtyEntry>,
+  claudeWorkflowRunsById: Record<string, ClaudeWorkflowRunSummary>,
   now: number
 ): DashboardProjectGroup[] {
   // Why: build a tabId -> entries index once per computation instead of
@@ -146,7 +243,20 @@ function buildDashboardData(
     const worktrees = (worktreesByRepo[repo.id] ?? [])
       .filter((w) => !w.isArchived)
       .map((worktree) => {
-        const agents = buildAgentRowsForWorktree(worktree.id, tabsByWorktree, entriesByTabId, now)
+        const baseAgents = buildAgentRowsForWorktree(
+          worktree.id,
+          tabsByWorktree,
+          entriesByTabId,
+          now
+        )
+        const workflowRows = buildClaudeWorkflowRowsForWorktree({
+          worktreeId: worktree.id,
+          workflows: Object.values(claudeWorkflowRunsById).filter(
+            (workflow) => workflow.worktreeId === worktree.id
+          ),
+          tabs: tabsByWorktree[worktree.id] ?? []
+        })
+        const agents = [...baseAgents, ...workflowRows]
         return { repo, worktree, agents } satisfies DashboardWorktreeCard
       })
 
@@ -168,6 +278,7 @@ export function useDashboardData(): DashboardProjectGroup[] {
   const tabsByWorktree = useAppStore((s) => s.tabsByWorktree)
   const agentStatusByPaneKey = useAppStore((s) => s.agentStatusByPaneKey)
   const migrationUnsupportedByPtyId = useAppStore((s) => s.migrationUnsupportedByPtyId)
+  const claudeWorkflowRunsById = useAppStore((s) => s.claudeWorkflowRunsById)
   // Why: agentStatusEpoch is included in the dependency array (but not in the
   // computation itself) so the memo recomputes when freshness boundaries expire,
   // even if no new PTY data arrives.
@@ -185,6 +296,7 @@ export function useDashboardData(): DashboardProjectGroup[] {
         tabsByWorktree,
         agentStatusByPaneKey,
         migrationUnsupportedByPtyId,
+        claudeWorkflowRunsById,
         Date.now()
       ),
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -194,6 +306,7 @@ export function useDashboardData(): DashboardProjectGroup[] {
       tabsByWorktree,
       agentStatusByPaneKey,
       migrationUnsupportedByPtyId,
+      claudeWorkflowRunsById,
       agentStatusEpoch
     ]
   )

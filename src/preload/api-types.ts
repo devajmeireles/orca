@@ -173,6 +173,7 @@ import type {
   AgentStatusIpcPayload,
   MigrationUnsupportedPtyEntry
 } from '../shared/agent-status-types'
+import type { ClaudeWorkflowSnapshot } from '../shared/claude-workflow-status'
 import type { AgentInterruptInferenceRequest } from '../shared/agent-interrupt-intent'
 import type {
   RuntimeBrowserDriverState,
@@ -2157,6 +2158,12 @@ export type PreloadApi = {
     /** Drop a paneKey from the main-process hook cache and the on-disk
      *  last-status file. Fire-and-forget. */
     drop: (paneKey: string) => void
+  }
+  claudeWorkflows: {
+    onDidUpdate: (callback: (snapshot: ClaudeWorkflowSnapshot) => void) => () => void
+    getSnapshot: () => Promise<ClaudeWorkflowSnapshot>
+    drop: (id: string) => void
+    dropByWorktree: (worktreeId: string) => void
   }
   mobile: {
     listNetworkInterfaces: () => Promise<{

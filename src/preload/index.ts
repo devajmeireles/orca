@@ -109,6 +109,7 @@ import type {
   AgentStatusIpcPayload,
   MigrationUnsupportedPtyEntry
 } from '../shared/agent-status-types'
+import type { ClaudeWorkflowSnapshot } from '../shared/claude-workflow-status'
 import type { AgentInterruptInferenceRequest } from '../shared/agent-interrupt-intent'
 import type {
   SpeechErrorEvent,
@@ -3363,6 +3364,23 @@ const api = {
      *  cannot resurrect it. Fire-and-forget; no response. */
     drop: (paneKey: string): void => {
       ipcRenderer.send('agentStatus:drop', paneKey)
+    }
+  },
+
+  claudeWorkflows: {
+    onDidUpdate: (callback: (snapshot: ClaudeWorkflowSnapshot) => void): (() => void) => {
+      const listener = (_event: Electron.IpcRendererEvent, snapshot: ClaudeWorkflowSnapshot) =>
+        callback(snapshot)
+      ipcRenderer.on('claudeWorkflows:update', listener)
+      return () => ipcRenderer.removeListener('claudeWorkflows:update', listener)
+    },
+    getSnapshot: (): Promise<ClaudeWorkflowSnapshot> =>
+      ipcRenderer.invoke('claudeWorkflows:getSnapshot'),
+    drop: (id: string): void => {
+      ipcRenderer.send('claudeWorkflows:drop', id)
+    },
+    dropByWorktree: (worktreeId: string): void => {
+      ipcRenderer.send('claudeWorkflows:drop', `worktree:${worktreeId}`)
     }
   },
 

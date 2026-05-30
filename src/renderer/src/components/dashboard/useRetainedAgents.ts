@@ -2,7 +2,7 @@ import { useEffect, useRef } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 import { useAppStore } from '@/store'
 import { isExplicitAgentStatusFresh } from '@/lib/agent-status'
-import { type DashboardAgentRow } from './useDashboardData'
+import { type DashboardRealAgentRow } from './useDashboardData'
 import type { RetainedAgentEntry } from '@/store/slices/agent-status'
 import type { Repo, TerminalTab, Worktree } from '../../../../shared/types'
 import {
@@ -17,7 +17,7 @@ import { parsePaneKey } from '../../../../shared/stable-pane-id'
 // per-card agents list render the done row until the user dismisses it, rather
 // than having the row wink out the moment the terminal process exits.
 
-type RetainedAgentSnapshot = Map<string, { row: DashboardAgentRow; worktreeId: string }>
+type RetainedAgentSnapshot = Map<string, { row: DashboardRealAgentRow; worktreeId: string }>
 
 type RetainedAgentsSyncInputs = {
   repos: Repo[]
@@ -88,12 +88,15 @@ export function buildRetainedAgentsSyncSnapshot(args: RetainedAgentsSyncSnapshot
       (entry.state === 'working' || entry.state === 'blocked' || entry.state === 'waiting')
     currentAgents.set(paneKey, {
       row: {
+        kind: 'agent',
+        rowId: paneKey,
         paneKey,
         entry,
         tab: owner.tab,
         agentType: entry.agentType ?? 'unknown',
         state: shouldDecay ? 'idle' : entry.state,
-        startedAt: agentStartedAt(entry)
+        startedAt: agentStartedAt(entry),
+        parentRowId: entry.orchestration?.parentPaneKey
       },
       worktreeId: owner.worktreeId
     })
@@ -105,6 +108,7 @@ export function buildRetainedAgentsSyncSnapshot(args: RetainedAgentsSyncSnapshot
 export function useRetainedAgentsSync(): void {
   const retainAgents = useAppStore((s) => s.retainAgents)
   const pruneRetainedAgents = useAppStore((s) => s.pruneRetainedAgents)
+  const pruneClaudeWorkflowRuns = useAppStore((s) => s.pruneClaudeWorkflowRuns)
   const clearRetentionSuppressedPaneKeys = useAppStore((s) => s.clearRetentionSuppressedPaneKeys)
   const [repos, worktreesByRepo, tabsByWorktree, agentStatusEpoch] = useAppStore(
     useShallow((s) => [s.repos, s.worktreesByRepo, s.tabsByWorktree, s.agentStatusEpoch] as const)
@@ -142,6 +146,7 @@ export function useRetainedAgentsSync(): void {
 
     prevAgentsRef.current = currentAgents
     pruneRetainedAgents(existingWorktreeIds)
+    pruneClaudeWorkflowRuns(existingWorktreeIds)
     if (consumedSuppressedPaneKeys.length > 0) {
       clearRetentionSuppressedPaneKeys(consumedSuppressedPaneKeys)
     }
@@ -152,13 +157,14 @@ export function useRetainedAgentsSync(): void {
     agentStatusEpoch,
     retainAgents,
     pruneRetainedAgents,
+    pruneClaudeWorkflowRuns,
     clearRetentionSuppressedPaneKeys
   ])
 }
 
 export function collectRetainedAgentsOnDisappear(args: {
-  previousAgents: Map<string, { row: DashboardAgentRow; worktreeId: string }>
-  currentAgents: Map<string, { row: DashboardAgentRow; worktreeId: string }>
+  previousAgents: Map<string, { row: DashboardRealAgentRow; worktreeId: string }>
+  currentAgents: Map<string, { row: DashboardRealAgentRow; worktreeId: string }>
   retainedAgentsByPaneKey: Record<string, RetainedAgentEntry>
   retentionSuppressedPaneKeys: Record<string, true>
 }): {

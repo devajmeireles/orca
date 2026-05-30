@@ -73,6 +73,7 @@ import { ClaudeAccountService } from './claude-accounts/service'
 import { ClaudeRuntimeAuthService } from './claude-accounts/runtime-auth-service'
 import { StarNagService } from './star-nag/service'
 import { agentHookServer } from './agent-hooks/server'
+import { claudeWorkflowIndex } from './agent-hooks/claude-workflow-index'
 import { maybeAutoRenameBranchOnFirstWork } from './agent-hooks/first-work-branch-rename'
 import { setMigrationUnsupportedPtyListener } from './agent-hooks/migration-unsupported-pty-state'
 import {
@@ -518,6 +519,7 @@ function openMainWindow(): BrowserWindow {
     // replay-loop through lastStatusByPaneKey runs only on deliberate
     // window recreations instead of stacking on top of stale listeners.
     agentHookServer.setListener(null)
+    claudeWorkflowIndex.setUpdateListener(null)
     setMigrationUnsupportedPtyListener(null)
     // Why: any running synthesized-title spinner timer would fire into a
     // destroyed webContents; stop it here instead of deferring to per-pane
@@ -574,6 +576,14 @@ function openMainWindow(): BrowserWindow {
       }
     }
   )
+  claudeWorkflowIndex.setUpdateListener((snapshot) => {
+    for (const candidate of BrowserWindow.getAllWindows()) {
+      if (candidate.isDestroyed() || candidate.webContents.isDestroyed()) {
+        continue
+      }
+      candidate.webContents.send('claudeWorkflows:update', snapshot)
+    }
+  })
   setMigrationUnsupportedPtyListener((event) => {
     if (mainWindow?.isDestroyed()) {
       return

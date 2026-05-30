@@ -1,7 +1,13 @@
+/* eslint-disable max-lines -- Why: this module owns worktree-scoped indexing,
+   retained/live agent merging, migration placeholders, and Claude workflow
+   virtual-row derivation so per-card selectors keep one stable contract. */
 import { useMemo } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 import { useAppStore } from '@/store'
-import type { DashboardAgentRow } from '@/components/dashboard/useDashboardData'
+import {
+  buildClaudeWorkflowRowsForWorktree,
+  type DashboardAgentRow
+} from '@/components/dashboard/useDashboardData'
 import { isExplicitAgentStatusFresh } from '@/lib/agent-status'
 import type { RetainedAgentEntry } from '@/store/slices/agent-status'
 import type { AppState } from '@/store/types'
@@ -11,6 +17,7 @@ import {
   type AgentStatusEntry,
   type MigrationUnsupportedPtyEntry
 } from '../../../../shared/agent-status-types'
+import type { ClaudeWorkflowRunSummary } from '../../../../shared/claude-workflow-status'
 import { parsePaneKey } from '../../../../shared/stable-pane-id'
 import { migrationUnsupportedToAgentStatusEntry } from '@/lib/migration-unsupported-agent-entry'
 import { applyAgentRowLineage } from '@/components/dashboard/agent-row-lineage'
@@ -22,6 +29,7 @@ import { applyAgentRowLineage } from '@/components/dashboard/agent-row-lineage'
 const EMPTY_LIVE_ENTRIES: AgentStatusEntry[] = []
 const EMPTY_MIGRATION_UNSUPPORTED_ENTRIES: MigrationUnsupportedPtyEntry[] = []
 const EMPTY_RETAINED: RetainedAgentEntry[] = []
+const EMPTY_WORKFLOWS: ClaudeWorkflowRunSummary[] = []
 
 type WorktreeAgentRowsState = Pick<
   AppState,
@@ -29,7 +37,9 @@ type WorktreeAgentRowsState = Pick<
   | 'migrationUnsupportedByPtyId'
   | 'retainedAgentsByPaneKey'
   | 'tabsByWorktree'
->
+> & {
+  claudeWorkflowRunsById?: AppState['claudeWorkflowRunsById']
+}
 
 type TabWorktreeIndexCache = {
   tabsByWorktree: WorktreeAgentRowsState['tabsByWorktree']
@@ -53,10 +63,16 @@ type RetainedEntriesByWorktreeCache = {
   entriesByWorktree: Map<string, RetainedAgentEntry[]>
 }
 
+type WorkflowsByWorktreeCache = {
+  claudeWorkflowRunsById: WorktreeAgentRowsState['claudeWorkflowRunsById']
+  runsByWorktree: Map<string, ClaudeWorkflowRunSummary[]>
+}
+
 let tabWorktreeIndexCache: TabWorktreeIndexCache | null = null
 let liveEntriesByWorktreeCache: LiveEntriesByWorktreeCache | null = null
 let migrationUnsupportedByWorktreeCache: MigrationUnsupportedByWorktreeCache | null = null
 let retainedEntriesByWorktreeCache: RetainedEntriesByWorktreeCache | null = null
+let workflowsByWorktreeCache: WorkflowsByWorktreeCache | null = null
 
 function reuseArrayIfEqual<T>(previous: T[] | undefined, next: T[]): T[] {
   if (!previous || previous.length !== next.length) {
@@ -192,6 +208,37 @@ function getRetainedEntriesByWorktree(
   return entriesByWorktree
 }
 
+function getWorkflowsByWorktree(
+  state: WorktreeAgentRowsState
+): Map<string, ClaudeWorkflowRunSummary[]> {
+  const workflowsById = state.claudeWorkflowRunsById ?? {}
+  if (workflowsByWorktreeCache?.claudeWorkflowRunsById === workflowsById) {
+    return workflowsByWorktreeCache.runsByWorktree
+  }
+
+  const previous = workflowsByWorktreeCache?.runsByWorktree
+  const runsByWorktree = new Map<string, ClaudeWorkflowRunSummary[]>()
+  for (const run of Object.values(workflowsById)) {
+    if (!run.worktreeId) {
+      continue
+    }
+    const bucket = runsByWorktree.get(run.worktreeId)
+    if (bucket) {
+      bucket.push(run)
+    } else {
+      runsByWorktree.set(run.worktreeId, [run])
+    }
+  }
+  for (const [worktreeId, runs] of runsByWorktree) {
+    runsByWorktree.set(worktreeId, reuseArrayIfEqual(previous?.get(worktreeId), runs))
+  }
+  workflowsByWorktreeCache = {
+    claudeWorkflowRunsById: workflowsById,
+    runsByWorktree
+  }
+  return runsByWorktree
+}
+
 export function selectLiveAgentStatusEntriesForWorktree(
   state: WorktreeAgentRowsState,
   worktreeId: string
@@ -215,10 +262,18 @@ export function selectRetainedAgentEntriesForWorktree(
   return getRetainedEntriesByWorktree(state).get(worktreeId) ?? EMPTY_RETAINED
 }
 
+export function selectClaudeWorkflowRunsForWorktree(
+  state: WorktreeAgentRowsState,
+  worktreeId: string
+): ClaudeWorkflowRunSummary[] {
+  return getWorkflowsByWorktree(state).get(worktreeId) ?? EMPTY_WORKFLOWS
+}
+
 export function buildWorktreeAgentRows(args: {
   tabs: TerminalTab[]
   entries: AgentStatusEntry[]
   retained: RetainedAgentEntry[]
+  workflows?: ClaudeWorkflowRunSummary[]
   now: number
 }): DashboardAgentRow[] {
   const rows: DashboardAgentRow[] = []
@@ -246,12 +301,15 @@ export function buildWorktreeAgentRows(args: {
         !isFresh &&
         (entry.state === 'working' || entry.state === 'blocked' || entry.state === 'waiting')
       rows.push({
+        kind: 'agent',
+        rowId: entry.paneKey,
         paneKey: entry.paneKey,
         entry,
         tab,
         agentType: entry.agentType ?? 'unknown',
         state: shouldDecay ? 'idle' : entry.state,
-        startedAt: entry.stateHistory[0]?.startedAt ?? entry.stateStartedAt
+        startedAt: entry.stateHistory[0]?.startedAt ?? entry.stateStartedAt,
+        parentRowId: entry.orchestration?.parentPaneKey
       })
       seenPaneKeys.add(entry.paneKey)
     }
@@ -262,13 +320,26 @@ export function buildWorktreeAgentRows(args: {
       continue
     }
     rows.push({
+      kind: 'agent',
+      rowId: ra.entry.paneKey,
       paneKey: ra.entry.paneKey,
       entry: ra.entry,
       tab: ra.tab,
       agentType: ra.agentType,
       state: 'done',
-      startedAt: ra.startedAt
+      startedAt: ra.startedAt,
+      parentRowId: ra.entry.orchestration?.parentPaneKey
     })
+  }
+
+  if (args.workflows && args.workflows.length > 0) {
+    rows.push(
+      ...buildClaudeWorkflowRowsForWorktree({
+        worktreeId: args.tabs[0]?.worktreeId ?? '',
+        workflows: args.workflows,
+        tabs: args.tabs
+      })
+    )
   }
 
   rows.sort((a, b) => a.startedAt - b.startedAt)
@@ -304,6 +375,9 @@ export function useWorktreeAgentRows(worktreeId: string): DashboardAgentRow[] {
   const retained = useAppStore(
     useShallow((s) => selectRetainedAgentEntriesForWorktree(s, worktreeId))
   )
+  const workflows = useAppStore(
+    useShallow((s) => selectClaudeWorkflowRunsForWorktree(s, worktreeId))
+  )
   // Why: agentStatusEpoch is included in the dependency array (but not in the
   // computation itself) so the memo recomputes when freshness boundaries
   // expire, even if no new PTY data arrives — same rationale as
@@ -330,9 +404,10 @@ export function useWorktreeAgentRows(worktreeId: string): DashboardAgentRow[] {
         tabs: tabs ?? [],
         entries,
         retained,
+        workflows,
         now
       })
     )
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tabs, liveEntries, migrationUnsupported, retained, agentStatusEpoch])
+  }, [tabs, liveEntries, migrationUnsupported, retained, workflows, agentStatusEpoch])
 }
