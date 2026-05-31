@@ -878,16 +878,6 @@ const VirtualizedWorktreeViewport = React.memo(function VirtualizedWorktreeViewp
     },
     [clearRevealHighlightFrame, clearRevealHighlightTimeout]
   )
-  // Why: reveal frames capture virtualized row snapshots and set state later;
-  // cancel them when the list goes away so stale reveal work cannot survive teardown.
-  useEffect(
-    () => () => {
-      cancelPendingRevealFrames()
-      clearRevealHighlightFrame()
-      clearRevealHighlightTimeout()
-    },
-    [cancelPendingRevealFrames, clearRevealHighlightFrame, clearRevealHighlightTimeout]
-  )
   const suppressWorktreeClickUntilRef = useRef(0)
   const hasProjectGroups = projectGroups.length > 0
   const canReorderRepoHeaders =
@@ -1656,14 +1646,21 @@ const VirtualizedWorktreeViewport = React.memo(function VirtualizedWorktreeViewp
   const setScrollRootRef = useCallback(
     (node: HTMLDivElement | null) => {
       if (node === null && scrollRef.current !== null) {
-        // Why: sidebar drag previews, autoscroll frames, and reveal glow timers
-        // are tied to the scroll root surface; clear them before it disappears.
+        // Why: sidebar drag previews, autoscroll frames, and reveal row
+        // snapshots are tied to the scroll root; clear them before it disappears.
+        cancelPendingRevealFrames()
+        clearRevealHighlightFrame()
         clearRevealHighlightTimeout()
         clearWorktreeDrag()
       }
       scrollRef.current = node
     },
-    [clearRevealHighlightTimeout, clearWorktreeDrag]
+    [
+      cancelPendingRevealFrames,
+      clearRevealHighlightFrame,
+      clearRevealHighlightTimeout,
+      clearWorktreeDrag
+    ]
   )
 
   const flushWorktreePointerDrag = useCallback(() => {
