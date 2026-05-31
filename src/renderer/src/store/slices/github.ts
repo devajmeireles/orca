@@ -365,6 +365,11 @@ const prRefreshStartedHostedReviewEntries = new Map<
   AppState['hostedReviewCache'][string] | undefined
 >()
 
+/** @internal - exposed for leak-regression tests only */
+export function _getGitHubPRRequestGenerationCountForTest(): number {
+  return prRequestGenerations.size
+}
+
 // Why: cap in-flight cross-repo fan-out and hover-prefetches at the renderer
 // boundary — the main-side gate is behind the IPC queue, so it can't see a
 // stampede until the calls are already mid-flight. 8 balances responsiveness
@@ -2067,6 +2072,9 @@ export const createGitHubSlice: StateCreator<AppState, [], [], GitHubSlice> = (s
         const activeRequest = inflightPRRequests.get(cacheKey)
         if (activeRequest?.generation === generation) {
           inflightPRRequests.delete(cacheKey)
+          if (prRequestGenerations.get(cacheKey) === generation) {
+            prRequestGenerations.delete(cacheKey)
+          }
         }
       }
     })()
@@ -2741,13 +2749,9 @@ export const createGitHubSlice: StateCreator<AppState, [], [], GitHubSlice> = (s
       issueCache: evictStaleEntries(s.issueCache)
     }))
 
-    // Why: prRequestGenerations tracks generation counters for inflight
-    // fetch deduplication. Pruning keys that were just evicted from prCache
-    // would race with inflight requests — their generation check would fail
-    // and silently discard valid responses. Since each entry is just a number,
-    // the memory overhead is negligible; let it shrink naturally as keys stop
-    // being fetched. The eviction on prCache/issueCache above is sufficient
-    // to bound the dominant source of growth.
+    // Why: prRequestGenerations tracks only live inflight fetches and is
+    // cleared when the active request settles. Do not prune it here; deleting
+    // a live generation would make the corresponding response look stale.
 
     // Only re-fetch PR/issue entries that are already stale — skip fresh ones
     const state = get()

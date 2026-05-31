@@ -4,6 +4,7 @@ GitHub slice's cross-cutting invariants verifiable in one place. */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { create } from 'zustand'
 import {
+  _getGitHubPRRequestGenerationCountForTest,
   createGitHubSlice,
   mergePRCommentIntoList,
   prChecksCacheSuffix,
@@ -1010,6 +1011,25 @@ describe('createGitHubSlice.fetchPRForBranch', () => {
       await expect(initialFetch).resolves.toBeNull()
 
       expect(store.getState().prCache[prCacheKey]?.data).toMatchObject({ number: 99 })
+    } finally {
+      mockApi.gh.refreshPRNow = refreshPRNow
+    }
+  })
+
+  it('does not retain PR request generation keys after the active request settles', async () => {
+    const store = createTestStore()
+    const repoPath = '/repo'
+    const branch = 'feature/no-generation-leak'
+    const beforeCount = _getGitHubPRRequestGenerationCountForTest()
+    const refreshPRNow = mockApi.gh.refreshPRNow
+    ;(mockApi.gh as unknown as { refreshPRNow?: typeof refreshPRNow }).refreshPRNow = undefined
+    mockApi.gh.prForBranch.mockResolvedValueOnce(makePR({ number: 31 }))
+
+    try {
+      await expect(
+        store.getState().fetchPRForBranch(repoPath, branch, { force: true })
+      ).resolves.toMatchObject({ number: 31 })
+      expect(_getGitHubPRRequestGenerationCountForTest()).toBe(beforeCount)
     } finally {
       mockApi.gh.refreshPRNow = refreshPRNow
     }
