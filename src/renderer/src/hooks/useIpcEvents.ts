@@ -48,6 +48,10 @@ import {
   type AgentStatusIpcPayload,
   type ParsedAgentStatusPayload
 } from '../../../shared/agent-status-types'
+import {
+  resolveAgentStatusIdentity,
+  shouldSuppressInheritedTerminalStatus
+} from '../../../shared/agent-status-identity'
 import { isGitRepoKind } from '../../../shared/repo-kind'
 import { TOGGLE_FLOATING_TERMINAL_EVENT } from '@/lib/floating-terminal'
 import { focusTerminalTabSurface } from '@/lib/focus-terminal-tab-surface'
@@ -2186,6 +2190,29 @@ export function useIpcEvents(): void {
       const statusPayload = data.orchestration
         ? { ...resolvedPayload, orchestration: data.orchestration }
         : resolvedPayload
+      const existingStatus = store.agentStatusByPaneKey[data.paneKey]
+      const identity = resolveAgentStatusIdentity({
+        existing: existingStatus
+          ? {
+              agentType: existingStatus.agentType,
+              state: existingStatus.state,
+              updatedAt: existingStatus.updatedAt
+            }
+          : undefined,
+        incoming: statusPayload.agentType,
+        now: data.receivedAt
+      })
+      if (
+        existingStatus &&
+        shouldSuppressInheritedTerminalStatus({
+          inheritedFromActivePane: identity.inheritedFromActivePane,
+          incomingState: statusPayload.state
+        })
+      ) {
+        // Why: renderer may receive an old/stale main-process child completion.
+        // Keep the defensive store guard and completion notification path in sync.
+        return 'dropped'
+      }
       store.setAgentStatus(data.paneKey, statusPayload, title, {
         updatedAt: data.receivedAt,
         stateStartedAt: data.stateStartedAt
