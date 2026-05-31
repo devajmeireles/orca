@@ -265,7 +265,7 @@ describe('WorktreeCardAgents', () => {
     expect(markup).toBe('')
   })
 
-  it('renders two compact agents directly instead of hiding them behind a summary', async () => {
+  it('renders a compact summary affordance for two flat agents', async () => {
     mockAgentActivityDisplayMode = 'compact'
     mockAgents = [
       mockAgent({ agentType: 'codex', state: 'done', startedAt: 1000, prompt: 'First agent' }),
@@ -281,10 +281,11 @@ describe('WorktreeCardAgents', () => {
 
     const markup = renderToStaticMarkup(<WorktreeCardAgents worktreeId="wt-1" />)
 
-    expect(markup).toContain('First agent')
-    expect(markup).toContain('Second agent')
-    expect(markup).not.toContain('All 2 agents done')
-    expect(markup).not.toContain('aria-label="Expand')
+    expect(markup).toContain('All 2 agents done')
+    expect(markup).toContain('Expand All 2 agents done')
+    expect(markup).not.toContain('First agent')
+    expect(markup).not.toContain('Second agent')
+    expect(markup).not.toContain('data-testid="agent-row"')
   })
 
   it('renders compact agent messages with images as inline thumbnails', async () => {

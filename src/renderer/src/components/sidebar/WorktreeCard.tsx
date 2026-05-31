@@ -23,7 +23,7 @@ import WorktreeCardAgents from './WorktreeCardAgents'
 import { WorktreeCardStatusSlot } from './WorktreeCardStatusSlot'
 import { cn } from '@/lib/utils'
 import { activateAndRevealWorktree } from '@/lib/worktree-activation'
-import { isFolderRepo } from '../../../../shared/repo-kind'
+import { getRepoKindLabel, isFolderRepo } from '../../../../shared/repo-kind'
 import type { HostedReviewInfo } from '../../../../shared/hosted-review'
 import type {
   GitHubWorkItem,
@@ -36,9 +36,10 @@ import { branchDisplayName, CONFLICT_OPERATION_LABELS } from './WorktreeCardHelp
 import {
   WorktreeCardDetailsHover,
   hasWorktreeCardDetails,
+  WorktreeCardMetaBadges,
   type WorktreeCardIssueDisplay
 } from './WorktreeCardMeta'
-import { WorktreeCardPortsDetails } from './WorktreeCardPorts'
+import { WorktreeCardPortsDetails, WorktreeCardPortsTrigger } from './WorktreeCardPorts'
 import { writeWorkspaceDragData } from './workspace-status'
 import { getWorktreeCardPrDisplay } from './worktree-card-pr-display'
 import { getWorkspacePortsByWorktreeId } from '@/lib/workspace-port-groups'
@@ -256,11 +257,12 @@ const WorktreeCard = React.memo(function WorktreeCard({
   const isDeleting = deleteState?.isDeleting ?? false
   const deleteModifierPressed = useWorkspaceDeleteModifierPressed()
 
-  const showPR = cardProps.includes('pr')
-  const showIssue = cardProps.includes('issue')
-  const showLinearIssue = cardProps.includes('linear-issue')
-  const showComment = cardProps.includes('comment')
-  const showPorts = cardProps.includes('ports')
+  const showDetailedCardProperties = !compactCards
+  const showPR = showDetailedCardProperties && cardProps.includes('pr')
+  const showIssue = showDetailedCardProperties && cardProps.includes('issue')
+  const showLinearIssue = showDetailedCardProperties && cardProps.includes('linear-issue')
+  const showComment = showDetailedCardProperties && cardProps.includes('comment')
+  const showPorts = showDetailedCardProperties && cardProps.includes('ports')
 
   // Skip hosted-review fetches when the corresponding card sections are hidden.
   // This preference is purely presentational, so background refreshes would
@@ -557,7 +559,9 @@ const WorktreeCard = React.memo(function WorktreeCard({
   const hasPorts = showPorts && workspacePorts.length > 0
   const cacheStartedAt = usePromptCacheCountdownStartedAt(worktree.id)
   const cacheTtlMs = useAppStore((s) => s.settings?.promptCacheTtlMs ?? 0)
-  const showInlineRepoBadge = !!repo && !hideRepoBadge && !isFolder
+  const showInlineRepoBadge = compactCards && !!repo && !hideRepoBadge && !isFolder
+  const showRepoBadgeInMetaRow = !compactCards && !!repo && !hideRepoBadge
+  const showBranch = !isFolder && (!compactCards || branch !== worktree.displayName)
   // Why: rebases already surface in source control; keep dense cards from
   // carrying a persistent rebase chip while preserving other interruption cues.
   const showConflictOperationBadge =
@@ -570,9 +574,12 @@ const WorktreeCard = React.memo(function WorktreeCard({
   const showCombinedStatusSlot = showStatus || (!compactCards && showUnreadQuickAction)
   const showTitleRowUnread = compactCards && showUnreadQuickAction && !showStatus
   const showTitleRowPrimary = compactCards && worktree.isMainWorktree && !isFolder
-  const hasMetaRow = hasMetadataBadge || cacheStartedAt != null
+  const showMetaRowDetails = !compactCards && (hasDetails || hasPorts)
+  // Why: detailed layout is the user's explicit choice to reserve a scannable
+  // metadata lane; compact layout only opens that lane for transient state.
+  const hasMetaRow = !compactCards || hasMetadataBadge || cacheStartedAt != null
   const showHeaderActions = showTitleRowUnread || showTitleRowPrimary || showDeleteQuickAction
-  const showBranchIdentityHover = !isFolder && branch !== worktree.displayName
+  const showBranchIdentityHover = compactCards && showBranch
   // Why: sidebar rows need a small surface inset, while their content remains
   // aligned with the pre-inset layout and the repo header hierarchy.
   const cardStyle = flushSurface
@@ -584,34 +591,55 @@ const WorktreeCard = React.memo(function WorktreeCard({
       : undefined
 
   const titleDetailsWrapper =
-    hasDetails || hasPorts || showBranchIdentityHover
+    compactCards && showBranchIdentityHover
       ? (title: React.ReactElement) => (
           <WorktreeCardDetailsHover
-            issue={metaIssue}
-            linearIssue={metaLinearIssue}
-            review={metaReview}
-            comment={metaComment}
+            issue={null}
+            linearIssue={null}
+            review={null}
+            comment={null}
             branchName={showBranchIdentityHover ? branch : undefined}
             workspaceTitle={worktree.displayName}
-            detailsAfter={hasPorts ? <WorktreeCardPortsDetails ports={workspacePorts} /> : null}
             onEditIssue={handleEditIssue}
             onEditComment={handleEditComment}
-            onOpenGitHubIssueInOrca={
-              metaIssue && 'url' in metaIssue && metaIssue.url
-                ? handleOpenGitHubIssueInOrca
-                : undefined
-            }
-            onOpenLinearIssueInOrca={linearIssue?.url ? handleOpenLinearIssueInOrca : undefined}
-            onOpenReviewInOrca={
-              metaReview?.url && metaReview.provider === 'github'
-                ? handleOpenReviewInOrca
-                : undefined
-            }
           >
             {title}
           </WorktreeCardDetailsHover>
         )
       : undefined
+
+  const detailsAndPorts =
+    hasDetails || hasPorts ? (
+      <WorktreeCardDetailsHover
+        issue={metaIssue}
+        linearIssue={metaLinearIssue}
+        review={metaReview}
+        comment={metaComment}
+        detailsAfter={hasPorts ? <WorktreeCardPortsDetails ports={workspacePorts} /> : null}
+        onEditIssue={handleEditIssue}
+        onEditComment={handleEditComment}
+        onOpenGitHubIssueInOrca={
+          metaIssue && 'url' in metaIssue && metaIssue.url ? handleOpenGitHubIssueInOrca : undefined
+        }
+        onOpenLinearIssueInOrca={linearIssue?.url ? handleOpenLinearIssueInOrca : undefined}
+        onOpenReviewInOrca={
+          metaReview?.url && metaReview.provider === 'github' ? handleOpenReviewInOrca : undefined
+        }
+      >
+        <div className="flex shrink-0 items-center gap-1">
+          {hasPorts && <WorktreeCardPortsTrigger ports={workspacePorts} />}
+          {hasDetails && (
+            <WorktreeCardMetaBadges
+              issue={metaIssue}
+              linearIssue={metaLinearIssue}
+              review={metaReview}
+              comment={metaComment}
+              className="ml-0 pr-0"
+            />
+          )}
+        </div>
+      </WorktreeCardDetailsHover>
+    ) : null
 
   const cardBody = (
     <div
@@ -816,6 +844,28 @@ const WorktreeCard = React.memo(function WorktreeCard({
         {hasMetaRow && (
           <div className="flex items-center gap-1.5 min-w-0" data-worktree-card-meta-row="">
             <div className="flex min-w-0 flex-1 items-center gap-1.5 overflow-hidden">
+              {showRepoBadgeInMetaRow && repo && (
+                <div className="flex items-center gap-1.5 shrink-0 px-1.5 py-0.5 rounded-[4px] bg-accent border border-border dark:bg-accent/50 dark:border-border/60">
+                  <RepoBadgeMark color={repo.badgeColor} />
+                  <span className="text-[10px] font-semibold text-foreground truncate max-w-[6rem] leading-none lowercase">
+                    {repo.displayName}
+                  </span>
+                </div>
+              )}
+
+              {isFolder ? (
+                <Badge
+                  variant="secondary"
+                  className="h-[16px] px-1.5 text-[10px] font-medium rounded shrink-0 text-muted-foreground bg-accent border border-border dark:bg-accent/80 dark:border-border/50 leading-none"
+                >
+                  {repo ? getRepoKindLabel(repo) : 'Folder'}
+                </Badge>
+              ) : showBranch ? (
+                <span className="min-w-0 text-[11px] text-muted-foreground truncate leading-none">
+                  {branch}
+                </span>
+              ) : null}
+
               {showConflictOperationBadge && (
                 <Badge
                   variant="outline"
@@ -830,6 +880,12 @@ const WorktreeCard = React.memo(function WorktreeCard({
                 <CacheTimer startedAt={cacheStartedAt} ttlMs={cacheTtlMs} />
               )}
             </div>
+
+            {showMetaRowDetails && (
+              <div className="ml-auto flex shrink-0 items-center gap-1 pr-1.5">
+                {detailsAndPorts}
+              </div>
+            )}
           </div>
         )}
 
@@ -849,7 +905,7 @@ const WorktreeCard = React.memo(function WorktreeCard({
              naturally when agents appear/disappear. When agents directly
              follow the title, counterbalance the card stack gap so both rows
              read as one compact header group. */}
-        {cardProps.includes('inline-agents') && (
+        {showDetailedCardProperties && cardProps.includes('inline-agents') && (
           <WorktreeCardAgents
             worktreeId={worktree.id}
             className={hasMetaRow || remoteBranchConflict ? 'mt-0' : '-mt-1'}

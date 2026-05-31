@@ -419,9 +419,9 @@ const WorktreeCardAgentsBody = React.memo(function WorktreeCardAgentsBody({
 
   if (agentActivityDisplayMode === 'compact') {
     const summaryAgents = hasLineage ? rootAgents : agents
-    // Why: one or two compact rows still carry useful prompt/provider detail
-    // without making worktree cards tall; the summary is for overflow.
-    const shouldUseSummaryRow = summaryAgents.length > 2
+    // Why: compact worktree cards keep multiple active agents to a single
+    // predictable status line, even when there are only two agents.
+    const shouldUseSummaryRow = summaryAgents.length > 1
     const subjectLabel = hasLineage
       ? `${rootAgents.length} ${rootAgents.length === 1 ? 'parent' : 'parents'}`
       : `${agents.length} agents`

@@ -2,7 +2,7 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import type { ReactNode } from 'react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { HostedReviewInfo } from '../../../../shared/hosted-review'
-import type { Repo, Worktree, WorktreeCardProperty } from '../../../../shared/types'
+import type { GlobalSettings, Repo, Worktree, WorktreeCardProperty } from '../../../../shared/types'
 import type { WorkspacePortScanResult } from '../../../../shared/workspace-ports'
 
 const fetchHostedReviewForBranch = vi.fn()
@@ -14,6 +14,7 @@ const updateWorktreeMeta = vi.fn()
 let worktreeCardProperties: WorktreeCardProperty[] = ['pr']
 let hostedReviewCache: Record<string, unknown> = {}
 let workspacePortScan: WorkspacePortScanResult | null = null
+let settings: Partial<GlobalSettings> | null = null
 
 vi.mock('@/store', () => ({
   useAppStore: (selector: (state: unknown) => unknown) =>
@@ -28,7 +29,7 @@ vi.mock('@/store', () => ({
       linearIssueCache: {},
       openModal,
       remoteBranchConflictByWorktreeId: {},
-      settings: null,
+      settings,
       sshConnectionStates: new Map(),
       sshTargetLabels: new Map(),
       updateWorktreeMeta,
@@ -128,20 +129,49 @@ describe('WorktreeCard linked PR display', () => {
     worktreeCardProperties = ['pr']
     hostedReviewCache = {}
     workspacePortScan = null
+    settings = null
   })
 
-  it('keeps linked GH PR details off the closed card before hosted review details are cached', async () => {
+  it('shows linked GH PR metadata in detailed cards before hosted review details are cached', async () => {
     const { default: WorktreeCard } = await import('./WorktreeCard')
 
     const markup = renderWorktreeCardMarkup(
       <WorktreeCard worktree={makeWorktree({ linkedPR: 456 })} repo={makeRepo()} isActive={false} />
     )
 
-    expect(markup).not.toContain('Linked PR #456')
+    expect(markup).toContain('Linked PR #456')
     expect(markup).not.toContain('Loading PR')
   })
 
-  it('keeps issue, Linear issue, PR, and notes metadata out of the closed card', async () => {
+  it('shows issue, Linear issue, PR, and notes metadata in detailed cards', async () => {
+    worktreeCardProperties = ['issue', 'linear-issue', 'pr', 'comment']
+    const { default: WorktreeCard } = await import('./WorktreeCard')
+
+    const markup = renderWorktreeCardMarkup(
+      <WorktreeCard
+        worktree={makeWorktree({
+          linkedIssue: 123,
+          linkedLinearIssue: 'ENG-123',
+          linkedPR: 456,
+          comment: 'Reviewer handoff note'
+        })}
+        repo={makeRepo()}
+        isActive={false}
+      />
+    )
+
+    expect(markup).toContain('Linked issue #123')
+    expect(markup).toContain('Linked Linear ENG-123')
+    expect(markup).toContain('Linked PR #456')
+    expect(markup).toContain('Workspace notes')
+    expect(markup).not.toContain('data-slot="badge"')
+    expect(markup).not.toContain('Loading issue')
+    expect(markup).not.toContain('Loading PR')
+    expect(markup).not.toContain('Reviewer handoff note')
+  })
+
+  it('keeps issue, Linear issue, PR, and notes metadata out of compact cards', async () => {
+    settings = { experimentalCompactWorktreeCards: true }
     worktreeCardProperties = ['issue', 'linear-issue', 'pr', 'comment']
     const { default: WorktreeCard } = await import('./WorktreeCard')
 
@@ -162,9 +192,6 @@ describe('WorktreeCard linked PR display', () => {
     expect(markup).not.toContain('Linked Linear ENG-123')
     expect(markup).not.toContain('Linked PR #456')
     expect(markup).not.toContain('Workspace notes')
-    expect(markup).not.toContain('data-slot="badge"')
-    expect(markup).not.toContain('Loading issue')
-    expect(markup).not.toContain('Loading PR')
     expect(markup).not.toContain('Reviewer handoff note')
   })
 
@@ -243,8 +270,8 @@ describe('WorktreeCard linked PR display', () => {
       <WorktreeCard worktree={makeWorktree({ linkedPR: 456 })} repo={makeRepo()} isActive={false} />
     )
 
-    expect(markup).not.toContain('Linked PR #456')
-    expect(markup).not.toContain('text-rose-500/85')
+    expect(markup).toContain('Linked PR #456')
+    expect(markup).toContain('text-rose-500/85')
     expect(markup).not.toContain('CI checks')
   })
 })

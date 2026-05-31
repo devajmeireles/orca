@@ -147,17 +147,17 @@ describe('WorktreeCard quick actions', () => {
     expect(markup).toContain('data-workspace-board-preserve-open=""')
   })
 
-  it('renders repo identity inline without creating a repo-only metadata row', () => {
+  it('renders repo identity in the detailed metadata row', () => {
     const markup = renderToStaticMarkup(
       <WorktreeCard worktree={makeWorktree()} repo={makeRepo()} isActive={false} />
     )
 
-    expect(markup).toContain('aria-label="Project orca"')
-    expect(markup.indexOf('aria-label="Project orca"')).toBeLessThan(markup.indexOf('Quick action'))
-    expect(markup).not.toContain('data-worktree-card-meta-row=""')
+    expect(markup).not.toContain('aria-label="Project orca"')
+    expect(markup).toContain('>orca</span>')
+    expect(markup).toContain('data-worktree-card-meta-row=""')
   })
 
-  it('omits folder kind from the title row without creating a folder-only metadata row', () => {
+  it('renders folder kind in the detailed metadata row', () => {
     const markup = renderToStaticMarkup(
       <WorktreeCard
         worktree={makeWorktree({ displayName: 'Docs folder', branch: '' })}
@@ -167,11 +167,11 @@ describe('WorktreeCard quick actions', () => {
     )
 
     expect(markup).toContain('Docs folder')
-    expect(markup).not.toContain('>Folder</span>')
-    expect(markup).not.toContain('data-worktree-card-meta-row=""')
+    expect(markup).toContain('>Folder</span>')
+    expect(markup).toContain('data-worktree-card-meta-row=""')
   })
 
-  it('omits the branch metadata row by default when it repeats the workspace title', () => {
+  it('renders the repeated branch metadata row in detailed cards', () => {
     worktreeCardProperties = []
 
     const markup = renderToStaticMarkup(
@@ -184,8 +184,8 @@ describe('WorktreeCard quick actions', () => {
     )
 
     expect(markup).toContain('quick-action')
-    expect(markup).not.toContain('text-[11px] text-muted-foreground truncate leading-none')
-    expect(markup).not.toContain('data-worktree-card-meta-row=""')
+    expect(markup).toContain('text-[11px] text-muted-foreground truncate leading-none')
+    expect(markup).toContain('data-worktree-card-meta-row=""')
     expect(markup).toContain('tabindex="0"')
   })
 
@@ -243,7 +243,7 @@ describe('WorktreeCard quick actions', () => {
 
     expect(markup).toContain('primary')
     expect(markup).not.toContain('aria-label="Primary worktree"')
-    expect(markup).not.toContain('data-worktree-card-meta-row=""')
+    expect(markup).toContain('data-worktree-card-meta-row=""')
   })
 
   it('moves unread and primary into the title row when compact cards are enabled', () => {
@@ -374,7 +374,7 @@ describe('WorktreeCard quick actions', () => {
     )
 
     expect(markup).not.toContain('Rebasing')
-    expect(markup).not.toContain('data-worktree-card-meta-row=""')
+    expect(markup).toContain('data-worktree-card-meta-row=""')
   })
 
   it('keeps non-rebase operation chips on the card', () => {
