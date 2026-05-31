@@ -10,6 +10,7 @@ import type { CliInstallMethod, CliInstallStatus } from '../../shared/cli-instal
 
 const execFileAsync = promisify(execFile)
 const DEFAULT_MAC_COMMAND_PATH = '/usr/local/bin/orca'
+const DEV_COMMAND_NAME = 'orca-dev'
 const LINUX_COMMAND_NAME = 'orca-ide'
 const LEGACY_LINUX_COMMAND_NAME = 'orca'
 const DEV_LAUNCHER_DIR = ['cli', 'bin']
@@ -51,8 +52,12 @@ export class CliInstaller {
   private readonly userPathReader: () => Promise<string | null>
   private readonly userPathWriter: (value: string) => Promise<void>
 
-  // Why: Linux uses `orca-ide` to avoid shadowing GNOME Orca's /usr/bin/orca.
   private get commandName(): string {
+    if (!this.isPackaged && !this.commandPathOverride) {
+      // Why: development builds must not claim the production shell command.
+      return DEV_COMMAND_NAME
+    }
+    // Why: packaged Linux uses `orca-ide` to avoid shadowing GNOME Orca's /usr/bin/orca.
     return this.platform === 'linux' ? LINUX_COMMAND_NAME : 'orca'
   }
 
@@ -212,6 +217,20 @@ export class CliInstaller {
       return this.commandPathOverride
     }
 
+    if (!this.isPackaged) {
+      // Why: default dev registration is a separate command, while tests and
+      // diagnostics can still exercise production paths via commandPathOverride.
+      if (this.platform === 'darwin') {
+        return `/usr/local/bin/${DEV_COMMAND_NAME}`
+      }
+      if (this.platform === 'linux') {
+        return join(this.homePath, '.local', 'bin', DEV_COMMAND_NAME)
+      }
+      if (this.platform === 'win32') {
+        return join(this.localAppDataPath, 'Programs', 'Orca Dev', 'bin', `${DEV_COMMAND_NAME}.cmd`)
+      }
+    }
+
     if (this.platform === 'darwin') {
       return DEFAULT_MAC_COMMAND_PATH
     }
@@ -247,7 +266,8 @@ export class CliInstaller {
       platform: this.platform,
       userDataPath: this.userDataPath,
       execPath: this.execPathValue,
-      cliEntryPath: join(this.appPathValue, 'out', 'cli', 'index.js')
+      cliEntryPath: join(this.appPathValue, 'out', 'cli', 'index.js'),
+      commandName: this.commandName
     })
   }
 
@@ -378,13 +398,16 @@ export class CliInstaller {
 
   private isManagedSymlinkTarget(resolvedTarget: string, launcherPath: string): boolean {
     const expectedName = basename(launcherPath)
+    if (this.isPackaged && this.isSiblingDevLauncherTarget(resolvedTarget, expectedName)) {
+      return true
+    }
+
     if (basename(resolvedTarget) !== expectedName) {
       return false
     }
 
     const devLauncherDir = resolve(this.userDataPath, ...DEV_LAUNCHER_DIR)
-    const devRelative = relative(devLauncherDir, resolvedTarget)
-    if (devRelative && !devRelative.startsWith('..') && !isAbsolute(devRelative)) {
+    if (isPathInsideOrEqual(devLauncherDir, resolvedTarget)) {
       return true
     }
 
@@ -401,6 +424,26 @@ export class CliInstaller {
     }
 
     return false
+  }
+
+  private isSiblingDevLauncherTarget(
+    resolvedTarget: string,
+    packagedLauncherName: string
+  ): boolean {
+    if (![packagedLauncherName, DEV_COMMAND_NAME].includes(basename(resolvedTarget))) {
+      return false
+    }
+
+    const packagedUserDataPath = resolve(this.userDataPath)
+    const siblingDevUserDataPath = `${packagedUserDataPath}-dev`
+    const siblingDevLauncherDir = resolve(siblingDevUserDataPath, ...DEV_LAUNCHER_DIR)
+
+    // Why: development builds generate launchers under the sibling `*-dev`
+    // profile; packaged Orca must be able to reclaim that public command.
+    return (
+      basename(siblingDevUserDataPath) === `${basename(packagedUserDataPath)}-dev` &&
+      isPathInsideOrEqual(siblingDevLauncherDir, resolvedTarget)
+    )
   }
 
   private async inspectWindowsWrapper(
@@ -543,6 +586,7 @@ async function ensureDevLauncher(args: {
   userDataPath: string
   execPath: string
   cliEntryPath: string
+  commandName: string
 }): Promise<string | null> {
   if (
     !isAbsoluteForPlatform(args.platform, args.execPath) ||
@@ -555,7 +599,7 @@ async function ensureDevLauncher(args: {
   const launcherPath = join(
     args.userDataPath,
     ...DEV_LAUNCHER_DIR,
-    args.platform === 'win32' ? 'orca.cmd' : args.platform === 'linux' ? LINUX_COMMAND_NAME : 'orca'
+    args.platform === 'win32' ? `${args.commandName}.cmd` : args.commandName
   )
   await mkdir(dirname(launcherPath), { recursive: true })
 
@@ -565,8 +609,8 @@ async function ensureDevLauncher(args: {
   // changing the packaged registration contract.
   const content =
     args.platform === 'win32'
-      ? buildWindowsDevLauncher(args.execPath, args.cliEntryPath)
-      : buildUnixDevLauncher(args.execPath, args.cliEntryPath)
+      ? buildWindowsDevLauncher(args.execPath, args.cliEntryPath, args.userDataPath)
+      : buildUnixDevLauncher(args.execPath, args.cliEntryPath, args.userDataPath)
   await writeFile(launcherPath, content, {
     encoding: 'utf8',
     mode: args.platform === 'win32' ? undefined : 0o755
@@ -574,11 +618,20 @@ async function ensureDevLauncher(args: {
   return launcherPath
 }
 
-function buildUnixDevLauncher(execPathValue: string, cliEntryPath: string): string {
+function buildUnixDevLauncher(
+  execPathValue: string,
+  cliEntryPath: string,
+  userDataPath: string
+): string {
   return `#!/usr/bin/env bash
 set -euo pipefail
 ELECTRON=${quoteShell(execPathValue)}
 CLI=${quoteShell(cliEntryPath)}
+export ORCA_USER_DATA_PATH=${quoteShell(userDataPath)}
+if [ -z "\${ORCA_APP_EXECUTABLE:-}" ]; then
+  export ORCA_APP_EXECUTABLE="$ELECTRON"
+  export ORCA_APP_EXECUTABLE_NEEDS_APP_ROOT=1
+fi
 export ORCA_NODE_OPTIONS="\${NODE_OPTIONS-}"
 export ORCA_NODE_REPL_EXTERNAL_MODULE="\${NODE_REPL_EXTERNAL_MODULE-}"
 unset NODE_OPTIONS
@@ -587,11 +640,20 @@ ELECTRON_RUN_AS_NODE=1 "$ELECTRON" "$CLI" "$@"
 `
 }
 
-function buildWindowsDevLauncher(execPathValue: string, cliEntryPath: string): string {
+function buildWindowsDevLauncher(
+  execPathValue: string,
+  cliEntryPath: string,
+  userDataPath: string
+): string {
   return `@echo off
 setlocal
 set "ELECTRON=${escapeWindowsBatchValue(execPathValue)}"
 set "CLI=${escapeWindowsBatchValue(cliEntryPath)}"
+set "ORCA_USER_DATA_PATH=${escapeWindowsBatchValue(userDataPath)}"
+if not defined ORCA_APP_EXECUTABLE (
+  set "ORCA_APP_EXECUTABLE=%ELECTRON%"
+  set "ORCA_APP_EXECUTABLE_NEEDS_APP_ROOT=1"
+)
 set "ORCA_NODE_OPTIONS=%NODE_OPTIONS%"
 set "ORCA_NODE_REPL_EXTERNAL_MODULE=%NODE_REPL_EXTERNAL_MODULE%"
 set NODE_OPTIONS=
@@ -623,6 +685,11 @@ function samePathEntry(platform: NodeJS.Platform, left: string, right: string): 
   return platform === 'win32'
     ? normalizeWindowsPath(left) === normalizeWindowsPath(right)
     : left === right
+}
+
+function isPathInsideOrEqual(parentPath: string, childPath: string): boolean {
+  const childRelative = relative(parentPath, childPath)
+  return childRelative === '' || (!childRelative.startsWith('..') && !isAbsolute(childRelative))
 }
 
 function normalizeWindowsPath(value: string): string {
