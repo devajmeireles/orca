@@ -17,7 +17,7 @@ import { track } from '@/lib/telemetry'
 import { RemoteStep, CloneStep, useRemoteRepo } from './AddRepoSteps'
 import { CreateStep, useCreateRepo } from './AddRepoCreateStep'
 import { getProjectAddedPrimaryBranchName, SetupStep } from './AddRepoSetupStep'
-import { getDefaultCloneParent } from './clone-defaults'
+import { getCloneDestinationAutoFill } from './clone-defaults'
 import { callRuntimeRpc, getActiveRuntimeTarget } from '@/runtime/runtime-rpc-client'
 import { activateAndRevealWorktree } from '@/lib/worktree-activation'
 import { isGitRepoKind } from '../../../../shared/repo-kind'
@@ -109,6 +109,18 @@ const AddRepoDialog = React.memo(function AddRepoDialog() {
 
   // Why: monotonic ID so stale clone callbacks can detect they were superseded.
   const cloneGenRef = useRef(0)
+  // Why: local folder picking/scanning can outlive the dialog; resetState
+  // invalidates stale continuations before they can repopulate closed UI.
+  const localAddGenRef = useRef(0)
+  // Why: server path adds share the same dialog but run against a runtime
+  // server; resetState cancels their stale scan/add/fetch continuations.
+  const serverAddGenRef = useRef(0)
+  // Why: nested group import can create many repos; resetState must prevent
+  // stale import completions from reopening setup UI after Back/close.
+  const nestedImportGenRef = useRef(0)
+  // Why: setup actions can await settings/worktree refreshes; resetState
+  // cancels stale continuations when the setup step is dismissed.
+  const setupActionGenRef = useRef(0)
   // Why: a dropped path is modal data, so ordinary state updates must not
   // re-run the import while the Add Project dialog advances through steps.
   const droppedLocalPathHandledRef = useRef<string | null>(null)
@@ -179,26 +191,21 @@ const AddRepoDialog = React.memo(function AddRepoDialog() {
     return window.api.repos.onCloneProgress(setCloneProgress)
   }, [isCloning])
 
-  useEffect(() => {
-    if (step !== 'clone') {
-      cloneStepAutoFilledRef.current = false
-      return
-    }
-    if (cloneStepAutoFilledRef.current) {
-      return
-    }
-    if (cloneDestination) {
-      return
-    }
-    if (settings?.activeRuntimeEnvironmentId?.trim()) {
-      return
-    }
-    if (!settings?.workspaceDir) {
-      return
-    }
+  const cloneDestinationAutoFill = getCloneDestinationAutoFill({
+    step,
+    cloneDestination,
+    activeRuntimeEnvironmentId: settings?.activeRuntimeEnvironmentId,
+    workspaceDir: settings?.workspaceDir,
+    cloneStepAutoFilled: cloneStepAutoFilledRef.current
+  })
+  if (step !== 'clone') {
+    cloneStepAutoFilledRef.current = false
+  } else if (cloneDestinationAutoFill) {
+    // Why: late settings hydration should still seed the local clone path,
+    // but runtime/server clone flows must keep their destination user-entered.
     cloneStepAutoFilledRef.current = true
-    setCloneDestination(getDefaultCloneParent(settings.workspaceDir))
-  }, [step, cloneDestination, settings?.activeRuntimeEnvironmentId, settings?.workspaceDir])
+    setCloneDestination(cloneDestinationAutoFill.destination)
+  }
 
   const isOpen = activeModal === 'add-repo'
   const droppedLocalPath =
@@ -240,6 +247,10 @@ const AddRepoDialog = React.memo(function AddRepoDialog() {
 
   const resetState = useCallback(() => {
     cloneGenRef.current++
+    localAddGenRef.current++
+    serverAddGenRef.current++
+    nestedImportGenRef.current++
+    setupActionGenRef.current++
     // Why: kill the git clone process if one is running, so backing out
     // or closing the dialog doesn't leave a clone running on disk.
     void window.api.repos.cloneAbort()
@@ -286,10 +297,14 @@ const AddRepoDialog = React.memo(function AddRepoDialog() {
         closeModal()
         return
       }
+      const gen = ++localAddGenRef.current
       setIsAdding(true)
       try {
         const attemptId = createNestedRepoTelemetryAttemptId()
         const scan = await scanNestedRepos(path)
+        if (gen !== localAddGenRef.current) {
+          return
+        }
         track(
           'add_repo_nested_scan_result',
           buildNestedRepoScanTelemetry({
@@ -310,10 +325,16 @@ const AddRepoDialog = React.memo(function AddRepoDialog() {
           return
         }
         const repo = await addRepoPath(path)
+        if (gen !== localAddGenRef.current) {
+          return
+        }
         if (repo && isGitRepoKind(repo)) {
           setAddedRepo(repo)
           setExistingWorkspaceSource(source)
           await fetchWorktrees(repo.id)
+          if (gen !== localAddGenRef.current) {
+            return
+          }
           setStep('setup')
         } else if (repo) {
           // Why: folder repos skip the Git worktree setup step and activate
@@ -321,7 +342,9 @@ const AddRepoDialog = React.memo(function AddRepoDialog() {
           closeModal()
         }
       } finally {
-        setIsAdding(false)
+        if (gen === localAddGenRef.current) {
+          setIsAdding(false)
+        }
       }
     },
     [addRepoPath, closeModal, fetchWorktrees, scanNestedRepos, settings?.activeRuntimeEnvironmentId]
@@ -339,15 +362,18 @@ const AddRepoDialog = React.memo(function AddRepoDialog() {
   }, [droppedLocalPath, handleAddLocalPath, isOpen])
 
   const handleBrowse = useCallback(async () => {
+    const gen = ++localAddGenRef.current
     setIsAdding(true)
     try {
       const path = await window.api.repos.pickFolder()
-      if (!path) {
+      if (!path || gen !== localAddGenRef.current) {
         return
       }
       await handleAddLocalPath(path, 'local_folder_picker')
     } finally {
-      setIsAdding(false)
+      if (gen === localAddGenRef.current) {
+        setIsAdding(false)
+      }
     }
   }, [handleAddLocalPath])
 
@@ -367,6 +393,7 @@ const AddRepoDialog = React.memo(function AddRepoDialog() {
       const foundCount = nestedScan.repos.length
       const selectedCount = nestedSelectedPaths.size
       const runtimeKind = nestedRuntimeKind ?? getNestedRepoRuntimeKind(nestedConnectionId)
+      const gen = ++nestedImportGenRef.current
       setIsAdding(true)
       track(
         'add_repo_nested_import_action',
@@ -410,13 +437,18 @@ const AddRepoDialog = React.memo(function AddRepoDialog() {
         const firstRepoId = importedRepoIds[0]
         if (!firstRepoId) {
           const firstFailure = result.projects.find((entry) => entry.status === 'failed')?.error
-          toast.error('No repositories imported', {
-            description: firstFailure ?? undefined
-          })
+          if (gen === nestedImportGenRef.current) {
+            toast.error('No repositories imported', {
+              description: firstFailure ?? undefined
+            })
+          }
           return
         }
         for (const projectId of importedRepoIds) {
           await fetchWorktrees(projectId)
+        }
+        if (gen !== nestedImportGenRef.current) {
+          return
         }
         const repo = useAppStore.getState().repos.find((entry) => entry.id === firstRepoId)
         if (repo) {
@@ -431,9 +463,11 @@ const AddRepoDialog = React.memo(function AddRepoDialog() {
           setStep('setup')
         }
         if (result.failedCount > 0) {
-          toast.warning('Some repositories could not be imported', {
-            description: `${result.failedCount} failed`
-          })
+          if (gen === nestedImportGenRef.current) {
+            toast.warning('Some repositories could not be imported', {
+              description: `${result.failedCount} failed`
+            })
+          }
         }
       } finally {
         if (!resultTracked) {
@@ -450,7 +484,9 @@ const AddRepoDialog = React.memo(function AddRepoDialog() {
             })
           )
         }
-        setIsAdding(false)
+        if (gen === nestedImportGenRef.current) {
+          setIsAdding(false)
+        }
       }
     },
     [
@@ -473,11 +509,15 @@ const AddRepoDialog = React.memo(function AddRepoDialog() {
       if (!path) {
         return
       }
+      const gen = ++serverAddGenRef.current
       setIsAddingServerPath(true)
       try {
         if (kind === 'git') {
           const attemptId = createNestedRepoTelemetryAttemptId()
           const scan = await scanNestedRepos(path)
+          if (gen !== serverAddGenRef.current) {
+            return
+          }
           track(
             'add_repo_nested_scan_result',
             buildNestedRepoScanTelemetry({
@@ -499,10 +539,16 @@ const AddRepoDialog = React.memo(function AddRepoDialog() {
           }
         }
         const repo = await addRepoPath(path, kind)
+        if (gen !== serverAddGenRef.current) {
+          return
+        }
         if (repo && isGitRepoKind(repo)) {
           setAddedRepo(repo)
           setExistingWorkspaceSource('runtime_server_path')
           await fetchWorktrees(repo.id)
+          if (gen !== serverAddGenRef.current) {
+            return
+          }
           setStep('setup')
         } else if (repo) {
           // Why: folder repos skip the Git worktree setup step; their synthetic
@@ -510,7 +556,9 @@ const AddRepoDialog = React.memo(function AddRepoDialog() {
           closeModal()
         }
       } finally {
-        setIsAddingServerPath(false)
+        if (gen === serverAddGenRef.current) {
+          setIsAddingServerPath(false)
+        }
       }
     },
     [addRepoPath, closeModal, fetchWorktrees, getNestedRepoRuntimeKind, scanNestedRepos, serverPath]
@@ -523,8 +571,9 @@ const AddRepoDialog = React.memo(function AddRepoDialog() {
       toast.error('Enter a server path for the clone destination.')
       return
     }
+    const gen = cloneGenRef.current
     const dir = await window.api.repos.pickDirectory()
-    if (dir) {
+    if (dir && gen === cloneGenRef.current) {
       setCloneDestination(dir)
       setCloneError(null)
     }
@@ -577,6 +626,9 @@ const AddRepoDialog = React.memo(function AddRepoDialog() {
       setAddedRepo(repo)
       setExistingWorkspaceSource('clone_url')
       await fetchWorktrees(repo.id)
+      if (gen !== cloneGenRef.current) {
+        return
+      }
       setStep('setup')
     } catch (err) {
       if (gen !== cloneGenRef.current) {
@@ -683,13 +735,20 @@ const AddRepoDialog = React.memo(function AddRepoDialog() {
     if (!projectId) {
       return
     }
+    const gen = ++setupActionGenRef.current
     trackSetupAction('open_existing')
     if (!otherWorktreesVisible) {
       const updated = await updateRepo(projectId, { externalWorktreeVisibility: 'show' })
+      if (gen !== setupActionGenRef.current) {
+        return
+      }
       if (updated && addedRepo) {
         setAddedRepo({ ...addedRepo, externalWorktreeVisibility: 'show' })
       }
       await fetchWorktrees(projectId)
+      if (gen !== setupActionGenRef.current) {
+        return
+      }
     }
     await finishImportedRepoWithoutOpening()
   }, [

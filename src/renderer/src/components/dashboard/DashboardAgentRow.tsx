@@ -1,7 +1,7 @@
 /* eslint-disable max-lines -- Why: the row keeps tightly-coupled visual states
 and SSR coverage in one component until the agent-row layout is split. */
 import React, { useState, useCallback } from 'react'
-import { X, Wrench, ChevronDown } from 'lucide-react'
+import { X, Wrench, ChevronDown, Send } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { AgentStateDot, agentStateLabel, type AgentDotState } from '@/components/AgentStateDot'
 import { AgentIcon } from '@/lib/agent-catalog'
@@ -23,9 +23,8 @@ function asDotState(state: AgentStatusState | 'idle'): AgentDotState {
     case 'done':
     case 'idle':
       return state
-    default:
-      return 'idle'
   }
+  return 'idle'
 }
 
 function formatTimeAgo(ts: number, now: number): string {
@@ -123,6 +122,11 @@ type Props = {
   reserveDisclosureGutter?: boolean
   // Why: chevron indentation replaces fixed-offset lineage connector art.
   hideLineageConnectors?: boolean
+  // Why: send-popover target mode temporarily turns sidebar rows into the
+  // picker surface, so row clicks must send/no-op instead of navigating.
+  sendTargetStatus?: 'eligible' | 'disabled' | 'sending'
+  sendTargetDisabledReason?: string
+  onSendTargetClick?: (paneKey: string) => void
   // Why: inline sidebar rows replace the passive tooltip with a terminal popover.
   renderStateDotPopover?: (args: {
     children: React.ReactNode
@@ -153,6 +157,9 @@ const DashboardAgentRow = React.memo(function DashboardAgentRow({
   onToggleChildAgents,
   reserveDisclosureGutter = false,
   hideLineageConnectors = false,
+  sendTargetStatus,
+  sendTargetDisabledReason,
+  onSendTargetClick,
   renderStateDotPopover,
   renderRowPopover
 }: Props) {
@@ -202,6 +209,36 @@ const DashboardAgentRow = React.memo(function DashboardAgentRow({
       onActivate(agent.tab.id, agent.paneKey)
     },
     [onActivate, agent.tab.id, agent.paneKey]
+  )
+  const handleSendTargetClickCapture = useCallback(
+    (e: React.MouseEvent) => {
+      if (!sendTargetStatus) {
+        return
+      }
+      const target = e.target
+      if (
+        target instanceof Element &&
+        target.closest('button, a, input, textarea, select, [role="button"]')
+      ) {
+        return
+      }
+      e.preventDefault()
+      e.stopPropagation()
+      if (sendTargetStatus === 'eligible') {
+        onSendTargetClick?.(agent.paneKey)
+      }
+    },
+    [agent.paneKey, onSendTargetClick, sendTargetStatus]
+  )
+  const handleInlineSendTargetClick = useCallback(
+    (e: React.MouseEvent<HTMLButtonElement>) => {
+      e.preventDefault()
+      e.stopPropagation()
+      if (sendTargetStatus === 'eligible') {
+        onSendTargetClick?.(agent.paneKey)
+      }
+    },
+    [agent.paneKey, onSendTargetClick, sendTargetStatus]
   )
   const startedAt = agent.startedAt > 0 ? agent.startedAt : null
   const doneAt = lastEnteredDoneAt(agent)
@@ -253,6 +290,8 @@ const DashboardAgentRow = React.memo(function DashboardAgentRow({
     tsParts.push(`done ${formatTimeAgo(doneAt, now)}`)
   }
 
+  const titleParts = sendTargetDisabledReason ? [sendTargetDisabledReason, ...tsParts] : tsParts
+
   const row = (
     // Why: NOT role="button" / tabIndex={0}. The row contains real <button>
     // children (dismiss X, expand chevron) and tooltip triggers that forward
@@ -262,6 +301,7 @@ const DashboardAgentRow = React.memo(function DashboardAgentRow({
     // the agent via the child buttons and the tab switcher; the outer <div>
     // stays a plain clickable surface for pointer activation.
     <div
+      onClickCapture={handleSendTargetClickCapture}
       onClick={handleActivate}
       className={cn(
         // Why: this row owns the timestamp/X hover boundary; anonymous
@@ -271,10 +311,13 @@ const DashboardAgentRow = React.memo(function DashboardAgentRow({
         // Why: inline agent rows sit inside a hoverable workspace card, so
         // their hover wash must stay softer than the parent card highlight.
         // The focused-pane state reuses the same class via data attribute.
-        'cursor-pointer rounded-sm worktree-agent-row-hover'
+        'cursor-pointer rounded-sm worktree-agent-row-hover',
+        sendTargetStatus === 'sending' && 'cursor-progress opacity-75',
+        sendTargetStatus === 'disabled' && 'cursor-default opacity-60'
       )}
       data-focused-agent-pane={isFocusedPane ? 'true' : undefined}
-      title={tsParts.length > 0 ? tsParts.join(' • ') : undefined}
+      data-agent-send-target={sendTargetStatus}
+      title={titleParts.length > 0 ? titleParts.join(' • ') : undefined}
       role={participatesInLineage ? 'treeitem' : undefined}
       aria-level={participatesInLineage ? (lineage?.depth ?? 0) + 1 : undefined}
     >
@@ -342,8 +385,12 @@ const DashboardAgentRow = React.memo(function DashboardAgentRow({
             </TooltipContent>
           </Tooltip>
         )}
-        {/* Why: identity sits inline with the prompt; sub-rows inherit that
-            context and indent cleanly without repeating the icon. */}
+        {/* Why: identity (Claude/Codex/Gemini/…) sits inline with the prompt
+            so the reader gets "state → who → what they said" left-to-right
+            on the top row. The sub-rows (tool step, assistant response) are
+            about the same agent and do not need the icon repeated next to
+            them — keeping the icon only on the prompt row lets the sub-rows
+            indent under the prompt text cleanly. */}
         {!hideIdentityIcon && (
           <span className="inline-flex shrink-0" title={identityTitle}>
             <AgentIcon agent={agentTypeToIconAgent(agent.agentType)} size={14} />
@@ -392,7 +439,25 @@ const DashboardAgentRow = React.memo(function DashboardAgentRow({
         {/* Why: right cluster keeps passive time and dismiss affordance in one
             place. State belongs in the leading gutter; repeating it here as
             text makes interrupted rows look like the old badge treatment. */}
-        <span className="ml-auto flex shrink-0 items-center gap-1.5">
+        <span className="relative ml-auto flex h-3.5 w-12 shrink-0 items-center justify-end">
+          {(sendTargetStatus === 'eligible' || sendTargetStatus === 'sending') && (
+            <button
+              type="button"
+              onClick={handleInlineSendTargetClick}
+              onMouseDown={stopMouseDown}
+              onKeyDown={stopKeyDown}
+              disabled={sendTargetStatus === 'sending'}
+              className={cn(
+                'worktree-agent-send-target-button absolute right-0 top-1/2 z-10 inline-flex h-5 -translate-y-1/2 items-center gap-1 rounded-md border px-1.5 text-[10px] font-medium leading-none transition-[background-color,border-color,color,opacity]',
+                sendTargetStatus === 'sending' && 'cursor-progress opacity-75'
+              )}
+              aria-label="Send to this agent"
+              title="Send to this agent"
+            >
+              <Send className="size-3" />
+              <span>Send</span>
+            </button>
+          )}
           {/* Why: timestamp and dismiss-X share a single slot so passive
               rows show "time ago" and hovered rows swap in the X — no
               reserved-space gap, no competing columns. Grid stacks both
@@ -403,7 +468,7 @@ const DashboardAgentRow = React.memo(function DashboardAgentRow({
               fade the crossfade instead of snapping, and keyboard focus
               on the hidden X still activates it because `opacity-0`
               doesn't remove it from the tab order. */}
-          {(startedAt !== null || doneAt !== null) && (
+          {!sendTargetStatus && (startedAt !== null || doneAt !== null) && (
             <span className="relative grid grid-cols-1 grid-rows-1 shrink-0 items-center justify-items-end">
               <span
                 className={cn(
@@ -441,7 +506,7 @@ const DashboardAgentRow = React.memo(function DashboardAgentRow({
               as a standalone hover-only control so dismiss is still
               reachable. Rare path; most rows have a timestamp the moment
               they start. */}
-          {startedAt === null && doneAt === null && (
+          {!sendTargetStatus && startedAt === null && doneAt === null && (
             <button
               type="button"
               onClick={handleDismiss}
