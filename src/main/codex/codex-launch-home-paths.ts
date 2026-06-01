@@ -5,6 +5,7 @@ import {
   cpSync,
   existsSync,
   lstatSync,
+  linkSync,
   mkdirSync,
   readFileSync,
   readlinkSync,
@@ -220,6 +221,7 @@ function linkSharedEntryIntoLaunchHome(
     removeLaunchEntryIfOwned(targetPath, launchHomePath, entryName, sourcePath)
     return
   }
+  materializeMissingSharedEntryIfNeeded(sourcePath, entryName)
   if (targetAlreadyPointsToSource(targetPath, sourcePath)) {
     markLaunchEntry(launchHomePath, entryName, sourcePath, 'link')
     return
@@ -260,16 +262,70 @@ function linkSharedEntryIntoLaunchHome(
   }
 }
 
+function materializeMissingSharedEntryIfNeeded(sourcePath: string, entryName: string): void {
+  if (
+    process.platform !== 'win32' ||
+    !isCodexSqliteSidecarEntryName(entryName) ||
+    existsSync(sourcePath)
+  ) {
+    return
+  }
+  try {
+    writeFileSync(sourcePath, '', { flag: 'wx', mode: 0o600 })
+  } catch (error) {
+    if (existsSync(sourcePath)) {
+      return
+    }
+    throw error
+  }
+}
+
 function createSharedEntryLink(sourcePath: string, targetPath: string): void {
   if (createWslSymlinkIfPossible(sourcePath, targetPath)) {
     return
   }
   const sourceStat = existsSync(sourcePath) ? lstatSync(sourcePath) : null
-  symlinkSync(
-    sourcePath,
-    targetPath,
-    sourceStat?.isDirectory() && process.platform === 'win32' ? 'junction' : undefined
-  )
+  if (
+    sourceStat?.isFile() &&
+    process.platform === 'win32' &&
+    createHardLinkIfPossible(sourcePath, targetPath)
+  ) {
+    return
+  }
+  if (targetAlreadyPointsToSource(targetPath, sourcePath)) {
+    return
+  }
+  try {
+    symlinkSync(
+      sourcePath,
+      targetPath,
+      sourceStat?.isDirectory() && process.platform === 'win32' ? 'junction' : undefined
+    )
+  } catch (error) {
+    if (targetAlreadyPointsToSource(targetPath, sourcePath)) {
+      return
+    }
+    if (
+      sourceStat?.isFile() &&
+      process.platform === 'win32' &&
+      createHardLinkIfPossible(sourcePath, targetPath)
+    ) {
+      return
+    }
+    if (targetAlreadyPointsToSource(targetPath, sourcePath)) {
+      return
+    }
+    throw error
+  }
+}
+
+function createHardLinkIfPossible(sourcePath: string, targetPath: string): boolean {
+  try {
+    linkSync(sourcePath, targetPath)
+    return true
+  } catch {
+    return false
+  }
 }
 
 function createWslSymlinkIfPossible(sourcePath: string, targetPath: string): boolean {
@@ -648,9 +704,19 @@ function targetAlreadyPointsToSource(targetPath: string, sourcePath: string): bo
     return readWslSymlinkTarget(targetPath) === paths.sourceLinuxPath
   }
   try {
+    const targetStat = lstatSync(targetPath)
+    if (targetStat.isSymbolicLink()) {
+      return linkTargetsMatch(readlinkSync(targetPath), sourcePath)
+    }
+    if (!targetStat.isFile() || !existsSync(sourcePath)) {
+      return false
+    }
+    const sourceStat = statSync(sourcePath)
     return (
-      lstatSync(targetPath).isSymbolicLink() &&
-      linkTargetsMatch(readlinkSync(targetPath), sourcePath)
+      sourceStat.isFile() &&
+      targetStat.dev === sourceStat.dev &&
+      targetStat.ino === sourceStat.ino &&
+      targetStat.nlink > 1
     )
   } catch {
     return false
