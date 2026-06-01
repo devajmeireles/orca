@@ -134,12 +134,14 @@ const TerminalPaneOverlayLayer = memo(function TerminalPaneOverlayLayer({
   worktreeId,
   worktreePath,
   isWorktreeActive,
-  activityTerminalPortals = EMPTY_ACTIVITY_PORTALS
+  activityTerminalPortals = EMPTY_ACTIVITY_PORTALS,
+  liveTerminalTabIds = null
 }: {
   worktreeId: string
   worktreePath: string
   isWorktreeActive: boolean
   activityTerminalPortals?: ActivityTerminalPortalTarget[]
+  liveTerminalTabIds?: ReadonlySet<string> | null
 }): React.JSX.Element | null {
   const { terminalTabs, unifiedTabs, groups, activeGroupId } = useAppStore(
     useShallow((state) => ({
@@ -213,6 +215,9 @@ const TerminalPaneOverlayLayer = memo(function TerminalPaneOverlayLayer({
           worktreeId,
           tabId: terminalTab.id
         })
+        if (liveTerminalTabIds && !liveTerminalTabIds.has(terminalTab.id)) {
+          return null
+        }
         return (
           <TerminalOverlaySlot
             key={terminalTab.id}

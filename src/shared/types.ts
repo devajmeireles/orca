@@ -2024,6 +2024,8 @@ export type GlobalSettings = {
    *  usable without the setup output crowding the initial pane. */
   setupScriptLaunchMode: SetupScriptLaunchMode
   terminalScrollbackBytes: number
+  /** Max number of mounted xterm renderer panes to keep warm. 0 disables eviction. */
+  maxLiveTerminalPanes?: number
   /** Optional app-level proxy for Electron networking and locally spawned PTYs.
    *  Empty preserves system proxy settings plus inherited proxy env behavior. */
   httpProxyUrl?: string

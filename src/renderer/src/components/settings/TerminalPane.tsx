@@ -231,6 +231,42 @@ export function TerminalPane({
               }
             />
           </SearchableSetting>
+
+          <SearchableSetting
+            title="Live Terminal Pane Limit"
+            description="Caps how many hidden terminal renderer panes stay mounted. 0 disables eviction."
+            keywords={['terminal', 'live panes', 'limit', 'lru', 'memory', 'xterm', 'renderer']}
+          >
+            <SettingsRow
+              label="Live Pane Limit"
+              description={
+                (settings.maxLiveTerminalPanes ?? 0) === 0
+                  ? 'Disabled; all open terminal panes stay mounted.'
+                  : 'Older hidden local terminal panes are detached and restored when reopened.'
+              }
+              control={
+                <div className="flex items-center gap-2">
+                  <Input
+                    type="number"
+                    min={0}
+                    max={500}
+                    step={1}
+                    value={settings.maxLiveTerminalPanes ?? 0}
+                    onChange={(e) => {
+                      const value = Number(e.target.value)
+                      if (Number.isFinite(value)) {
+                        updateSettings({
+                          maxLiveTerminalPanes: Math.floor(clampNumber(value, 0, 500))
+                        })
+                      }
+                    }}
+                    className="number-input-clean w-24 tabular-nums"
+                  />
+                  <span className="text-xs text-muted-foreground">panes</span>
+                </div>
+              }
+            />
+          </SearchableSetting>
         </div>
       </section>
     ) : null,

@@ -58,6 +58,11 @@ export const TERMINAL_RENDERING_SEARCH_ENTRIES: SettingsSearchEntry[] = [
       'linux',
       'vscode'
     ]
+  },
+  {
+    title: 'Live Terminal Pane Limit',
+    description: 'Caps how many hidden terminal renderer panes stay mounted. 0 disables eviction.',
+    keywords: ['terminal', 'live panes', 'limit', 'lru', 'memory', 'xterm', 'renderer']
   }
 ]
 

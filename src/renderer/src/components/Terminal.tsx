@@ -53,6 +53,7 @@ import TabGroupSplitLayout from './tab-group/TabGroupSplitLayout'
 import { shouldAutoCreateInitialTerminal } from './terminal/initial-terminal'
 import { shouldRepairActiveTerminalTab } from './terminal/active-terminal-repair'
 import { addBackgroundMountedTerminalWorktree } from './terminal/background-terminal-worktree-mount'
+import { computeLiveTerminalTabIds } from './terminal/terminal-live-tab-set'
 import {
   getEffectiveLayoutForWorktree as getEffectiveLayout,
   anyMountedWorktreeHasLayout as computeAnyMountedWorktreeHasLayout
@@ -186,6 +187,9 @@ function Terminal(): React.JSX.Element | null {
   const renderedActiveWorktreeId = activeWorktreeId
   const activeView = useAppStore((s) => s.activeView)
   const tabsByWorktree = useAppStore((s) => s.tabsByWorktree)
+  const unifiedTabsByWorktree = useAppStore((s) => s.unifiedTabsByWorktree)
+  const ptyIdsByTabId = useAppStore((s) => s.ptyIdsByTabId)
+  const pendingStartupByTabId = useAppStore((s) => s.pendingStartupByTabId)
   const activeTabId = useAppStore((s) => s.activeTabId)
   const createTab = useAppStore((s) => s.createTab)
   const closeTab = useAppStore((s) => s.closeTab)
@@ -207,6 +211,7 @@ function Terminal(): React.JSX.Element | null {
   const terminalShortcutPolicy = useAppStore(
     (s) => s.settings?.terminalShortcutPolicy ?? 'orca-first'
   )
+  const maxLiveTerminalPanes = useAppStore((s) => s.settings?.maxLiveTerminalPanes ?? 0)
   const setActiveTabType = useAppStore((s) => s.setActiveTabType)
   const setActiveFile = useAppStore((s) => s.setActiveFile)
   const closeFile = useAppStore((s) => s.closeFile)
@@ -243,6 +248,9 @@ function Terminal(): React.JSX.Element | null {
   const activityTerminalPortals: ActivityTerminalPortalTarget[] = useActivityTerminalPortals(
     activeView === 'activity'
   )
+  const terminalTabRecencyByIdRef = useRef(new Map<string, number>())
+  const terminalTabRecencyCounterRef = useRef(0)
+  const [terminalTabRecencyRevision, setTerminalTabRecencyRevision] = useState(0)
 
   const tabs = useMemo(
     () => (renderedActiveWorktreeId ? (tabsByWorktree[renderedActiveWorktreeId] ?? []) : []),
@@ -298,6 +306,111 @@ function Terminal(): React.JSX.Element | null {
     ),
     'workspace_agent_sessions_visible'
   )
+
+  const requiredLiveTerminalTabIds = useMemo(() => {
+    const ids = new Set<string>()
+
+    if (activeView === 'terminal' && renderedActiveWorktreeId) {
+      if (getEffectiveLayoutForWorktree(renderedActiveWorktreeId)) {
+        const groups = groupsByWorktree[renderedActiveWorktreeId] ?? []
+        const activeUnifiedIdsByGroup = new Map<string, string | null>()
+        for (const group of groups) {
+          activeUnifiedIdsByGroup.set(group.id, group.activeTabId)
+        }
+        for (const tab of unifiedTabsByWorktree[renderedActiveWorktreeId] ?? []) {
+          if (
+            tab.contentType === 'terminal' &&
+            activeUnifiedIdsByGroup.get(tab.groupId) === tab.id
+          ) {
+            ids.add(tab.entityId)
+          }
+        }
+      } else if (activeTabType === 'terminal' && activeTabId) {
+        ids.add(activeTabId)
+      }
+    }
+
+    for (const tabsForWorktree of Object.values(unifiedTabsByWorktree)) {
+      for (const tab of tabsForWorktree) {
+        if (tab.contentType === 'terminal' && tab.isPinned === true) {
+          ids.add(tab.entityId)
+        }
+      }
+    }
+
+    for (const portal of activityTerminalPortals) {
+      ids.add(portal.tabId)
+    }
+
+    for (const tabId of Object.keys(pendingStartupByTabId)) {
+      ids.add(tabId)
+    }
+
+    for (const [worktreeId, terminalTabs] of Object.entries(tabsByWorktree)) {
+      const isRemoteWorktree = getConnectionId(worktreeId) !== null
+      for (const tab of terminalTabs) {
+        const ptyIds = ptyIdsByTabId[tab.id] ?? []
+        if (isRemoteWorktree || ptyIds.some(isRemoteRuntimePtyId)) {
+          ids.add(tab.id)
+        }
+      }
+    }
+
+    return ids
+  }, [
+    activeTabId,
+    activeTabType,
+    activeView,
+    activityTerminalPortals,
+    getEffectiveLayoutForWorktree,
+    groupsByWorktree,
+    pendingStartupByTabId,
+    ptyIdsByTabId,
+    renderedActiveWorktreeId,
+    tabsByWorktree,
+    unifiedTabsByWorktree
+  ])
+
+  const requiredLiveTerminalTabIdsKey = useMemo(
+    () => Array.from(requiredLiveTerminalTabIds).sort().join('\0'),
+    [requiredLiveTerminalTabIds]
+  )
+
+  useEffect(() => {
+    const knownTabIds = new Set(
+      Object.values(tabsByWorktree).flatMap((worktreeTabs) => worktreeTabs.map((tab) => tab.id))
+    )
+    let changed = false
+
+    for (const tabId of Array.from(terminalTabRecencyByIdRef.current.keys())) {
+      if (!knownTabIds.has(tabId)) {
+        terminalTabRecencyByIdRef.current.delete(tabId)
+        changed = true
+      }
+    }
+
+    for (const tabId of requiredLiveTerminalTabIds) {
+      terminalTabRecencyCounterRef.current += 1
+      terminalTabRecencyByIdRef.current.set(tabId, terminalTabRecencyCounterRef.current)
+      changed = true
+    }
+
+    if (changed) {
+      setTerminalTabRecencyRevision((revision) => revision + 1)
+    }
+  }, [requiredLiveTerminalTabIds, requiredLiveTerminalTabIdsKey, tabsByWorktree])
+
+  const liveTerminalTabIds = useMemo(() => {
+    // Why: recency is stored in a mutable ref, so this revision is the render
+    // signal that recomputes the live/cold pane split after visible tabs move.
+    void terminalTabRecencyRevision
+    return computeLiveTerminalTabIds({
+      tabsByWorktree,
+      maxLiveTerminalPanes,
+      requiredTabIds: requiredLiveTerminalTabIds,
+      recentUseByTabId: terminalTabRecencyByIdRef.current
+    })
+  }, [maxLiveTerminalPanes, requiredLiveTerminalTabIds, tabsByWorktree, terminalTabRecencyRevision])
 
   // Save confirmation dialog state
   const [saveDialogFileId, setSaveDialogFileId] = useState<string | null>(null)
@@ -1675,6 +1788,7 @@ function Terminal(): React.JSX.Element | null {
                   isVisible={isVisible}
                   shouldMeasureHiddenWorktree={shouldMeasureHiddenWorktree}
                   activityTerminalPortals={activityTerminalPortals}
+                  liveTerminalTabIds={liveTerminalTabIds}
                 />
               )
             })}
@@ -1738,6 +1852,9 @@ function Terminal(): React.JSX.Element | null {
                   >
                     <CodexRestartChip worktreeId={worktree.id} />
                     {(tabsByWorktree[worktree.id] ?? []).map((tab) => {
+                      if (liveTerminalTabIds && !liveTerminalTabIds.has(tab.id)) {
+                        return null
+                      }
                       const activityTerminalPortal = findActivityTerminalPortal(
                         activityTerminalPortals,
                         { worktreeId: worktree.id, tabId: tab.id }
@@ -1933,7 +2050,8 @@ const WorktreeSplitSurface = React.memo(function WorktreeSplitSurface({
   focusedGroupId,
   isVisible,
   shouldMeasureHiddenWorktree,
-  activityTerminalPortals
+  activityTerminalPortals,
+  liveTerminalTabIds
 }: {
   worktreeId: string
   worktreePath: string
@@ -1942,6 +2060,7 @@ const WorktreeSplitSurface = React.memo(function WorktreeSplitSurface({
   isVisible: boolean
   shouldMeasureHiddenWorktree: boolean
   activityTerminalPortals: ActivityTerminalPortalTarget[]
+  liveTerminalTabIds: Set<string> | null
 }): React.JSX.Element {
   const browserPageIds = useAppStore(
     useShallow((state) =>
@@ -1979,6 +2098,7 @@ const WorktreeSplitSurface = React.memo(function WorktreeSplitSurface({
         worktreePath={worktreePath}
         isWorktreeActive={isVisible}
         activityTerminalPortals={activityTerminalPortals}
+        liveTerminalTabIds={liveTerminalTabIds}
       />
       <BrowserPaneOverlayLayer worktreeId={worktreeId} isWorktreeActive={isVisible} />
     </div>
