@@ -209,7 +209,7 @@ describe('contextual tour gate', () => {
   })
 
   it('skips missing later steps and keeps progress relative to visible steps', () => {
-    const tour = getContextualTour('browser')
+    const tour = getContextualTour('tasks')
     const visibleSelectors = new Set([tour.steps[0]!.targetSelector, tour.steps[2]!.targetSelector])
     const targetExists = (selector: string): boolean => visibleSelectors.has(selector)
     const visibleStepIndexes = getVisibleContextualTourStepIndexes(tour, targetExists)

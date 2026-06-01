@@ -56,18 +56,21 @@ export const CONTEXTUAL_TOURS = [
       {
         title: 'Plan work on the board',
         body: 'Use the board when you want to see workspaces by status instead of by project.',
-        targetSelector: '[data-contextual-tour-target="workspace-board-surface"]',
-        requiredForStart: true
+        targetSelector: '[data-contextual-tour-target="workspace-board-center"]',
+        requiredForStart: true,
+        preferredPlacement: 'bottom'
       },
       {
         title: 'Move work through lanes',
-        body: 'Statuses make active, reviewing, and finished work easy to scan.',
-        targetSelector: '[data-contextual-tour-target="workspace-board-lanes"]'
+        body: 'Drag workspaces between lanes as their status changes.',
+        targetSelector:
+          '[data-contextual-tour-target="workspace-board-done-lane"], [data-contextual-tour-target="workspace-board-lanes"]'
       },
       {
-        title: 'Drag cards and tune density',
-        body: 'Drop cards into lanes, resize columns, or switch compact mode from the board controls.',
-        targetSelector: '[data-contextual-tour-target="workspace-board-cards"]'
+        title: 'Tune density',
+        body: 'Use board settings to switch between detailed and compact cards.',
+        targetSelector:
+          '[data-contextual-tour-target="workspace-board-settings"], [data-contextual-tour-target="workspace-board-lanes"]'
       }
     ]
   },
@@ -98,20 +101,14 @@ export const CONTEXTUAL_TOURS = [
     id: 'browser',
     steps: [
       {
-        title: 'Preview the app here',
-        body: 'Use the address bar for localhost, URLs, or search while you keep coding nearby.',
-        targetSelector:
-          '[data-contextual-tour-target="browser-address"], [data-orca-browser-address-bar="true"]',
+        title: 'Grab page context for agents',
+        body: 'Grab controls can copy elements or hand page context to an agent.',
+        targetSelector: '[data-contextual-tour-target="browser-grab-control"]',
         requiredForStart: true
       },
       {
-        title: 'Grab page context for agents',
-        body: 'On supported local pages, grab controls can copy elements or hand page context to an agent.',
-        targetSelector: '[data-contextual-tour-target="browser-grab-control"]'
-      },
-      {
         title: 'Mark design feedback in place',
-        body: 'On supported local pages, annotate elements and send those notes to an agent.',
+        body: 'Annotate elements and send those notes to an agent.',
         targetSelector: '[data-contextual-tour-target="browser-annotation-control"]'
       }
     ]
@@ -131,10 +128,10 @@ export const CONTEXTUAL_TOURS = [
         targetSelector: '[data-contextual-tour-target="tasks-search-presets"]'
       },
       {
-        title: 'Start from tracked work',
-        body: 'Open an item or create one, then use it to start a workspace with the right context.',
+        title: 'Start from work items',
+        body: 'Use Start or Open on a task, issue, review, or merge request to bring its context into a workspace.',
         targetSelector:
-          '[data-contextual-tour-target="tasks-actions"], [data-contextual-tour-target="tasks-search-presets"]'
+          '[data-contextual-tour-target="tasks-start-workspace"], [data-contextual-tour-target="tasks-actions"], [data-contextual-tour-target="tasks-search-presets"]'
       }
     ]
   },
@@ -142,19 +139,14 @@ export const CONTEXTUAL_TOURS = [
     id: 'automations',
     steps: [
       {
-        title: 'Review recurring work',
-        body: 'The list shows scheduled agent work, next runs, and external automation sources.',
-        targetSelector: '[data-contextual-tour-target="automations-list"]',
+        title: 'What is an automation?',
+        body: 'Automations run agent work on a schedule. Add an automation by clicking this button.',
+        targetSelector: '[data-contextual-tour-target="automations-create"]',
         requiredForStart: true
       },
       {
-        title: 'Create a schedule',
-        body: 'Add an automation for recurring checks, maintenance, or follow-up agent work.',
-        targetSelector: '[data-contextual-tour-target="automations-create"]'
-      },
-      {
-        title: 'Run and inspect results',
-        body: 'Use overview and runs to trigger work manually and review what happened.',
+        title: 'Find the results',
+        body: 'Runs show when automations executed, what happened, and where to inspect their output.',
         targetSelector: '[data-contextual-tour-target="automations-runs"]'
       }
     ]

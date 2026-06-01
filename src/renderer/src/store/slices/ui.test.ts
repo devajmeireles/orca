@@ -1194,7 +1194,7 @@ describe('createUISlice contextual tours', () => {
   it('advances across visible steps and leaves completion to the overlay', () => {
     const store = createUIStore()
     const visibleSelectors = [
-      '[data-contextual-tour-target="browser-address"], [data-orca-browser-address-bar="true"]',
+      '[data-contextual-tour-target="browser-grab-control"]',
       '[data-contextual-tour-target="browser-annotation-control"]'
     ]
     stubContextualTourTargets(visibleSelectors)
@@ -1202,11 +1202,11 @@ describe('createUISlice contextual tours', () => {
     store.getState().requestContextualTour('browser', 'browser_visible')
 
     store.getState().advanceContextualTour()
-    expect(store.getState().activeContextualTourStepIndex).toBe(2)
+    expect(store.getState().activeContextualTourStepIndex).toBe(1)
 
     store.getState().advanceContextualTour()
     expect(store.getState().activeContextualTourId).toBe('browser')
-    expect(store.getState().activeContextualTourStepIndex).toBe(2)
+    expect(store.getState().activeContextualTourStepIndex).toBe(1)
   })
 
   it('advances the active split step when the split command interaction is recorded', () => {

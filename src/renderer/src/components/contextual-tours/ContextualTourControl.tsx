@@ -37,7 +37,7 @@ function AutoRenameBranchFromWorkControl(): JSX.Element {
         <div className="min-w-0">
           <div className="text-xs font-medium text-foreground">Auto-name from first message</div>
           <div className="mt-0.5 text-[11px] leading-4 text-muted-foreground">
-            Works when you leave the generated name unchanged.
+            Auto-generates a new name when you leave this text box empty.
           </div>
         </div>
         <button

@@ -157,7 +157,7 @@ describe('ContextualTourOverlaySurface', () => {
     const markup = renderToStaticMarkup(
       renderSurface({
         progress: { current: 2, total: 2 },
-        title: 'Start from tracked work',
+        title: 'Start from work items',
         isLastStep: true,
         isFirstStep: false
       })
@@ -165,7 +165,7 @@ describe('ContextualTourOverlaySurface', () => {
 
     expect(markup).toContain('aria-valuenow="2"')
     expect(markup).toContain('aria-valuemax="2"')
-    expect(markup).toContain('Start from tracked work')
+    expect(markup).toContain('Start from work items')
     expect(markup).toContain('Done')
   })
 

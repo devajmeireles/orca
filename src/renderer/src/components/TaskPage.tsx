@@ -5363,6 +5363,7 @@ export default function TaskPage(): React.JSX.Element {
                                     type="button"
                                     variant="outline"
                                     size="xs"
+                                    data-contextual-tour-target="tasks-start-workspace"
                                     onClick={(event) => {
                                       event.stopPropagation()
                                       handleOpenOrUseGitHubPR(item)
@@ -5411,6 +5412,7 @@ export default function TaskPage(): React.JSX.Element {
                             ) : (
                               <button
                                 type="button"
+                                data-contextual-tour-target="tasks-start-workspace"
                                 onClick={(event) => {
                                   event.stopPropagation()
                                   handleUseWorkItem(item)
@@ -5645,6 +5647,7 @@ export default function TaskPage(): React.JSX.Element {
                             <Button
                               variant="ghost"
                               size="icon-xs"
+                              data-contextual-tour-target="tasks-start-workspace"
                               onClick={(event) => {
                                 event.stopPropagation()
                                 handleUseGitLabItem(item)
@@ -5962,6 +5965,7 @@ export default function TaskPage(): React.JSX.Element {
                                     <Button
                                       variant="ghost"
                                       size="icon-xs"
+                                      data-contextual-tour-target="tasks-start-workspace"
                                       onClick={(event) => {
                                         event.stopPropagation()
                                         handleUseLinearItem(issue)
@@ -6185,6 +6189,7 @@ export default function TaskPage(): React.JSX.Element {
                                 <Button
                                   variant="ghost"
                                   size="icon-xs"
+                                  data-contextual-tour-target="tasks-start-workspace"
                                   onClick={(event) => {
                                     event.stopPropagation()
                                     handleUseLinearItem(issue)

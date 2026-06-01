@@ -70,6 +70,69 @@ describe('contextual tour definitions', () => {
     expect(tour?.steps[1]?.secondaryAction).toBeUndefined()
   })
 
+  it('points the workspace board tour at the board center, done lane, and settings', () => {
+    const tour = CONTEXTUAL_TOURS.find((entry) => entry.id === 'workspace-board') as
+      | ContextualTour
+      | undefined
+
+    expect(tour?.steps.map((step) => step.title)).toEqual([
+      'Plan work on the board',
+      'Move work through lanes',
+      'Tune density'
+    ])
+    expect(tour?.steps[0]).toMatchObject({
+      targetSelector: '[data-contextual-tour-target="workspace-board-center"]',
+      requiredForStart: true,
+      preferredPlacement: 'bottom'
+    })
+    expect(tour?.steps[1]).toMatchObject({
+      body: 'Drag workspaces between lanes as their status changes.',
+      targetSelector:
+        '[data-contextual-tour-target="workspace-board-done-lane"], [data-contextual-tour-target="workspace-board-lanes"]'
+    })
+    expect(tour?.steps[2]).toMatchObject({
+      body: 'Use board settings to switch between detailed and compact cards.',
+      targetSelector:
+        '[data-contextual-tour-target="workspace-board-settings"], [data-contextual-tour-target="workspace-board-lanes"]'
+    })
+  })
+
+  it('points the tasks tour at the row workspace action before toolbar fallbacks', () => {
+    const tour = CONTEXTUAL_TOURS.find((entry) => entry.id === 'tasks') as
+      | ContextualTour
+      | undefined
+    const step = tour?.steps[2]
+
+    expect(step).toMatchObject({
+      title: 'Start from work items',
+      body: 'Use Start or Open on a task, issue, review, or merge request to bring its context into a workspace.'
+    })
+    expect(step?.targetSelector.split(', ')).toEqual([
+      '[data-contextual-tour-target="tasks-start-workspace"]',
+      '[data-contextual-tour-target="tasks-actions"]',
+      '[data-contextual-tour-target="tasks-search-presets"]'
+    ])
+  })
+
+  it('orders the automations tour as create, then results', () => {
+    const tour = CONTEXTUAL_TOURS.find((entry) => entry.id === 'automations') as
+      | ContextualTour
+      | undefined
+
+    expect(tour?.steps.map((step) => step.title)).toEqual([
+      'What is an automation?',
+      'Find the results'
+    ])
+    expect(tour?.steps[0]).toMatchObject({
+      body: 'Automations run agent work on a schedule. Add an automation by clicking this button.',
+      requiredForStart: true
+    })
+    expect(tour?.steps.map((step) => step.targetSelector)).toEqual([
+      '[data-contextual-tour-target="automations-create"]',
+      '[data-contextual-tour-target="automations-runs"]'
+    ])
+  })
+
   it('allows only workspace creation over its workspace composer modal', () => {
     const modalTours = (CONTEXTUAL_TOURS as readonly ContextualTour[]).filter(
       (tour) => tour.allowedActiveModals?.length
