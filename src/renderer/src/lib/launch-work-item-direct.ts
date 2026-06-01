@@ -1,3 +1,5 @@
+/* eslint-disable max-lines -- Why: direct work-item launch keeps workspace setup,
+   agent startup, and prompt delivery in one audited flow. */
 import { toast } from 'sonner'
 import { useAppStore, type AppState } from '@/store'
 import { pasteDraftWhenAgentReady } from '@/lib/agent-paste-draft'
@@ -71,6 +73,11 @@ export type LaunchWorkItemDirectArgs = {
   /** Explicit agent chosen by an action-time composer. When unavailable after
    *  workspace creation, Orca must not fall back to a different agent. */
   agentOverride?: TuiAgent
+  /** Optional CLI arguments appended to the selected agent command. */
+  agentArgs?: string | null
+  /** Controls whether pasted work-item content remains editable or starts the
+   *  agent immediately after the TUI is ready. */
+  promptDelivery?: 'draft' | 'submit-after-ready'
 }
 
 async function resolveDirectPrStartPoint(
@@ -147,18 +154,23 @@ async function pasteWorkItemDraftWhenAgentReady(args: {
   primaryTabId: string
   startupPlan: NonNullable<ReturnType<typeof buildAgentStartupPlan>>
   content: string
+  submit?: boolean
+  forcePaste?: boolean
   /** Telemetry-only: which agent the renderer thinks it launched, so an
    *  `agent_error` on timeout can carry the right `agent_kind`. */
   agentKind?: ReturnType<typeof tuiAgentToAgentKind>
 }): Promise<void> {
-  const { primaryTabId, startupPlan, content, agentKind } = args
+  const { primaryTabId, startupPlan, content, submit = false, forcePaste = false, agentKind } = args
   await pasteDraftWhenAgentReady({
     tabId: primaryTabId,
     content,
     agent: startupPlan.agent,
+    submit,
+    forcePaste,
     onTimeout: () => {
+      const label = submit ? 'prompt' : 'issue URL'
       toast.message(
-        'Agent took too long to start. The workspace is ready — paste the issue URL when the agent is idle.'
+        `Agent took too long to start. The workspace is ready — paste the ${label} when the agent is idle.`
       )
       // Why: process-startup timeout has no v1 enum slot; the `unknown` slice
       // on the dashboard is the trigger to add one.
@@ -171,7 +183,8 @@ async function pasteWorkItemDraftWhenAgentReady(args: {
 
 /**
  * "Use" flow: create the workspace, activate it, launch the default agent,
- * and paste the work item URL into the agent's prompt as a draft (no submit).
+ * and paste the work item URL into the agent. Most callers leave it as a draft;
+ * fix-check launches can opt into submitting the prompt after the TUI is ready.
  *
  * Falls back to `openModalFallback()` when:
  *   - the repo's `setupRunPolicy` is `'ask'` (the user must pick per-workspace)
@@ -190,7 +203,8 @@ export async function launchWorkItemDirect(args: LaunchWorkItemDirectArgs): Prom
     baseBranch,
     telemetrySource,
     launchSource,
-    agentOverride
+    agentOverride,
+    agentArgs
   } = args
   const store = useAppStore.getState()
   const repo = store.repos.find((r) => r.id === repoId)
@@ -200,9 +214,15 @@ export async function launchWorkItemDirect(args: LaunchWorkItemDirectArgs): Prom
   }
 
   const settings = store.settings
+  const promptDelivery = args.promptDelivery ?? 'draft'
+  const repoConnectionId = repo.connectionId?.trim() || null
   // Why: agent detection shells out and can be cold/slow. Start it now, but
   // don't let it serialize setup-policy resolution or git worktree creation.
-  const detectedAgentsPromise = agentOverride ? null : store.ensureDetectedAgents()
+  const detectedAgentsPromise = agentOverride
+    ? null
+    : repoConnectionId
+      ? store.ensureRemoteDetectedAgents(repoConnectionId)
+      : store.ensureDetectedAgents()
 
   const setupResolution = await resolveSetupDecision(repoId, repo)
   if (setupResolution.kind === 'needs-modal') {
@@ -241,6 +261,7 @@ export async function launchWorkItemDirect(args: LaunchWorkItemDirectArgs): Prom
   let startupPlan: ReturnType<typeof buildAgentStartupPlan> = null
   let effectiveAgent: TuiAgent | null = null
   let draftLaunchedNatively = false
+  let startupPlanFailed = false
   try {
     const result = await store.createWorktree(
       repoId,
@@ -263,9 +284,9 @@ export async function launchWorkItemDirect(args: LaunchWorkItemDirectArgs): Prom
     worktreeId = result.worktree.id
     const worktreePath = result.worktree.path
 
+    const createdConnectionId = getConnectionId(worktreeId)
+    const latestStore = useAppStore.getState()
     if (agentOverride) {
-      const createdConnectionId = getConnectionId(worktreeId)
-      const latestStore = useAppStore.getState()
       const detectedAgents =
         typeof createdConnectionId === 'string'
           ? await latestStore.ensureRemoteDetectedAgents(createdConnectionId)
@@ -283,7 +304,13 @@ export async function launchWorkItemDirect(args: LaunchWorkItemDirectArgs): Prom
       }
       effectiveAgent = agentOverride
     } else {
-      const detectedIds = new Set(await detectedAgentsPromise!)
+      const detectedAgents =
+        createdConnectionId === repoConnectionId
+          ? await detectedAgentsPromise!
+          : typeof createdConnectionId === 'string'
+            ? await latestStore.ensureRemoteDetectedAgents(createdConnectionId)
+            : await latestStore.ensureDetectedAgents()
+      const detectedIds = new Set(detectedAgents)
       effectiveAgent = pickTuiAgent(
         settings?.defaultTuiAgent,
         detectedIds,
@@ -322,20 +349,18 @@ export async function launchWorkItemDirect(args: LaunchWorkItemDirectArgs): Prom
       }
     }
 
-    // Why: prefer a native prefill flag (e.g. `claude --prefill <url>`) when
-    // the agent's CLI exposes one — the TUI mounts with the URL already in
-    // its input box, which sidesteps the readiness/paste race entirely. Fall
-    // back to launching with no prompt + bracketed-paste-after-ready for
-    // every other agent so the URL still lands as a draft (not auto-
-    // submitted as the first turn).
+    // Why: draft launches prefer a native prefill flag when the CLI exposes one;
+    // submit-after-ready launches must avoid native drafts so Orca can send the
+    // generated prompt as the first turn after the TUI is ready.
     const draftLaunchPlan =
-      effectiveAgent === null
+      promptDelivery === 'submit-after-ready' || effectiveAgent === null
         ? null
         : buildAgentDraftLaunchPlan({
             agent: effectiveAgent,
             draft: draftContent,
             cmdOverrides: settings?.agentCmdOverrides ?? {},
-            platform: CLIENT_PLATFORM
+            platform: CLIENT_PLATFORM,
+            agentArgs
           })
     if (draftLaunchPlan) {
       startupPlan = {
@@ -352,8 +377,10 @@ export async function launchWorkItemDirect(args: LaunchWorkItemDirectArgs): Prom
         prompt: '',
         cmdOverrides: settings?.agentCmdOverrides ?? {},
         platform: CLIENT_PLATFORM,
+        agentArgs,
         allowEmptyPromptLaunch: true
       })
+      startupPlanFailed = startupPlan === null
     }
 
     const activation = activateAndRevealWorktree(worktreeId, {
@@ -376,6 +403,11 @@ export async function launchWorkItemDirect(args: LaunchWorkItemDirectArgs): Prom
 
   store.setSidebarOpen(true)
 
+  if (startupPlanFailed) {
+    toast.error('Could not build the agent launch command.')
+    return false
+  }
+
   // Why: at this point the workspace is live and the agent (if any) has
   // been queued on `primaryTabId`. The post-launch paste step below only
   // applies to agents that lacked a native prefill flag; for agents that
@@ -394,6 +426,8 @@ export async function launchWorkItemDirect(args: LaunchWorkItemDirectArgs): Prom
     primaryTabId,
     startupPlan,
     content,
+    submit: promptDelivery === 'submit-after-ready',
+    forcePaste: promptDelivery === 'submit-after-ready',
     ...(effectiveAgent ? { agentKind: tuiAgentToAgentKind(effectiveAgent) } : {})
   })
   return true

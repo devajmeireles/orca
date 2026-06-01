@@ -65,6 +65,7 @@ import { installWindowVisibilityInterval } from '@/lib/window-visibility-interva
 import { useMountedRef } from '@/hooks/useMountedRef'
 import { callRuntimeRpc, getActiveRuntimeTarget } from '@/runtime/runtime-rpc-client'
 import { gitLabPipelineJobsToPRChecks } from '../../../../shared/gitlab-pipeline-checks'
+import { startFixChecksAgent } from '@/lib/fix-checks-agent-launch'
 import { SourceControlAgentActionDialog } from './SourceControlAgentActionDialog'
 import {
   normalizeSourceControlAiSettings,
@@ -209,8 +210,7 @@ export default function ChecksPanel(): React.JSX.Element {
   const [createPrDialogOpen, setCreatePrDialogOpen] = useState(false)
   const [createPrPushFirst, setCreatePrPushFirst] = useState(false)
   const [isPublishingBranch, setIsPublishingBranch] = useState(false)
-  const isResolvingConflictsWithAI = false
-  const isFixingChecksWithAI = false
+  const [isFixingChecksWithAI, setIsFixingChecksWithAI] = useState(false)
   const [agentComposerState, setAgentComposerState] = useState<ChecksAgentComposerState | null>(
     null
   )
@@ -314,6 +314,7 @@ export default function ChecksPanel(): React.JSX.Element {
     setCreatePrDialogOpen(false)
     setCreatePrPushFirst(false)
     setIsPublishingBranch(false)
+    setIsFixingChecksWithAI(false)
     setAgentComposerState(null)
     setHostedReviewCreationSnapshot(null)
     setGitStatusSnapshot(null)
@@ -1440,7 +1441,7 @@ export default function ChecksPanel(): React.JSX.Element {
   }, [activeReview?.provider, activeWorktreeId, activeWorktreePath, pr])
 
   const handleFixChecksWithAI = useCallback(async (): Promise<void> => {
-    if (!activeWorktreeId || !activeReview) {
+    if (!activeWorktreeId || !activeReview || !repo || isFixingChecksWithAI) {
       return
     }
     const broken = getBrokenChecks(checks)
@@ -1448,20 +1449,29 @@ export default function ChecksPanel(): React.JSX.Element {
       toast.message('No broken checks to fix.')
       return
     }
-    setAgentComposerState({
-      actionId: 'fixChecks',
-      title: 'Fix Checks With AI',
-      description: 'Review and edit the full command input before starting an agent.',
-      prompt: buildFixBrokenChecksPrompt({
-        reviewKind: activeReview.provider === 'gitlab' ? 'MR' : 'PR',
-        reviewNumber: activeReview.number,
-        reviewTitle: activeReview.title,
-        reviewUrl: activeReview.url,
-        checks
-      }),
-      launchSource: 'task_page'
+    const basePrompt = buildFixBrokenChecksPrompt({
+      reviewKind: activeReview.provider === 'gitlab' ? 'MR' : 'PR',
+      reviewNumber: activeReview.number,
+      reviewTitle: activeReview.title,
+      reviewUrl: activeReview.url,
+      checks
     })
-  }, [activeReview, activeWorktreeId, checks])
+    setIsFixingChecksWithAI(true)
+    try {
+      const started = await startFixChecksAgent({
+        repoId: repo.id,
+        basePrompt,
+        worktreeId: activeWorktreeId,
+        groupId: activeWorktreeId,
+        launchSource: 'task_page'
+      })
+      if (started) {
+        toast.success('Started an AI agent for the broken checks.')
+      }
+    } finally {
+      setIsFixingChecksWithAI(false)
+    }
+  }, [activeReview, activeWorktreeId, checks, isFixingChecksWithAI, repo])
 
   // Refresh PR (passed to PRActions)
   const handleRefreshPR = useCallback(async () => {
@@ -1701,6 +1711,21 @@ export default function ChecksPanel(): React.JSX.Element {
     }
     return classifyHostedReview(summary, options)
   }, [pr, repo, comments, commentsFetchedAt, commentsLoading, checks])
+
+  // Resolve the saved recipe once per open composer rather than re-running the
+  // lookup for each prop the dialog reads from it.
+  const composerActionId = agentComposerState?.actionId ?? null
+  const activeActionRecipe = React.useMemo(
+    () =>
+      composerActionId
+        ? resolveSourceControlActionRecipe({
+            settings,
+            repo,
+            actionId: composerActionId
+          })
+        : null,
+    [settings, repo, composerActionId]
+  )
 
   const queueBadges = React.useMemo(() => {
     if (!activeReviewClassification) {
@@ -1958,15 +1983,17 @@ export default function ChecksPanel(): React.JSX.Element {
 
       {pr && (
         <>
+          {/* Why: launch busy state lives in SourceControlAgentActionDialog now;
+              the conflict button only opens the composer, so it's never busy here. */}
           <ConflictingFilesSection
             pr={pr}
-            isResolvingWithAI={isResolvingConflictsWithAI}
+            isResolvingWithAI={false}
             onResolveWithAI={() => void handleResolveConflictsWithAI()}
           />
           <MergeConflictNotice
             pr={pr}
             isRefreshingConflictDetails={isRefreshing || conflictDetailsRefreshing}
-            isResolvingWithAI={isResolvingConflictsWithAI}
+            isResolvingWithAI={false}
             onResolveWithAI={() => void handleResolveConflictsWithAI()}
           />
         </>
@@ -2003,24 +2030,9 @@ export default function ChecksPanel(): React.JSX.Element {
         connectionId={activeWorktreeId ? getConnectionId(activeWorktreeId) : null}
         promptDelivery="submit-after-ready"
         launchSource={agentComposerState?.launchSource ?? 'task_page'}
-        savedAgentId={
-          agentComposerState
-            ? (resolveSourceControlActionRecipe({
-                settings,
-                repo,
-                actionId: agentComposerState.actionId
-              }).agentId ?? null)
-            : null
-        }
-        savedCommandInputTemplate={
-          agentComposerState
-            ? (resolveSourceControlActionRecipe({
-                settings,
-                repo,
-                actionId: agentComposerState.actionId
-              }).commandInputTemplate ?? null)
-            : null
-        }
+        savedAgentId={activeActionRecipe?.agentId ?? null}
+        savedCommandInputTemplate={activeActionRecipe?.commandInputTemplate ?? null}
+        savedAgentArgs={activeActionRecipe?.agentArgs ?? null}
         onSaveAgentDefault={saveLaunchActionDefault}
         onLaunched={() => {
           if (agentComposerState?.actionId === 'resolveConflicts') {

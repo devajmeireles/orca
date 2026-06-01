@@ -266,8 +266,8 @@ function Settings(): React.JSX.Element {
       return true
     }
     const shouldDiscard = await confirm({
-      title: 'Discard unsaved Source Control AI prompt changes?',
-      description: 'You have unsaved Source Control AI prompt changes. Leaving will discard them.',
+      title: 'Discard unsaved Source Control AI changes?',
+      description: 'You have unsaved Source Control AI changes. Leaving will discard them.',
       confirmLabel: 'Discard',
       confirmVariant: 'destructive'
     })
@@ -317,7 +317,7 @@ function Settings(): React.JSX.Element {
         return
       }
       // Why: nested dialogs and menus own Escape before Settings page-level
-      // navigation, including the unsaved Source Control AI prompt confirmation dialog.
+      // navigation, including the unsaved Source Control AI confirmation dialog.
       if (hasVisibleOverlay()) {
         return
       }
