@@ -61,7 +61,8 @@ export const TERMINAL_RENDERING_SEARCH_ENTRIES: SettingsSearchEntry[] = [
   },
   {
     title: 'Limit hidden terminal views',
-    description: 'Unload older hidden terminal views while keeping their shells running.',
+    description:
+      'Limit inactive terminal views to reduce resource usage. Terminal sessions keep running.',
     keywords: [
       'terminal',
       'hidden views',

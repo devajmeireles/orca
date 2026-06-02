@@ -239,7 +239,7 @@ export function TerminalPane({
 
           <SearchableSetting
             title="Limit hidden terminal views"
-            description="Unload older hidden terminal views while keeping their shells running."
+            description="Limit inactive terminal views to reduce resource usage. Terminal sessions keep running."
             keywords={[
               'terminal',
               'hidden views',
@@ -254,14 +254,10 @@ export function TerminalPane({
           >
             <SettingsRow
               label="Limit hidden terminal views"
-              description={
-                limitHiddenTerminalViews
-                  ? 'Older hidden local terminal views are unloaded and restored when reopened.'
-                  : 'No limit; all terminal views stay mounted.'
-              }
-              alignTop={limitHiddenTerminalViews}
+              description="Limit inactive terminal views to reduce resource usage. Terminal sessions keep running."
+              alignTop
               control={
-                <div className="flex items-center gap-3">
+                <div className="flex min-w-44 flex-col items-end gap-2">
                   <SettingsSwitch
                     checked={limitHiddenTerminalViews}
                     ariaLabel="Limit hidden terminal views"
@@ -296,9 +292,7 @@ export function TerminalPane({
                       />
                       <span className="text-xs text-muted-foreground">views</span>
                     </div>
-                  ) : (
-                    <span className="text-xs text-muted-foreground">No limit</span>
-                  )}
+                  ) : null}
                 </div>
               }
             />
