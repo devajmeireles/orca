@@ -1,11 +1,13 @@
 ---
 name: computer-use
-description: Use Orca's computer-use CLI to inspect and operate local desktop app windows through accessibility trees, screenshots, and safe UI actions. Use for desktop app interaction: listing apps/windows, reading visible UI, clicking controls, setting field values, typing, pressing keys, scrolling, dragging, or verifying an app's on-screen state. Trigger phrases include "computer use", "orca computer", "control this app", "click in the app", "read the screen", "get app state", "desktop app", and "visible UI".
+description: Use Orca's computer-use CLI to inspect and operate local desktop app windows through accessibility trees, screenshots, and safe UI actions. Use for desktop app interaction: listing apps/windows, reading visible UI, clicking controls, setting field values, typing, pressing keys, scrolling, dragging, or verifying an app's on-screen state. Also use for browser windows, webviews, or desktop app UI outside Orca's built-in browser. Trigger phrases include "computer use", "orca computer", "control this app", "click in the app", "read the screen", "get app state", "desktop app", and "visible UI".
 ---
 
 # Computer Use
 
 Use this skill when the task should operate through Orca's desktop computer-use surface rather than native Codex computer tools, raw AppleScript, ad hoc screenshots, or direct app internals.
+
+Use Orca CLI browser commands only for the browser embedded inside the Orca app. Use Computer Use for browser windows, webviews, and app UI outside that built-in browser.
 
 ## Preconditions
 

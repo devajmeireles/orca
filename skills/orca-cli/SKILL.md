@@ -2,19 +2,21 @@
 name: orca-cli
 description: >-
   Use the public `orca` CLI to operate Orca editor state: workspaces/worktrees,
-  terminals, repos, scheduled automations, worktree comments, and Orca's
-  built-in browser. Use when the user says "$orca-cli", "use orca cli",
+  terminals, repos, scheduled automations, worktree comments, and the browser
+  embedded inside the Orca app. Use when the user says "$orca-cli", "use orca cli",
   "create/spawn workspace", "child workspace", "worktree", "setup hooks",
   "spawn codex/claude in a workspace", "read/wait terminal", "Orca browser",
-  or "browser use with orca cli". Prefer this over raw `git worktree`, ad hoc
+  or "control the browser inside Orca". Prefer this over raw `git worktree`, ad hoc
   PTYs, Playwright, or Computer Use when the task touches Orca-managed state.
+  Browser commands here only control the browser embedded in the Orca app; use
+  Computer Use for browser windows, webviews, or desktop app UI outside Orca.
   For terminal input to another AI agent, use `orchestration`; reading/waiting
   on agent terminals stays here.
 ---
 
 # Orca CLI
 
-Use this skill when work should go through Orca's control plane rather than direct `git`, shell PTYs, local files, ad hoc browser automation, or desktop Computer Use.
+Use this skill when work should go through Orca's control plane rather than direct `git`, shell PTYs, local files, ad hoc browser automation, or desktop Computer Use. Browser commands in this skill control only the browser embedded inside the Orca app.
 
 ## Platform Note
 
@@ -30,11 +32,11 @@ Use `orca` for:
 - sending input to non-agent terminals
 - creating and managing scheduled Orca automations
 - accessing repos known to Orca
-- driving Orca's built-in browser
+- driving the browser embedded inside the Orca app
 
 Do not use it when plain shell tools are simpler and Orca state does not matter.
 
-When the user asks for browser work "with Orca CLI", "with the Orca browser", or similar, use this skill's browser commands. Do not also use Computer Use unless the user explicitly asks to inspect or manipulate a desktop app/window outside Orca's browser automation surface.
+When the user asks for browser work "with Orca CLI", "with the Orca browser", "inside Orca", or similar, use this skill's built-in browser commands. For any browser window, webview, or desktop app UI outside the Orca app, use Computer Use.
 
 ## Preconditions
 
@@ -216,7 +218,9 @@ Terminal guidance:
 
 ## Browser Automation
 
-Use the built-in browser with a snapshot-interact-re-snapshot loop:
+Use these commands only for the browser embedded inside the Orca app. For any browser window, webview, or desktop app UI outside Orca, use Computer Use.
+
+Use a snapshot-interact-re-snapshot loop:
 
 ```bash
 orca goto --url https://example.com --json
@@ -247,8 +251,8 @@ orca exec --command "help" --json
 
 Browser guidance:
 
-- Browser commands are scoped to the current worktree by default. Use `--worktree all` only when cross-worktree access is intentional.
-- Prefer these browser commands over Computer Use for web-page navigation, clicking, filling, screenshots, tabs, and waits when the user asked for Orca CLI/browser automation.
+- Built-in browser commands are scoped to the current worktree by default. Use `--worktree all` only when cross-worktree access is intentional.
+- Prefer these commands over Computer Use only when the target is the browser embedded inside Orca.
 - Re-snapshot after navigation, tab switches, clicks that change the page, and any `browser_stale_ref` error.
 - Use `orca wait --text`, `--url`, `--selector`, or `--load` after async page changes. Avoid bare sleep-style waits except while debugging.
 - For concurrent browser workflows, run `orca tab list --json`, read `tabs[].browserPageId`, and pass `--page <browserPageId>` on later commands.
@@ -259,7 +263,7 @@ Browser guidance:
 ## Important Constraints
 
 - Orca CLI only talks to a running Orca editor.
-- Orca is the source of truth for worktree, terminal, automation, and browser state.
+- Orca is the source of truth for worktree, terminal, automation, and built-in browser state.
 - The public `orca` command is the interface users experience. Agents should validate and use that surface, not repo-local implementation entrypoints.
 
 ## References
@@ -272,4 +276,4 @@ See these docs in this repo when behavior is unclear:
 
 ## Next Action
 
-Resolve `$ORCA` if needed, confirm status unless already checked this turn, then choose the narrowest command for the task: `worktree ps/current/create`, `terminal list/read/wait`, `automations list`, or browser `snapshot`.
+Confirm status unless already checked this turn, then choose the narrowest command for the task: `worktree ps/current/create`, `terminal list/read/wait`, `automations list`, or built-in browser `snapshot`.
