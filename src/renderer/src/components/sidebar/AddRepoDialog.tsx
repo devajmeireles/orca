@@ -6,7 +6,6 @@ import {
   ArrowLeft,
   Globe,
   Monitor,
-  FolderPlus,
   FolderTree,
   Lightbulb,
   Loader2,
@@ -1245,20 +1244,20 @@ const AddRepoDialog = React.memo(function AddRepoDialog() {
               <span>Want to import many repos at once? Select the parent folder.</span>
             </div>
 
+            {/* Secondary link rather than a fourth card — create-from-scratch
+               is a less common path than importing. See orca#763. */}
             <div className="flex items-center justify-center pt-1">
-              <Button
+              <button
                 type="button"
                 onClick={() => {
                   setCreateError(null)
                   setStep('create')
                 }}
                 disabled={isAdding}
-                variant="outline"
-                size="sm"
+                className="text-xs text-muted-foreground hover:text-foreground transition-colors cursor-pointer rounded focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:cursor-default disabled:opacity-40"
               >
-                <FolderPlus className="size-3.5" />
                 Or start a new project from scratch
-              </Button>
+              </button>
             </div>
           </>
         ) : step === 'remote' ? (
