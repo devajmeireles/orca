@@ -27,8 +27,9 @@ type UpdaterHandlerContext = {
   getPendingInstallVersion: () => string
   getUserInitiatedCheck: () => boolean
   hasNewerDownloadedVersion: () => boolean
+  hasPendingQuitAndInstall: () => boolean
   markMissingManifestPrereleaseFallbackChecking: () => void
-  performQuitAndInstall: () => void
+  performQuitAndInstall: () => boolean
   recordCompletedUpdateCheck: () => void
   sendCheckFailureStatus: (
     message: string,
@@ -42,6 +43,7 @@ type UpdaterHandlerContext = {
   shouldSuppressMissingManifestPrereleaseFallbackEvent: (message: string, error: unknown) => boolean
   suppressMissingManifestPrereleaseFallbackPromiseFailure: (message: string) => void
   setAvailableReleaseUrl: (releaseUrl: string | null) => void
+  setAvailableUpdateChecksum: (checksum: string | null) => void
   setAvailableVersion: (version: string | null) => void
   setUserInitiatedCheck: (value: boolean) => void
 }
@@ -58,6 +60,7 @@ export function registerAutoUpdaterHandlers({
   getPendingInstallVersion,
   getUserInitiatedCheck,
   hasNewerDownloadedVersion,
+  hasPendingQuitAndInstall,
   markMissingManifestPrereleaseFallbackChecking,
   performQuitAndInstall,
   recordCompletedUpdateCheck,
@@ -68,6 +71,7 @@ export function registerAutoUpdaterHandlers({
   shouldSuppressMissingManifestPrereleaseFallbackEvent,
   suppressMissingManifestPrereleaseFallbackPromiseFailure,
   setAvailableReleaseUrl,
+  setAvailableUpdateChecksum,
   setAvailableVersion,
   setUserInitiatedCheck
 }: UpdaterHandlerContext): void {
@@ -107,6 +111,17 @@ export function registerAutoUpdaterHandlers({
         sendStatus
       )
     ) {
+      event.preventDefault()
+      return
+    }
+
+    const status = getCurrentStatus()
+    const shouldRouteReadyInstallQuit =
+      (status.state === 'downloaded' && hasNewerDownloadedVersion()) || hasPendingQuitAndInstall()
+    if (shouldRouteReadyInstallQuit && performQuitAndInstall()) {
+      // Why: electron-updater can auto-install on ordinary app quit, but that
+      // bypasses our marker/relaunch guard. Route ready-update quits through
+      // the same install path as the explicit Restart button.
       event.preventDefault()
     }
   })
@@ -169,6 +184,7 @@ export function registerAutoUpdaterHandlers({
       // timestamp persisted for a check that never showed a result.
       setAvailableVersion(info.version)
       setAvailableReleaseUrl(null)
+      setAvailableUpdateChecksum(extractUpdateChecksum(info))
       if (missingManifestFallback || publishingWindowLastGoodCheck) {
         // Why: offering a previous/last-good release is only a temporary
         // fallback; keep probing soon so users can move to the newest tag once
@@ -257,4 +273,27 @@ export function registerAutoUpdaterHandlers({
     }
     sendErrorStatus(message, wasUserInitiated || undefined)
   })
+}
+
+function extractUpdateChecksum(info: unknown): string | null {
+  if (
+    typeof info !== 'object' ||
+    info === null ||
+    !('files' in info) ||
+    !Array.isArray(info.files)
+  ) {
+    return null
+  }
+  for (const file of info.files) {
+    if (
+      typeof file === 'object' &&
+      file !== null &&
+      'sha512' in file &&
+      typeof file.sha512 === 'string' &&
+      file.sha512.length > 0
+    ) {
+      return file.sha512
+    }
+  }
+  return null
 }

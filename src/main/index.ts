@@ -123,6 +123,8 @@ import {
 import type { AgentStatusState } from '../shared/agent-status-types'
 import { KeybindingService } from './keybindings/keybinding-service'
 import { applyElectronProxySettings } from './network/proxy-settings'
+import { shouldWaitForAsyncQuitCleanup } from './update-quit-policy'
+import { quitIfRelaunchedDuringMacUpdate } from './mac-update-relaunch-guard'
 
 let mainWindow: BrowserWindow | null = null
 /** Whether a manual app.quit() (Cmd+Q, etc.) is in progress. Shared with the
@@ -247,6 +249,7 @@ if (startupDiagnosticsEnabled) {
     e2eUserData: Boolean(process.env.ORCA_E2E_USER_DATA_DIR)
   })
 }
+const isStaleRelaunchDuringMacUpdate = quitIfRelaunchedDuringMacUpdate()
 
 function focusExistingWindow(): void {
   focusExistingMainWindow({
@@ -316,8 +319,9 @@ if (bypassSingleInstanceLock) {
   // Electron reports a false lock loss before any normal app logs exist.
   logSingleInstanceLockBypass()
 }
-const hasSingleInstanceLock =
-  is.dev && !isServeMode
+const hasSingleInstanceLock = isStaleRelaunchDuringMacUpdate
+  ? true
+  : is.dev && !isServeMode
     ? true
     : bypassSingleInstanceLock
       ? true
@@ -326,7 +330,8 @@ if (startupDiagnosticsEnabled) {
   logStartupDiagnostic('single-instance-lock-result', {
     acquired: hasSingleInstanceLock,
     bypassed: bypassSingleInstanceLock,
-    skippedForDev: is.dev && !isServeMode
+    skippedForDev: is.dev && !isServeMode,
+    staleUpdateRelaunch: isStaleRelaunchDuringMacUpdate
   })
 }
 if (!hasSingleInstanceLock) {
@@ -335,13 +340,14 @@ if (!hasSingleInstanceLock) {
   logSingleInstanceLockFailure()
   app.quit()
 }
+const shouldRunStartupSideEffects = hasSingleInstanceLock && !isStaleRelaunchDuringMacUpdate
 
 // Why: when the lock is held by another process, we've already called
 // app.quit() above. Skip every remaining file-writing side effect so this
 // transient process never touches userData, and let handler registration
 // below happen — those handlers only fire after whenReady, which app.quit()
 // prevents from ever dispatching.
-if (hasSingleInstanceLock) {
+if (shouldRunStartupSideEffects) {
   // Why: dev parent shutdown coupling is only for electron-vite desktop runs.
   // `orca serve` may be launched through a CLI shim or background shell whose
   // parent lifetime is not the intended server lifetime.
@@ -1398,6 +1404,18 @@ app.on('will-quit', (e) => {
   killAllPty()
   const watcherShutdown = shutdownWatchersOnce()
   store?.flush()
+
+  if (
+    !shouldWaitForAsyncQuitCleanup({
+      daemonDisconnectDone,
+      isUpdaterInstallQuit: isQuittingForUpdate()
+    })
+  ) {
+    // Why: daemon PTYs intentionally survive app updates, but ShipIt needs the
+    // target app process itself to exit. The normal async disconnect/checkpoint
+    // barrier can be delayed by stale legacy daemons; skip it for updater quits.
+    return
+  }
 
   // Why: disconnectDaemon writes final checkpoints via async getSnapshot RPCs.
   // Without preventDefault, Electron exits before the RPCs complete and the
