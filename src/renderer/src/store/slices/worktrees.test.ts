@@ -106,6 +106,7 @@ function createTestStore() {
         shutdownWorktreeTerminals: vi.fn().mockResolvedValue(undefined),
         shutdownWorktreeBrowsers: vi.fn().mockResolvedValue(undefined),
         tabsByWorktree: {},
+        sleptWorktreeIds: {},
         tabBarOrderByWorktree: {},
         pendingReconnectTabByWorktree: {},
         activeTabIdByWorktree: {},
@@ -2729,6 +2730,19 @@ describe('worktree unread (show-until-interact)', () => {
         updates: { isUnread: false }
       })
     )
+  })
+
+  it('clears an explicit slept marker when activating the worktree', () => {
+    const store = createTestStore()
+    const worktree = makeWorktree({ id: 'repo1::/path/wt1', repoId: 'repo1', path: '/path/wt1' })
+    store.setState({
+      worktreesByRepo: { repo1: [worktree] },
+      sleptWorktreeIds: { [worktree.id]: true }
+    } as Partial<AppState>)
+
+    store.getState().setActiveWorktree(worktree.id)
+
+    expect(store.getState().sleptWorktreeIds[worktree.id]).toBeUndefined()
   })
 })
 

@@ -657,6 +657,7 @@ function buildWorktreePurgeState(s: AppState, worktreeIds: string[]): Partial<Ap
     activeTabIdByWorktree: omitByWorktree(s.activeTabIdByWorktree),
     tabBarOrderByWorktree: omitByWorktree(s.tabBarOrderByWorktree),
     pendingReconnectTabByWorktree: omitByWorktree(s.pendingReconnectTabByWorktree),
+    sleptWorktreeIds: omitByWorktree(s.sleptWorktreeIds),
     rightSidebarTabByWorktree: omitByWorktree(s.rightSidebarTabByWorktree),
     // Split-tab / unified tab state
     unifiedTabsByWorktree: omitByWorktree(s.unifiedTabsByWorktree),
@@ -1334,6 +1335,14 @@ export const createWorktreeSlice: StateCreator<AppState, [], [], WorktreeSlice> 
                 return next
               })()
             : s.lastVisitedAtByWorktreeId
+        const nextSleptWorktreeIds =
+          worktreeId in s.sleptWorktreeIds
+            ? (() => {
+                const next = { ...s.sleptWorktreeIds }
+                delete next[worktreeId]
+                return next
+              })()
+            : s.sleptWorktreeIds
         return {
           worktreesByRepo: next,
           worktreeLineageById: nextLineage,
@@ -1392,6 +1401,7 @@ export const createWorktreeSlice: StateCreator<AppState, [], [], WorktreeSlice> 
           activeTabType: removedActiveWorktree || activeFileCleared ? 'terminal' : s.activeTabType,
           everActivatedWorktreeIds: nextEverActivatedWorktreeIds,
           lastVisitedAtByWorktreeId: nextLastVisitedAtByWorktreeId,
+          sleptWorktreeIds: nextSleptWorktreeIds,
           sortEpoch: s.sortEpoch + 1
         }
       })
@@ -2170,6 +2180,14 @@ export const createWorktreeSlice: StateCreator<AppState, [], [], WorktreeSlice> 
       const nextEverActivated = isFirstActivation
         ? new Set([...s.everActivatedWorktreeIds, worktreeId!])
         : s.everActivatedWorktreeIds
+      const nextSleptWorktreeIds =
+        worktreeId in s.sleptWorktreeIds
+          ? (() => {
+              const next = { ...s.sleptWorktreeIds }
+              delete next[worktreeId]
+              return next
+            })()
+          : s.sleptWorktreeIds
       const nextWorktrees = shouldClearUnread
         ? applyWorktreeUpdates(s.worktreesByRepo, worktreeId, metaUpdates)
         : s.worktreesByRepo
@@ -2204,6 +2222,7 @@ export const createWorktreeSlice: StateCreator<AppState, [], [], WorktreeSlice> 
         s.activeTabId !== activeTabId ||
         nextActiveTabTypeByWorktree !== s.activeTabTypeByWorktree ||
         nextEverActivated !== s.everActivatedWorktreeIds ||
+        nextSleptWorktreeIds !== s.sleptWorktreeIds ||
         nextWorktrees !== s.worktreesByRepo ||
         nextDetectedWorktrees !== s.detectedWorktreesByRepo
       if (!hasStateChange) {
@@ -2221,6 +2240,9 @@ export const createWorktreeSlice: StateCreator<AppState, [], [], WorktreeSlice> 
         activeTabTypeByWorktree: nextActiveTabTypeByWorktree,
         activeTabId,
         everActivatedWorktreeIds: nextEverActivated,
+        ...(nextSleptWorktreeIds !== s.sleptWorktreeIds
+          ? { sleptWorktreeIds: nextSleptWorktreeIds }
+          : {}),
         ...(nextWorktrees !== s.worktreesByRepo ? { worktreesByRepo: nextWorktrees } : {}),
         ...(nextDetectedWorktrees !== s.detectedWorktreesByRepo
           ? { detectedWorktreesByRepo: nextDetectedWorktrees }

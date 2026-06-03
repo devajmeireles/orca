@@ -53,6 +53,7 @@ export type WorkspaceSessionSnapshot = Pick<
   | 'lastKnownRelayPtyIdByTabId'
   | 'lastVisitedAtByWorktreeId'
   | 'defaultTerminalTabsAppliedByWorktreeId'
+  | 'sleptWorktreeIds'
 >
 
 // Why: the App-level Zustand subscriber that debounces session writes uses
@@ -85,7 +86,8 @@ export const SESSION_RELEVANT_FIELDS = [
   'worktreesByRepo',
   'lastKnownRelayPtyIdByTabId',
   'lastVisitedAtByWorktreeId',
-  'defaultTerminalTabsAppliedByWorktreeId'
+  'defaultTerminalTabsAppliedByWorktreeId',
+  'sleptWorktreeIds'
 ] as const satisfies readonly (keyof WorkspaceSessionSnapshot)[]
 
 type _MissingSessionField = Exclude<
@@ -311,6 +313,14 @@ export function buildLastVisitedAtByWorktreeId(
     : undefined
 }
 
+export function buildSleptWorktreeIds(
+  snapshot: WorkspaceSessionSnapshot
+): WorkspaceSessionState['sleptWorktreeIds'] {
+  return snapshot.sleptWorktreeIds && Object.keys(snapshot.sleptWorktreeIds).length > 0
+    ? snapshot.sleptWorktreeIds
+    : undefined
+}
+
 export function buildWorkspaceSessionPayload(
   snapshot: WorkspaceSessionSnapshot
 ): WorkspaceSessionState {
@@ -356,7 +366,8 @@ export function buildWorkspaceSessionPayload(
       snapshot.defaultTerminalTabsAppliedByWorktreeId &&
       Object.keys(snapshot.defaultTerminalTabsAppliedByWorktreeId).length > 0
         ? snapshot.defaultTerminalTabsAppliedByWorktreeId
-        : undefined
+        : undefined,
+    sleptWorktreeIds: buildSleptWorktreeIds(snapshot)
   }
 
   return pruneLocalTerminalScrollbackBuffers(payload, snapshot.repos)

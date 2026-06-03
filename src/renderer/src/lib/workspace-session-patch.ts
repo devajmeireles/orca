@@ -8,6 +8,7 @@ import {
   buildPersistedBrowserPagesByWorkspace,
   buildPersistedBrowserTabsByWorktree,
   buildSanitizedTabsByWorktree,
+  buildSleptWorktreeIds,
   buildTerminalSessionData,
   type WorkspaceSessionSnapshot
 } from './workspace-session'
@@ -128,6 +129,9 @@ export function buildWorkspaceSessionPatch(
       Object.keys(snapshot.defaultTerminalTabsAppliedByWorktreeId).length > 0
         ? snapshot.defaultTerminalTabsAppliedByWorktreeId
         : undefined
+  }
+  if (changed.has('sleptWorktreeIds')) {
+    patch.sleptWorktreeIds = buildSleptWorktreeIds(snapshot)
   }
 
   return patch

@@ -713,6 +713,9 @@ export type WorkspaceSessionState = {
    *  considered. Persisted so closing all tabs and re-opening the workspace
    *  does not recreate the template. */
   defaultTerminalTabsAppliedByWorktreeId?: Record<string, true>
+  /** Worktrees the user explicitly slept. Inactive terminal state alone does
+   *  not imply sleep; a worktree only sleeps through the user sleep action. */
+  sleptWorktreeIds?: Record<string, true>
 }
 
 export type WorkspaceSessionPatch = Partial<WorkspaceSessionState>
