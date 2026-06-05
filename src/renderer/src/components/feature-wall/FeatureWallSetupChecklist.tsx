@@ -310,11 +310,13 @@ export function FeatureWallSetupChecklist(
                     <SplitTerminalShortcutHint />
                   </div>
                 ) : null}
+                {/* Action lives under the caption, not after the grid, so it sits just
+                    below the copy instead of being pushed down by the taller visual. */}
+                <div className="mt-5 min-w-0">
+                  <SelectedStepAction {...props} />
+                </div>
               </div>
               <SelectedStepVisual stepId={activeStep.id} />
-            </div>
-            <div className="min-w-0">
-              <SelectedStepAction {...props} />
             </div>
           </div>
         ) : null}
