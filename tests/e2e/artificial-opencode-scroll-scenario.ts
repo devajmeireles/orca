@@ -232,7 +232,8 @@ async function scrollActiveTerminalByApi(page: Page): Promise<void> {
     }
     // Why: Linux/Xvfb can lose synthetic wheel/DOM scroll events under flood;
     // xterm's public API keeps this probe about viewport responsiveness.
-    pane.terminal.scrollLines(-20)
+    const targetLine = Math.max(0, pane.terminal.buffer.active.viewportY - 20)
+    pane.terminal.scrollToLine(targetLine)
   })
 }
 
