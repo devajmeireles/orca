@@ -4,7 +4,7 @@ import remarkParse from 'remark-parse'
 import { unified } from 'unified'
 import { MarkdownHeadingSlugger } from './markdown-heading-slug'
 
-export type MarkdownTocLevel = 2 | 3
+export type MarkdownTocLevel = 1 | 2 | 3
 
 export type MarkdownTocItem = {
   children: MarkdownTocItem[]
@@ -23,7 +23,7 @@ const htmlEntitiesForToc = new Map([
 ])
 
 function isMarkdownTocLevel(value: number): value is MarkdownTocLevel {
-  return value === 2 || value === 3
+  return value === 1 || value === 2 || value === 3
 }
 
 // Scoped local fork of the tiny entities@6.0.1 surface Orca used here.
@@ -99,7 +99,7 @@ function markdownAstNodeToText(node: MarkdownAstNode): string {
 
 export function buildMarkdownTableOfContents(markdown: string): MarkdownTocItem[] {
   const slugger = new MarkdownHeadingSlugger()
-  const root: MarkdownTocItem = { id: 'toc-root', level: 1, title: '', children: [] }
+  const root = { id: 'toc-root', level: 1 as const, title: '', children: [] }
   const stack: MarkdownTocItem[] = [root]
 
   // Why: parsing Markdown keeps the TOC aligned with rendered setext/GFM/entity
