@@ -151,6 +151,7 @@ import {
   registerSshPtyProvider,
   clearProviderPtyState,
   deletePtyOwnership,
+  getPtyRendererDeliveryDebugSnapshot,
   getPtyIdForPaneKey,
   hasPendingRendererSerializerForPaneKey,
   setPtyOwnership,
@@ -4223,6 +4224,15 @@ describe('registerPtyHandlers', () => {
       vi.advanceTimersByTime(1)
       expect(mainWindow.webContents.send).toHaveBeenCalledTimes(32)
       expect(vi.getTimerCount()).toBe(0)
+      expect(getPtyRendererDeliveryDebugSnapshot()).toMatchObject({
+        pendingPtyCount: 1,
+        pendingChars: 88 * 1024,
+        maxPendingCharsByPty: 88 * 1024,
+        rendererInFlightPtyCount: 1,
+        rendererInFlightChars: 512 * 1024,
+        maxRendererInFlightCharsByPty: 512 * 1024,
+        flushScheduled: false
+      })
 
       secondProc.emitData('second-terminal-output')
       vi.advanceTimersByTime(8)
@@ -4240,6 +4250,11 @@ describe('registerPtyHandlers', () => {
       expect(mainWindow.webContents.send).toHaveBeenNthCalledWith(34, 'pty:data', {
         id: firstSpawn.id,
         data: 'x'.repeat(16 * 1024)
+      })
+      expect(getPtyRendererDeliveryDebugSnapshot()).toMatchObject({
+        pendingPtyCount: 1,
+        pendingChars: 72 * 1024,
+        rendererInFlightChars: 512 * 1024 + 'second-terminal-output'.length
       })
     } finally {
       vi.useRealTimers()
@@ -4456,6 +4471,11 @@ describe('registerPtyHandlers', () => {
       expect(mainWindow.webContents.send).toHaveBeenNthCalledWith(513, 'pty:data', {
         id: spawns[activeIndex]!.id,
         data: 'active-output'
+      })
+      expect(getPtyRendererDeliveryDebugSnapshot()).toMatchObject({
+        activeRendererPtyCount: 1,
+        pendingPtyCount: procs.length - 1,
+        rendererInFlightChars: 8 * 1024 * 1024 + 'active-output'.length
       })
       ackData(null, { id: spawns[0]!.id, charCount: 16 * 1024 })
     } finally {

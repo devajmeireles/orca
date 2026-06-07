@@ -893,6 +893,36 @@ export function rebindLocalProviderListeners(): void {
   rebindProviderListeners?.()
 }
 
+export type PtyRendererDeliveryDebugSnapshot = {
+  pendingPtyCount: number
+  pendingChars: number
+  maxPendingCharsByPty: number
+  rendererInFlightPtyCount: number
+  rendererInFlightChars: number
+  maxRendererInFlightCharsByPty: number
+  activeRendererPtyCount: number
+  flushScheduled: boolean
+}
+
+const EMPTY_PTY_RENDERER_DELIVERY_DEBUG_SNAPSHOT: PtyRendererDeliveryDebugSnapshot = {
+  pendingPtyCount: 0,
+  pendingChars: 0,
+  maxPendingCharsByPty: 0,
+  rendererInFlightPtyCount: 0,
+  rendererInFlightChars: 0,
+  maxRendererInFlightCharsByPty: 0,
+  activeRendererPtyCount: 0,
+  flushScheduled: false
+}
+
+let readPtyRendererDeliveryDebugSnapshot = (): PtyRendererDeliveryDebugSnapshot => ({
+  ...EMPTY_PTY_RENDERER_DELIVERY_DEBUG_SNAPSHOT
+})
+
+export function getPtyRendererDeliveryDebugSnapshot(): PtyRendererDeliveryDebugSnapshot {
+  return readPtyRendererDeliveryDebugSnapshot()
+}
+
 function clearDidFinishLoadHandler(): void {
   if (didFinishLoadHandler && didFinishLoadWebContents) {
     didFinishLoadWebContents.removeListener('did-finish-load', didFinishLoadHandler)
@@ -1032,6 +1062,34 @@ export function registerPtyHandlers(
   const INTERACTIVE_OUTPUT_MAX_CHARS = 1024
   const INTERACTIVE_REDRAW_MAX_CHARS = PTY_BATCH_FLUSH_CHUNK_CHARS
   const INTERACTIVE_OUTPUT_BUDGET_CHARS = 32 * 1024
+
+  function getMaxMapValue(values: Iterable<number>): number {
+    let max = 0
+    for (const value of values) {
+      max = Math.max(max, value)
+    }
+    return max
+  }
+
+  readPtyRendererDeliveryDebugSnapshot = () => {
+    let pendingChars = 0
+    let maxPendingCharsByPty = 0
+    for (const pending of pendingData.values()) {
+      const chars = pending.data.length
+      pendingChars += chars
+      maxPendingCharsByPty = Math.max(maxPendingCharsByPty, chars)
+    }
+    return {
+      pendingPtyCount: pendingData.size,
+      pendingChars,
+      maxPendingCharsByPty,
+      rendererInFlightPtyCount: rendererInFlightCharsByPty.size,
+      rendererInFlightChars: rendererInFlightTotalChars,
+      maxRendererInFlightCharsByPty: getMaxMapValue(rendererInFlightCharsByPty.values()),
+      activeRendererPtyCount: activeRendererPtys.size,
+      flushScheduled: flushTimer !== null
+    }
+  }
 
   function isLikelyInteractiveRedraw(data: string): boolean {
     if (data.length <= INTERACTIVE_OUTPUT_MAX_CHARS) {
