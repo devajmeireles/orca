@@ -26,7 +26,6 @@ export type PaneSpawnHints = {
 export type ClosedPaneInfo = {
   paneId: number
   leafId: TerminalLeafId
-  terminal?: Terminal
 }
 
 export type PaneManagerOptions = {
