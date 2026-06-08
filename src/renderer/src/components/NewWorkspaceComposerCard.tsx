@@ -10,8 +10,7 @@ import {
   FolderPlus,
   LoaderCircle,
   PlugZap,
-  Settings2,
-  Sparkles
+  Settings2
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
@@ -35,7 +34,6 @@ import SparseCheckoutPresetSelect from '@/components/sparse/SparseCheckoutPreset
 import SmartWorkspaceNameField, {
   type SmartWorkspaceNameSelection
 } from '@/components/new-workspace/SmartWorkspaceNameField'
-import AutoRenameBranchHint from '@/components/new-workspace/AutoRenameBranchHint'
 import type { SetupConfig } from '@/lib/new-workspace'
 import type { WorkspaceCreateErrorDisplay } from '@/lib/workspace-create-error-format'
 import type { SshConnectionStatus } from '../../../shared/ssh-types'
@@ -264,7 +262,6 @@ export default function NewWorkspaceComposerCard({
   const defaultTuiAgent = useAppStore((s) => s.settings?.defaultTuiAgent ?? null)
   const disabledTuiAgents = useAppStore((s) => s.settings?.disabledTuiAgents ?? [])
   const updateSettings = useAppStore((s) => s.updateSettings)
-  const autoRenameBranchFromWork = useAppStore((s) => s.settings?.autoRenameBranchFromWork ?? false)
   const nameInputFocusFrameRef = React.useRef<number | null>(null)
   const submitShortcutModifierLabel = getScreenSubmitModifierLabel()
   const selectedRepoName = React.useMemo(() => {
@@ -455,23 +452,10 @@ export default function NewWorkspaceComposerCard({
         </div>
 
         <div className="min-w-0 space-y-1" data-contextual-tour-target="workspace-creation-name">
-          <div className="flex items-center justify-between gap-2">
-            <label className="min-w-0 truncate text-xs font-medium text-muted-foreground">
-              {selectedRepoIsGit ? "Name or 'Create From'" : 'Workspace name'}{' '}
-              <span className="text-muted-foreground/70">[Optional]</span>
-            </label>
-            {selectedRepoIsGit ? (
-              <div className="flex min-w-0 items-center justify-end gap-1.5">
-                {autoRenameBranchFromWork ? (
-                  <span className="flex min-w-0 items-center gap-1 truncate text-[11px] text-muted-foreground">
-                    <Sparkles className="size-3 shrink-0" />
-                    <span className="truncate">Auto-named if left blank</span>
-                  </span>
-                ) : null}
-                <AutoRenameBranchHint />
-              </div>
-            ) : null}
-          </div>
+          <label className="block min-w-0 truncate text-xs font-medium text-muted-foreground">
+            {selectedRepoIsGit ? "Name or 'Create From'" : 'Workspace name'}{' '}
+            <span className="text-muted-foreground/70">[Optional]</span>
+          </label>
           <SmartWorkspaceNameField
             inputRef={nameInputRef}
             repos={eligibleRepos}
