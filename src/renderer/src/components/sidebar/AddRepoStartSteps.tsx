@@ -234,9 +234,12 @@ const AddRepoPrimaryStartAction = ({
     data-add-repo-action
     className={cn(
       'h-auto min-h-20 w-full justify-start gap-4 whitespace-normal px-4 py-4 text-left',
-      // Match the secondary rows' surface so the unselected card isn't a lighter gray than them;
-      // the outline variant's tinted/shadowed surface only suits standalone buttons.
-      !selected && 'bg-background shadow-none dark:bg-background'
+      // Transparent border holds the box size steady across the outline↔default variant swap,
+      // and dropping the focus ring keeps the selected card borderless like the filled rows
+      // (the fill + ⏎ chip already mark focus, since focus drives selection here).
+      selected
+        ? 'border border-transparent focus-visible:border-transparent focus-visible:ring-0'
+        : 'bg-background shadow-none dark:bg-background'
     )}
   >
     <span
