@@ -199,3 +199,137 @@ describe('remote runtime terminal data subscriptions', () => {
     expect(unsubscribe).toHaveBeenCalledOnce()
   })
 })
+
+describe('remote runtime terminal multiplex ACK gate', () => {
+  const runtimeSubscribe = vi.fn()
+  const sendBinary = vi.fn()
+  const unsubscribe = vi.fn()
+  let callbacks: {
+    onResponse: (response: unknown) => void
+    onBinary?: (bytes: Uint8Array<ArrayBufferLike>) => void
+    onError?: (error: { message: string }) => void
+    onClose?: () => void
+  } | null = null
+
+  beforeEach(async () => {
+    vi.resetModules()
+    vi.clearAllMocks()
+    callbacks = null
+    runtimeSubscribe.mockImplementation(async (_args: unknown, nextCallbacks: typeof callbacks) => {
+      callbacks = nextCallbacks
+      queueMicrotask(() =>
+        callbacks?.onResponse({
+          ok: true,
+          result: { type: 'ready' }
+        })
+      )
+      return { unsubscribe, sendBinary }
+    })
+    vi.stubGlobal('window', {
+      api: {
+        e2e: {
+          getConfig: () => ({ exposeStore: true })
+        },
+        runtimeEnvironments: {
+          subscribe: runtimeSubscribe
+        }
+      }
+    })
+  })
+
+  afterEach(() => {
+    vi.unstubAllGlobals()
+    vi.resetModules()
+  })
+
+  it('holds and releases ACKs for selected remote terminal streams only', async () => {
+    const { getRemoteRuntimeTerminalMultiplexer, resetRemoteRuntimeTerminalMultiplexersForTests } =
+      await import('./remote-runtime-terminal-multiplexer')
+    resetRemoteRuntimeTerminalMultiplexersForTests()
+
+    const multiplexer = getRemoteRuntimeTerminalMultiplexer('env-ack-gate')
+    const heldTerminal = await multiplexer.subscribeTerminal({
+      terminal: 'terminal-held',
+      client: { id: 'desktop-held', type: 'desktop' },
+      callbacks: {
+        onData: vi.fn(),
+        onSnapshot: vi.fn()
+      }
+    })
+    const liveTerminal = await multiplexer.subscribeTerminal({
+      terminal: 'terminal-live',
+      client: { id: 'desktop-live', type: 'desktop' },
+      callbacks: {
+        onData: vi.fn(),
+        onSnapshot: vi.fn()
+      }
+    })
+
+    await vi.waitFor(() => expect(sendBinary).toHaveBeenCalledTimes(2))
+    const heldStreamId = heldTerminal.streamId
+    const liveStreamId = liveTerminal.streamId
+    const gate = (
+      window as typeof window & {
+        __remoteTerminalMultiplexAckGate?: {
+          hold: (terminals: string[]) => void
+          release: () => void
+          snapshot: () => {
+            heldTerminalCount: number
+            heldStreamCount: number
+            heldAckChars: number
+            releasedAckChars: number
+          }
+        }
+      }
+    ).__remoteTerminalMultiplexAckGate
+    expect(gate).toBeDefined()
+    gate?.hold(['terminal-held'])
+    sendBinary.mockClear()
+
+    callbacks?.onBinary?.(
+      encodeTerminalStreamFrame({
+        opcode: TerminalStreamOpcode.Output,
+        streamId: heldStreamId,
+        seq: 1,
+        payload: encodeTerminalStreamText('held-output')
+      })
+    )
+    callbacks?.onBinary?.(
+      encodeTerminalStreamFrame({
+        opcode: TerminalStreamOpcode.Output,
+        streamId: liveStreamId,
+        seq: 2,
+        payload: encodeTerminalStreamText('live-output')
+      })
+    )
+
+    const immediateAckFrames = sendBinary.mock.calls
+      .map((call) => decodeTerminalStreamFrame(call[0]))
+      .filter((frame) => frame?.opcode === TerminalStreamOpcode.Ack)
+    expect(immediateAckFrames).toHaveLength(1)
+    expect(immediateAckFrames[0]?.streamId).toBe(liveStreamId)
+    expect(gate?.snapshot()).toMatchObject({
+      heldTerminalCount: 1,
+      heldStreamCount: 1,
+      heldAckChars: 'held-output'.length
+    })
+
+    gate?.release()
+    const allAckFrames = sendBinary.mock.calls
+      .map((call) => decodeTerminalStreamFrame(call[0]))
+      .filter((frame) => frame?.opcode === TerminalStreamOpcode.Ack)
+    const releasedAck = allAckFrames.find((frame) => frame?.streamId === heldStreamId)
+    expect(releasedAck && decodeTerminalStreamJson(releasedAck.payload)).toEqual({
+      bytes: 'held-output'.length
+    })
+    expect(gate?.snapshot()).toMatchObject({
+      heldTerminalCount: 0,
+      heldStreamCount: 0,
+      heldAckChars: 0,
+      releasedAckChars: 'held-output'.length
+    })
+
+    heldTerminal.close()
+    liveTerminal.close()
+  })
+})
