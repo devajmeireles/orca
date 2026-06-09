@@ -76,8 +76,11 @@ describe('buildDefaultTerminalOptions', () => {
     expect(buildDefaultTerminalOptions().cursorInactiveStyle).toBe('outline')
   })
 
-  it('does not reserve a classic scrollbar gutter when fitting terminal columns', () => {
-    expect(buildDefaultTerminalOptions().scrollbar?.width).toBe(0)
+  it('shows the slim xterm scrollbar in its reserved gutter', () => {
+    // Why: 7px gutter is an accepted ~1-column cost (VS Code reserves 14);
+    // the v1.4.51 table corruption that once forced width 0 was the ZWJ
+    // width bug, fixed separately by the Orca unicode provider.
+    expect(buildDefaultTerminalOptions().scrollbar?.width).toBe(7)
   })
 
   it('only uses inactive outline for block cursors', () => {
