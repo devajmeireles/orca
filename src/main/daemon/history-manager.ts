@@ -103,6 +103,24 @@ export class HistoryManager {
     })
   }
 
+  // Why: wake after sleep re-spawns a session whose history was closed by the
+  // sleep-time kill. Re-register the writer without deleting checkpoint.json
+  // (still the only recovery data until the next tick) and clear endedAt so
+  // the next sleep can cold-restore this session again.
+  reopenSession(sessionId: string): void {
+    this.disabledSessions.delete(sessionId)
+    this.registerWriter(sessionId)
+    const writer = this.writers.get(sessionId)
+    if (!writer) {
+      return
+    }
+    try {
+      this.updateMeta(writer.dir, { endedAt: null, exitCode: null })
+    } catch (err) {
+      this.handleWriteError(sessionId, err)
+    }
+  }
+
   // Why: replaces the old appendData (which wrote every PTY chunk to disk).
   // Checkpoints happen every ~5 seconds from a timer, not on every data event,
   // so disk I/O drops from O(PTY throughput) to O(1 write per interval).

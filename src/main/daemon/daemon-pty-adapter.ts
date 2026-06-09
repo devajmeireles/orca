@@ -157,6 +157,14 @@ export class DaemonPtyAdapter implements IPtyProvider {
     // but should still return the cached cold restore data.
     const cachedRestore = this.coldRestoreCache.get(sessionId)
     if (cachedRestore) {
+      // Why: wake after sleep also lands here, and the slept session's active
+      // tracking and history writer were dropped when sleep killed the PTY.
+      // Without re-registering both, checkpoints stop after wake and the
+      // second sleep/wake cycle restores a blank terminal.
+      this.activeSessionIds.add(sessionId)
+      if (this.historyManager) {
+        this.historyManager.reopenSession(sessionId)
+      }
       return {
         id: sessionId,
         pid,

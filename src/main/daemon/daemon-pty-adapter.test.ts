@@ -721,6 +721,53 @@ describe('DaemonPtyAdapter (IPtyProvider)', () => {
       }
     })
 
+    it('cold restores the second sleep/wake cycle with post-wake output', async () => {
+      const adapterClass = DaemonPtyAdapter as unknown as { CHECKPOINT_INTERVAL_MS: number }
+      const previousInterval = adapterClass.CHECKPOINT_INTERVAL_MS
+      adapterClass.CHECKPOINT_INTERVAL_MS = 10_000
+
+      try {
+        historyAdapter = new DaemonPtyAdapter({ socketPath, tokenPath, historyPath: historyDir })
+        const { id } = await historyAdapter.spawn({
+          cols: 80,
+          rows: 24,
+          cwd: '/home/user',
+          sessionId: 'sleep-wake-cycles'
+        })
+
+        lastSubprocess._simulateData('first cycle content\r\n')
+        await historyAdapter.shutdown(id, { immediate: true, keepHistory: true })
+        // Why: production wake always happens after the slept session's exit
+        // event closed its history; wait for that close before re-spawning.
+        const metaPath = join(historyDir, getHistorySessionDirName(id), 'meta.json')
+        await waitFor(() => JSON.parse(readFileSync(metaPath, 'utf-8')).endedAt !== null)
+
+        const firstWake = await historyAdapter.spawn({
+          cols: 80,
+          rows: 24,
+          cwd: '/home/user',
+          sessionId: id
+        })
+        expect(firstWake.coldRestore?.scrollback).toContain('first cycle content')
+        historyAdapter.ackColdRestore(id)
+        expect(historyAdapter.hasPty(id)).toBe(true)
+
+        lastSubprocess._simulateData('second cycle content\r\n')
+        await historyAdapter.shutdown(id, { immediate: true, keepHistory: true })
+        await waitFor(() => JSON.parse(readFileSync(metaPath, 'utf-8')).endedAt !== null)
+
+        const secondWake = await historyAdapter.spawn({
+          cols: 80,
+          rows: 24,
+          cwd: '/home/user',
+          sessionId: id
+        })
+        expect(secondWake.coldRestore?.scrollback).toContain('second cycle content')
+      } finally {
+        adapterClass.CHECKPOINT_INTERVAL_MS = previousInterval
+      }
+    })
+
     it('writes meta.json with endedAt on exit', async () => {
       historyAdapter = new DaemonPtyAdapter({ socketPath, tokenPath, historyPath: historyDir })
 
