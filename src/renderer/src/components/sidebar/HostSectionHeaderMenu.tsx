@@ -74,7 +74,6 @@ export function HostSectionHeaderMenu({ row }: { row: HostHeaderRow }): React.JS
   const [renameOpen, setRenameOpen] = useState(false)
   const [removeOpen, setRemoveOpen] = useState(false)
   const mountedRef = useMountedRef()
-  const setWorkspaceHostScope = useAppStore((s) => s.setWorkspaceHostScope)
   const sshConnected = useAppStore((s) => {
     const parsed = parseExecutionHostId(row.hostId)
     if (parsed?.kind !== 'ssh') {
@@ -90,10 +89,6 @@ export function HostSectionHeaderMenu({ row }: { row: HostHeaderRow }): React.JS
     compatibility: row.compatibility
   })
   const removalTarget = resolveHostRemoval(row.hostId)
-
-  const handleFocus = useCallback(() => {
-    setWorkspaceHostScope(row.hostId)
-  }, [row.hostId, setWorkspaceHostScope])
 
   const handleManage = useCallback(() => {
     openManageHost(row)
@@ -238,9 +233,6 @@ export function HostSectionHeaderMenu({ row }: { row: HostHeaderRow }): React.JS
         <DropdownMenuLabel className="truncate text-[11px] font-medium text-muted-foreground">
           {row.label}
         </DropdownMenuLabel>
-        <DropdownMenuItem onSelect={handleFocus}>
-          {translate('auto.components.sidebar.HostSectionHeaderMenu.1a2b3c4d5e', 'Focus this host')}
-        </DropdownMenuItem>
         {model.actions.includes('rename') && (
           <DropdownMenuItem onSelect={() => setRenameOpen(true)}>
             <Pencil className="size-3.5" />

@@ -3747,6 +3747,42 @@
               }
             }
           }
+        },
+        "sidebarHostOptions": {
+          "3e102f111c": "All hosts"
+        },
+        "HostRemoveDialog": {
+          "1a2b3c4d5e": "Removed {{value0}}",
+          "2b3c4d5e6f": "Failed to remove host",
+          "3c4d5e6f7a": "Remove {{value0}}?",
+          "4d5e6f7a8b": "This opens the Orca servers settings where you can remove this server.",
+          "5e6f7a8b9c": "This removes the saved SSH host and its credentials from this computer. Remote files are not deleted.",
+          "6f7a8b9c0d": "Cancel",
+          "7a8b9c0d1e": "Open settings",
+          "8b9c0d1e2f": "Remove host"
+        },
+        "HostRenameDialog": {
+          "1a2b3c4d5e": "Rename host",
+          "2b3c4d5e6f": "This label is shown only on this computer. Leave it blank to use the default name.",
+          "3c4d5e6f7a": "Display name",
+          "4d5e6f7a8b": "Reset to default",
+          "5e6f7a8b9c": "Cancel",
+          "6f7a8b9c0d": "Save"
+        },
+        "HostSectionHeaderMenu": {
+          "5b8b4b6a01": "Update server required",
+          "9b3c1d2e44": "Update client required",
+          "2c29e2de68": "Connection failed",
+          "bf07aee59e": "Disconnect failed",
+          "7f1a2b3c4d": "{{value0}} is reachable",
+          "4f2c8a9b10": "Host actions for {{value0}}",
+          "6b7c8d9e10": "Host actions",
+          "8d1e2f3a4b": "Rename…",
+          "63f36455cc": "Reconnect",
+          "59b553e2aa": "Disconnect",
+          "2d3e4f5a6b": "Check connection",
+          "3c4d5e6f7a": "Manage host…",
+          "6e7f8a9b0c": "Remove host…"
         }
       },
       "shared": {

@@ -4,7 +4,7 @@ import { buildHostHeaderMenuModel } from './host-header-menu-items'
 describe('buildHostHeaderMenuModel', () => {
   it('offers Focus + Rename + Manage for the local host (no Remove)', () => {
     const model = buildHostHeaderMenuModel({ kind: 'local', health: 'local' })
-    expect(model.actions).toEqual(['focus', 'rename', 'manage'])
+    expect(model.actions).toEqual(['rename', 'manage'])
     expect(model.actions).not.toContain('remove')
     expect(model.blocked).toBeNull()
   })
@@ -15,7 +15,7 @@ describe('buildHostHeaderMenuModel', () => {
       health: 'disconnected',
       sshConnected: false
     })
-    expect(model.actions).toEqual(['focus', 'rename', 'ssh-reconnect', 'manage', 'remove'])
+    expect(model.actions).toEqual(['rename', 'ssh-reconnect', 'manage', 'remove'])
   })
 
   it('offers Disconnect + Remove for a connected SSH host', () => {
@@ -24,18 +24,12 @@ describe('buildHostHeaderMenuModel', () => {
       health: 'available',
       sshConnected: true
     })
-    expect(model.actions).toEqual(['focus', 'rename', 'ssh-disconnect', 'manage', 'remove'])
+    expect(model.actions).toEqual(['rename', 'ssh-disconnect', 'manage', 'remove'])
   })
 
   it('offers Check connection + Remove for a runtime host', () => {
     const model = buildHostHeaderMenuModel({ kind: 'runtime', health: 'available' })
-    expect(model.actions).toEqual([
-      'focus',
-      'rename',
-      'runtime-check-connection',
-      'manage',
-      'remove'
-    ])
+    expect(model.actions).toEqual(['rename', 'runtime-check-connection', 'manage', 'remove'])
   })
 
   it('offers Rename for every host kind', () => {

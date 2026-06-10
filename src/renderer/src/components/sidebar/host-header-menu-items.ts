@@ -5,8 +5,10 @@ import type { RuntimeCompatVerdict } from '../../../../shared/protocol-compat'
 // Why: the host-header dropdown shows different lifecycle actions per host kind.
 // Keeping the availability rules in a pure function makes them unit-testable
 // without rendering the sidebar.
+// Why: no 'focus' action here — the host scope strip is the single scoping
+// control (the design doc forbids a separate focused-host toggle), and
+// decluttering is served by collapsing the section.
 export type HostHeaderMenuAction =
-  | 'focus'
   | 'rename'
   | 'manage'
   | 'ssh-reconnect'
@@ -40,7 +42,7 @@ function sshActions(connected: boolean): HostHeaderMenuAction[] {
 export function buildHostHeaderMenuModel(input: HostHeaderMenuInput): HostHeaderMenuModel {
   // Why: Rename edits only the client-side display label, so it's offered for
   // every host kind including local.
-  const actions: HostHeaderMenuAction[] = ['focus', 'rename']
+  const actions: HostHeaderMenuAction[] = ['rename']
 
   switch (input.kind) {
     case 'ssh':
