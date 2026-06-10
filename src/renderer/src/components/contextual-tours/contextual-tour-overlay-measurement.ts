@@ -118,7 +118,13 @@ export function measureContextualTourOverlayRenderState(args: {
   const sidebarAlreadyVisible =
     activeStep.primaryAction?.kind === 'show-worktrees' && args.sidebarOpen
   const primaryAction = sidebarAlreadyVisible
-    ? ({ kind: 'next', label: translate("auto.components.contextual.tours.contextual.tour.overlay.measurement.38b3155418", "Next") } as const)
+    ? ({
+        kind: 'next',
+        label: translate(
+          'auto.components.contextual.tours.contextual.tour.overlay.measurement.38b3155418',
+          'Next'
+        )
+      } as const)
     : activeStep.primaryAction
   const secondaryAction = sidebarAlreadyVisible ? undefined : activeStep.secondaryAction
 
@@ -156,12 +162,18 @@ export function getContextualTourCleanupOutcome(
     : 'cancelled'
 }
 
+const SHORTCUT_PLACEHOLDER_ACTION_IDS = [
+  'terminal.splitRight',
+  'floatingTerminal.toggle'
+] satisfies readonly Parameters<typeof formatShortcutLabel>[0][]
+
 function formatContextualTourStepCopy(
   copy: string,
   keybindings: Parameters<typeof formatShortcutLabel>[1]
 ): string {
-  return copy.replace(
-    '{terminal.splitRight}',
-    formatShortcutLabel('terminal.splitRight', keybindings)
+  return SHORTCUT_PLACEHOLDER_ACTION_IDS.reduce(
+    (formatted, actionId) =>
+      formatted.replace(`{${actionId}}`, formatShortcutLabel(actionId, keybindings)),
+    copy
   )
 }

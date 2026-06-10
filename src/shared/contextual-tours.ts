@@ -169,18 +169,17 @@ export const CONTEXTUAL_TOURS = [
     steps: [
       {
         title: 'Run an agent across every repo',
-        body: 'Agents here run in any folder you choose — point one at the directory above your services to work across all your repos at once.',
+        body: 'Agents here run in any folder you choose. Point one at the directory above your services to work across all your repos at once.',
         targetSelector:
           '[data-contextual-tour-target="floating-workspace-actions"], [data-contextual-tour-target="floating-workspace-surface"]',
         requiredForStart: true,
         preferredPlacement: 'left'
       },
       {
-        title: 'Park side work here',
-        body: 'Open agents, scratch terminals, notes, and browser tabs without cluttering the worktree you’re focused on.',
-        targetSelector:
-          '[data-contextual-tour-target="floating-workspace-actions"], [data-contextual-tour-target="floating-workspace-surface"]',
-        preferredPlacement: 'left'
+        title: 'Out of the way, still running',
+        body: 'Minimize the panel and your terminals, notes, and browser tabs keep running. Bring it back anytime with {floatingTerminal.toggle}.',
+        targetSelector: '[data-contextual-tour-target="floating-workspace-minimize"]',
+        preferredPlacement: 'bottom'
       }
     ]
   },

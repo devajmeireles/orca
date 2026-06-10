@@ -169,20 +169,20 @@ describe('contextual tour definitions', () => {
 
     expect(tour?.steps.map((step) => step.title)).toEqual([
       'Run an agent across every repo',
-      'Park side work here'
+      'Out of the way, still running'
     ])
     expect(tour?.steps.map((step) => step.body)).toEqual([
-      'Agents here run in any folder you choose — point one at the directory above your services to work across all your repos at once.',
-      'Open agents, scratch terminals, notes, and browser tabs without cluttering the worktree you’re focused on.'
+      'Agents here run in any folder you choose. Point one at the directory above your services to work across all your repos at once.',
+      'Minimize the panel and your terminals, notes, and browser tabs keep running. Bring it back anytime with {floatingTerminal.toggle}.'
     ])
     expect(tour?.steps[0]).toMatchObject({
       requiredForStart: true,
       preferredPlacement: 'left'
     })
-    expect(tour?.steps[1]?.preferredPlacement).toBe('left')
+    expect(tour?.steps[1]?.preferredPlacement).toBe('bottom')
     expect(tour?.steps.map((step) => step.targetSelector)).toEqual([
       '[data-contextual-tour-target="floating-workspace-actions"], [data-contextual-tour-target="floating-workspace-surface"]',
-      '[data-contextual-tour-target="floating-workspace-actions"], [data-contextual-tour-target="floating-workspace-surface"]'
+      '[data-contextual-tour-target="floating-workspace-minimize"]'
     ])
   })
 
