@@ -64,6 +64,31 @@ export function getRepositoryPaneSearchEntries(repo: Repo): SettingsSearchEntry[
       ]
     },
     ...(isFolder ? [] : getRepositoryGitWorktreeSearchEntries(repo)),
+    ...(isFolder
+      ? []
+      : [
+          {
+            title: translate(
+              'auto.components.settings.repository.search.availableHosts',
+              'Available Hosts'
+            ),
+            description: translate(
+              'auto.components.settings.repository.search.availableHostsDescription',
+              'Hosts where this project is set up.'
+            ),
+            keywords: [
+              repo.displayName,
+              repo.path,
+              ...translateSearchKeyword('auto.components.settings.repository.search.host', 'host'),
+              ...translateSearchKeyword('auto.components.settings.repository.search.ssh', 'ssh'),
+              ...translateSearchKeyword(
+                'auto.components.settings.repository.search.remote',
+                'remote'
+              ),
+              ...translateSearchKeyword('auto.components.settings.repository.search.vm', 'vm')
+            ]
+          }
+        ]),
     {
       title: translate('auto.components.settings.repository.search.c5266c2c9d', 'Remove Project'),
       description: translate(

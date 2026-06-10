@@ -5013,6 +5013,10 @@
           "0909e5d650": "删除项目",
           "ee5a290616": "作为文件夹打开。 Git 功能对此工作区不可用。",
           "323debba71": "类型：",
+          "availableHosts": "可用主机",
+          "availableHostsDescription": "此项目已设置的主机。",
+          "availableHostsHelp": "项目路径和工作树设置按主机区分；创建工作区可选择任何已就绪的设置。",
+          "currentSetup": "当前",
           "499a437335": "身份"
         },
         "RepositorySourceControlAiActionRows": {
@@ -6833,6 +6837,12 @@
             "a47f51127e": "源代码控制",
             "6cc5c65e64": "项目特定的 git 生成覆盖。",
             "eec3995dc6": "Git AI Author",
+            "availableHosts": "可用主机",
+            "availableHostsDescription": "此项目已设置的主机。",
+            "host": "主机",
+            "ssh": "ssh",
+            "remote": "远程",
+            "vm": "vm",
             "cc876ca5f2": "存储库",
             "6469de5368": "项目",
             "3067595d82": "删除",

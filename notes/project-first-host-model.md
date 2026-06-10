@@ -1,5 +1,10 @@
 # Project-First Host Model
 
+Companion summary: see
+[`project-first-host-model-change-inventory.md`](./project-first-host-model-change-inventory.md)
+for the current discussion recap, change count, and branch implementation
+status.
+
 ## Context
 
 We have been exploring how Orca should make VMs, remote servers, SSH machines,

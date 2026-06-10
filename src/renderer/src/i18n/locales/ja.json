@@ -5013,6 +5013,10 @@
           "0909e5d650": "プロジェクトの削除",
           "ee5a290616": "フォルダーとして開きます。このワークスペースでは Git 機能を使用できません。",
           "323debba71": "タイプ：",
+          "availableHosts": "利用可能なホスト",
+          "availableHostsDescription": "このプロジェクトがセットアップされているホスト。",
+          "availableHostsHelp": "プロジェクトのパスとワークツリー設定はホストごとに異なります。ワークスペースは準備済みの任意のセットアップで作成できます。",
+          "currentSetup": "現在",
           "499a437335": "身元"
         },
         "RepositorySourceControlAiActionRows": {
@@ -6833,6 +6837,12 @@
             "a47f51127e": "ソース管理",
             "6cc5c65e64": "プロジェクト固有の git 生成のオーバーライド。",
             "eec3995dc6": "Git AI Author",
+            "availableHosts": "利用可能なホスト",
+            "availableHostsDescription": "このプロジェクトがセットアップされているホスト。",
+            "host": "ホスト",
+            "ssh": "ssh",
+            "remote": "リモート",
+            "vm": "vm",
             "cc876ca5f2": "リポジトリ",
             "6469de5368": "プロジェクト",
             "3067595d82": "削除",

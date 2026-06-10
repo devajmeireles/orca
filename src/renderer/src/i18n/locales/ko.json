@@ -5013,6 +5013,10 @@
           "0909e5d650": "프로젝트 제거",
           "ee5a290616": "폴더로 열렸습니다. 이 워크스페이스에서는 Git 기능을 사용할 수 없습니다.",
           "323debba71": "유형:",
+          "availableHosts": "사용 가능한 호스트",
+          "availableHostsDescription": "이 프로젝트가 설정된 호스트입니다.",
+          "availableHostsHelp": "프로젝트 경로와 워크트리 설정은 호스트별로 다릅니다. 워크스페이스는 준비된 모든 설정에서 만들 수 있습니다.",
+          "currentSetup": "현재",
           "499a437335": "신원"
         },
         "RepositorySourceControlAiActionRows": {
@@ -6833,6 +6837,12 @@
             "a47f51127e": "소스 제어",
             "6cc5c65e64": "프로젝트별 Git 생성이 재정의됩니다.",
             "eec3995dc6": "Git AI Author",
+            "availableHosts": "사용 가능한 호스트",
+            "availableHostsDescription": "이 프로젝트가 설정된 호스트입니다.",
+            "host": "호스트",
+            "ssh": "ssh",
+            "remote": "원격",
+            "vm": "vm",
             "cc876ca5f2": "저장소",
             "6469de5368": "프로젝트",
             "3067595d82": "삭제",
