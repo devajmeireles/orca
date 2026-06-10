@@ -9461,6 +9461,9 @@ export class OrcaRuntimeService {
 
     const worktreeId = `${repo.id}::${created.path}`
     const now = Date.now()
+    // Why: persisted compare refs must survive local branches whose names look
+    // like remote labels, e.g. a local branch literally named "origin/main".
+    const metadataBaseRef = remoteTrackingBase?.ref ?? baseBranch
     const displayNameMeta = requestedDisplayName
       ? { displayName: requestedDisplayName }
       : shouldSetDisplayName(effectiveRequestedName, branchName, effectiveSanitizedName)
@@ -9482,13 +9485,13 @@ export class OrcaRuntimeService {
       orcaCreationSource: 'runtime',
       orcaCreationWorkspaceLayout: getWorktreeCreationLayout(repo, settings),
       ...displayNameMeta,
-      baseRef: baseBranch,
+      baseRef: metadataBaseRef,
       ...(checkoutExistingBranch ? { preserveBranchOnDelete: true } : {}),
       ...(configuredPushTarget ? { pushTarget: configuredPushTarget } : {}),
       ...(sparseDirectories.length > 0
         ? {
             sparseDirectories,
-            sparseBaseRef: baseBranch,
+            sparseBaseRef: metadataBaseRef,
             sparsePresetId: args.sparseCheckout?.presetId
           }
         : {}),
