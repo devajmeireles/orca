@@ -108,6 +108,7 @@ import type {
   MigrationUnsupportedPtyEntry
 } from '../shared/agent-status-types'
 import type { AgentInterruptInferenceRequest } from '../shared/agent-interrupt-intent'
+import type { TerminalSideEffectBatch } from '../shared/terminal-side-effect-facts'
 import type {
   SpeechErrorEvent,
   SpeechLifecycleEvent,
@@ -771,6 +772,21 @@ const api = {
       ipcRenderer.on('pty:replay', listener)
       return () => ipcRenderer.removeListener('pty:replay', listener)
     },
+
+    /** Batched derived side-effect facts (title/bell/agent transitions) for
+     *  PTYs whose bytes transit local main. Per-PTY in-order; deliberately not
+     *  synchronized with pty:data (terminal-side-effect-authority.md). */
+    onSideEffect: (callback: (batch: TerminalSideEffectBatch) => void): (() => void) => {
+      const listener = (_event: Electron.IpcRendererEvent, batch: TerminalSideEffectBatch) =>
+        callback(batch)
+      ipcRenderer.on('pty:sideEffect', listener)
+      return () => ipcRenderer.removeListener('pty:sideEffect', listener)
+    },
+
+    /** Title-only replay snapshot applied on (re)attach — attention facts
+     *  (bells/completions) never replay. */
+    getSideEffectSnapshot: (id: string): Promise<TerminalSideEffectBatch | null> =>
+      ipcRenderer.invoke('pty:sideEffectSnapshot', { id }),
 
     onExit: (callback: (data: { id: string; code: number }) => void): (() => void) => {
       const listener = (_event: Electron.IpcRendererEvent, data: { id: string; code: number }) =>
@@ -1493,6 +1509,10 @@ const api = {
 
   settings: {
     get: (): Promise<unknown> => ipcRenderer.invoke('settings:get'),
+
+    // Why: blocking read for the few startup decisions (terminal side-effect
+    // authority) that cannot wait for async hydration. Call sparingly.
+    getSync: (): unknown => ipcRenderer.sendSync('settings:get-sync'),
 
     set: (args: Record<string, unknown>): Promise<unknown> =>
       ipcRenderer.invoke('settings:set', args),

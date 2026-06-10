@@ -23,7 +23,7 @@ import type {
   PtyConnectResult,
   PtyDataMeta
 } from './pty-dispatcher'
-import { createBellDetector } from './bell-detector'
+import { createBellDetector } from '../../../../shared/terminal-bell-detector'
 import {
   createAgentStatusOscProcessor,
   type ProcessedAgentStatusChunk

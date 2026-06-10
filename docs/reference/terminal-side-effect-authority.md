@@ -66,8 +66,11 @@ Remote-runtime PTYs (`remote:`) never transit local main; the renderer
 ## Event Transport: `pty:sideEffect`
 
 One new batched main→renderer channel (preload pattern of `agentStatus:set`,
-`src/preload/index.ts:3586`), routed by the existing singleton dispatcher like
-`pty:data`/`pty:exit` (`pty-dispatcher.ts:92-145`). Events are **facts, not
+`src/preload/index.ts:3586`). It is **not** routed through the pty dispatcher:
+the renderer fact-consumer registry
+(`terminal-side-effect-facts-handler.ts`) subscribes directly via
+`window.api.pty.onSideEffect` — one channel subscription per renderer, with
+exactly one registered fact consumer per PTY. Events are **facts, not
 decisions**: `title`, `bell`, `agent-working`, `agent-idle` (with title),
 `agent-exited`, `command-finished` (exit code), `pr-link`. Each carries
 `ptyId`, main-known attribution (worktreeId/tabId/paneKey from runtime leaf

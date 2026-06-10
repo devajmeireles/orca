@@ -209,6 +209,7 @@ import type {
   MigrationUnsupportedPtyEntry
 } from '../shared/agent-status-types'
 import type { AgentInterruptInferenceRequest } from '../shared/agent-interrupt-intent'
+import type { TerminalSideEffectBatch } from '../shared/terminal-side-effect-facts'
 import type {
   RuntimeBrowserDriverState,
   RuntimeMobileSessionTabMove,
@@ -970,6 +971,11 @@ export type PreloadApi = {
       callback: (data: { id: string; data: string; seq?: number; rawLength?: number }) => void
     ) => () => void
     onReplay: (callback: (data: { id: string; data: string }) => void) => () => void
+    /** Batched derived side-effect facts for PTYs whose bytes transit local
+     *  main; see docs/reference/terminal-side-effect-authority.md. */
+    onSideEffect: (callback: (batch: TerminalSideEffectBatch) => void) => () => void
+    /** Title-only replay snapshot for (re)attach; attention facts never replay. */
+    getSideEffectSnapshot: (id: string) => Promise<TerminalSideEffectBatch | null>
     onExit: (callback: (data: { id: string; code: number }) => void) => () => void
     onSerializeBufferRequest: (
       callback: (data: {
@@ -1613,6 +1619,10 @@ export type PreloadApi = {
   telemetryAcknowledgeBanner: () => Promise<void>
   settings: {
     get: () => Promise<GlobalSettings>
+    /** Synchronous persisted-settings read for startup decisions that cannot
+     *  wait for async hydration (terminal side-effect authority). Blocking
+     *  IPC — call sparingly. */
+    getSync: () => GlobalSettings | null
     set: (args: Partial<GlobalSettings>) => Promise<GlobalSettings>
     listFonts: () => Promise<string[]>
     previewGhosttyImport: () => Promise<GhosttyImportPreview>

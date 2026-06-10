@@ -58,6 +58,7 @@ type StoreState = {
     promptCacheTimerEnabled?: boolean
     activeRuntimeEnvironmentId?: string | null
     experimentalTerminalAttention?: boolean
+    terminalMainSideEffectAuthority?: boolean
     notifications?: {
       enabled?: boolean
       agentTaskComplete?: boolean
@@ -448,7 +449,14 @@ describe('connectPanePty', () => {
       repos: [{ id: 'repo1', connectionId: null, displayName: 'orca' }],
       sshConnectionStates: new Map(),
       cacheTimerByKey: {},
-      settings: { promptCacheTimerEnabled: true, experimentalTerminalAttention: true },
+      // Why: terminalMainSideEffectAuthority false pins the legacy renderer
+      // byte-parser wiring this suite asserts on (onTitleChange/onBell on the
+      // transport). The authority-on fact-consumer mode has its own tests.
+      settings: {
+        promptCacheTimerEnabled: true,
+        experimentalTerminalAttention: true,
+        terminalMainSideEffectAuthority: false
+      },
       codexRestartNoticeByPtyId: {},
       deferredSshReconnectTargets: [],
       deferredSshSessionIdsByTabId: {},
@@ -5066,6 +5074,251 @@ describe('connectPanePty', () => {
     expect(deps.markWorktreeUnread).toHaveBeenCalledTimes(1)
     expect(deps.markTerminalTabUnread).toHaveBeenCalledWith('tab-1')
     expect(deps.markTerminalPaneUnread).not.toHaveBeenCalled()
+  })
+
+  // ─── Main side-effect authority (terminal-side-effect-authority.md) ────
+  //
+  // With the kill switch on (the default), local/SSH transports must not
+  // register title/bell/agent byte parsers; the pane's policy callbacks are
+  // registered as the PTY's single pty:sideEffect fact consumer instead.
+  describe('with main side-effect authority on', () => {
+    const SIDE_EFFECT_PARSER_CALLBACKS = [
+      'onTitleChange',
+      'onBell',
+      'onAgentBecameIdle',
+      'onAgentBecameWorking',
+      'onAgentExited'
+    ] as const
+
+    function enableMainAuthority(): void {
+      mockStoreState.settings = {
+        ...mockStoreState.settings,
+        terminalMainSideEffectAuthority: true
+      }
+    }
+
+    it('omits byte-parser callbacks from the local transport options', async () => {
+      enableMainAuthority()
+      const { connectPanePty } = await import('./pty-connection')
+      const transport = createMockTransport()
+      transportFactoryQueue.push(transport)
+
+      connectPanePty(createPane(1) as never, createManager(1) as never, createDeps() as never)
+
+      expect(createdTransportOptions[0]).toBeDefined()
+      for (const callback of SIDE_EFFECT_PARSER_CALLBACKS) {
+        expect(createdTransportOptions[0]?.[callback]).toBeUndefined()
+      }
+      // The lifecycle callbacks stay on the transport — only side-effect
+      // parsing moves to the fact consumer.
+      expect(createdTransportOptions[0]?.onPtySpawn).toBeTypeOf('function')
+      expect(createdTransportOptions[0]?.onPtyExit).toBeTypeOf('function')
+    })
+
+    it('keeps byte-parser callbacks on remote-runtime transports', async () => {
+      enableMainAuthority()
+      enableActiveRuntimeEnvironment()
+      const { connectPanePty } = await import('./pty-connection')
+      const { createRemoteRuntimePtyTransport } = await import('./remote-runtime-pty-transport')
+      const transport = createMockTransport()
+      transportFactoryQueue.push(transport)
+
+      connectPanePty(createPane(1) as never, createManager(1) as never, createDeps() as never)
+
+      expect(createRemoteRuntimePtyTransport).toHaveBeenCalledWith('env-1', expect.any(Object))
+      for (const callback of SIDE_EFFECT_PARSER_CALLBACKS) {
+        expect(createdTransportOptions[0]?.[callback]).toBeTypeOf('function')
+      }
+    })
+
+    it('consumes pty:sideEffect facts with the live-path policy after spawn', async () => {
+      enableMainAuthority()
+      const { connectPanePty } = await import('./pty-connection')
+      const handler = await import('./terminal-side-effect-facts-handler')
+      const transport = createMockTransport()
+      transportFactoryQueue.push(transport)
+      vi.useFakeTimers()
+
+      const pane = createPane(1)
+      const manager = createManager(1)
+      const deps = createDeps()
+      connectPanePty(pane as never, manager as never, deps as never)
+
+      const onPtySpawn = createdTransportOptions[0]?.onPtySpawn as (ptyId: string) => void
+      onPtySpawn('pty-fact-1')
+
+      handler._dispatchTerminalSideEffectBatchForTest({
+        ptyId: 'pty-fact-1',
+        seq: 10,
+        facts: [
+          { kind: 'title', normalizedTitle: 'Codex working', rawTitle: 'Codex working' },
+          { kind: 'bell' }
+        ]
+      })
+
+      expect(deps.setRuntimePaneTitle).toHaveBeenCalledWith('tab-1', 1, 'Codex working')
+      expect(deps.markWorktreeUnread).toHaveBeenCalledTimes(1)
+      expect(deps.markTerminalTabUnread).toHaveBeenCalledWith('tab-1')
+      expect(deps.dispatchNotification).not.toHaveBeenCalled()
+      vi.advanceTimersByTime(250)
+      expect(deps.dispatchNotification).toHaveBeenCalledWith(
+        expect.objectContaining({
+          source: 'terminal-bell',
+          paneKey: makePaneKey('tab-1', LEAF_1)
+        })
+      )
+    })
+
+    it('stops consuming facts after the pane binding is disposed', async () => {
+      enableMainAuthority()
+      const { connectPanePty } = await import('./pty-connection')
+      const handler = await import('./terminal-side-effect-facts-handler')
+      const transport = createMockTransport()
+      transportFactoryQueue.push(transport)
+
+      const deps = createDeps()
+      const binding = connectPanePty(
+        createPane(1) as never,
+        createManager(1) as never,
+        deps as never
+      )
+      const onPtySpawn = createdTransportOptions[0]?.onPtySpawn as (ptyId: string) => void
+      onPtySpawn('pty-fact-2')
+
+      binding.dispose()
+      handler._dispatchTerminalSideEffectBatchForTest({
+        ptyId: 'pty-fact-2',
+        seq: 1,
+        facts: [{ kind: 'bell' }]
+      })
+
+      expect(deps.markWorktreeUnread).not.toHaveBeenCalled()
+      expect(deps.markTerminalTabUnread).not.toHaveBeenCalled()
+    })
+
+    it('schedules the completion notification for genuine working→idle facts', async () => {
+      enableMainAuthority()
+      const { connectPanePty } = await import('./pty-connection')
+      const handler = await import('./terminal-side-effect-facts-handler')
+      const transport = createMockTransport()
+      transportFactoryQueue.push(transport)
+      vi.useFakeTimers()
+
+      const deps = createDeps()
+      connectPanePty(createPane(1) as never, createManager(1) as never, deps as never)
+      const onPtySpawn = createdTransportOptions[0]?.onPtySpawn as (ptyId: string) => void
+      onPtySpawn('pty-fact-genuine')
+
+      handler._dispatchTerminalSideEffectBatchForTest({
+        ptyId: 'pty-fact-genuine',
+        seq: 1,
+        facts: [
+          { kind: 'title', normalizedTitle: '⠋ Codex working', rawTitle: '⠋ Codex working' },
+          { kind: 'agent-working' }
+        ]
+      })
+      handler._dispatchTerminalSideEffectBatchForTest({
+        ptyId: 'pty-fact-genuine',
+        seq: 2,
+        facts: [
+          { kind: 'title', normalizedTitle: '* Codex done', rawTitle: '* Codex done' },
+          { kind: 'agent-idle', title: '* Codex done' }
+        ]
+      })
+      vi.advanceTimersByTime(AGENT_TASK_COMPLETE_NOTIFICATION_MAX_WAIT_MS)
+
+      expect(deps.dispatchNotification).toHaveBeenCalledWith(
+        expect.objectContaining({ source: 'agent-task-complete' })
+      )
+    })
+
+    it('clears state without completion attention for stale-derived facts', async () => {
+      enableMainAuthority()
+      const { connectPanePty } = await import('./pty-connection')
+      const handler = await import('./terminal-side-effect-facts-handler')
+      const transport = createMockTransport()
+      transportFactoryQueue.push(transport)
+      vi.useFakeTimers()
+
+      const deps = createDeps()
+      connectPanePty(createPane(1) as never, createManager(1) as never, deps as never)
+      const onPtySpawn = createdTransportOptions[0]?.onPtySpawn as (ptyId: string) => void
+      onPtySpawn('pty-fact-stale')
+
+      handler._dispatchTerminalSideEffectBatchForTest({
+        ptyId: 'pty-fact-stale',
+        seq: 1,
+        facts: [
+          { kind: 'title', normalizedTitle: '⠋ Codex working', rawTitle: '⠋ Codex working' },
+          { kind: 'agent-working' }
+        ]
+      })
+      // Main's unthrottled 3s stale-title rewrite for a merely-paused agent.
+      handler._dispatchTerminalSideEffectBatchForTest({
+        ptyId: 'pty-fact-stale',
+        seq: 2,
+        facts: [
+          {
+            kind: 'title',
+            normalizedTitle: 'Codex',
+            rawTitle: 'Codex',
+            staleWorkingTitleClear: true
+          },
+          { kind: 'agent-idle', title: 'Codex', staleWorkingTitleClear: true }
+        ]
+      })
+
+      // The cleared title still lands; the cache timer is cleared.
+      expect(deps.setRuntimePaneTitle).toHaveBeenLastCalledWith('tab-1', 1, 'Codex')
+      expect(deps.setCacheTimerStartedAt).toHaveBeenLastCalledWith(
+        makePaneKey('tab-1', LEAF_1),
+        null
+      )
+      // But no task-complete notification or unread attention is scheduled.
+      vi.advanceTimersByTime(AGENT_TASK_COMPLETE_NOTIFICATION_MAX_WAIT_MS * 2)
+      expect(deps.dispatchNotification).not.toHaveBeenCalled()
+      expect(deps.markWorktreeUnread).not.toHaveBeenCalled()
+      expect(deps.markTerminalPaneUnread).not.toHaveBeenCalled()
+    })
+
+    it('honors the persisted kill switch for panes bound before settings hydrate', async () => {
+      // Pre-hydration: the store has no settings yet, but the user persisted
+      // the kill switch off. The pane must register byte parsers, not a fact
+      // consumer — and hydration must not produce a second consumer.
+      mockStoreState.settings = null
+      ;(window.api as unknown as Record<string, unknown>).settings = {
+        getSync: vi.fn(() => ({ terminalMainSideEffectAuthority: false }))
+      }
+      const { connectPanePty } = await import('./pty-connection')
+      const handler = await import('./terminal-side-effect-facts-handler')
+      const transport = createMockTransport()
+      transportFactoryQueue.push(transport)
+
+      const deps = createDeps()
+      connectPanePty(createPane(1) as never, createManager(1) as never, deps as never)
+
+      for (const callback of SIDE_EFFECT_PARSER_CALLBACKS) {
+        expect(createdTransportOptions[0]?.[callback]).toBeTypeOf('function')
+      }
+      const onPtySpawn = createdTransportOptions[0]?.onPtySpawn as (ptyId: string) => void
+      onPtySpawn('pty-prehydration')
+
+      // No fact consumer registered: channel batches are dropped.
+      handler._dispatchTerminalSideEffectBatchForTest({
+        ptyId: 'pty-prehydration',
+        seq: 1,
+        facts: [{ kind: 'bell' }]
+      })
+      expect(deps.markWorktreeUnread).not.toHaveBeenCalled()
+
+      // Hydration lands with the switch still off: byte parsing stays the
+      // single consumer — one BEL marks unread exactly once.
+      mockStoreState.settings = { terminalMainSideEffectAuthority: false }
+      notifyStoreSubscribers()
+      const onBell = createdTransportOptions[0]?.onBell as () => void
+      onBell()
+      expect(deps.markWorktreeUnread).toHaveBeenCalledTimes(1)
+    })
   })
 
   it('lets concurrent agent-complete notifications win over terminal bell notifications', async () => {

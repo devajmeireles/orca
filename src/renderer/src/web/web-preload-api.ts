@@ -436,6 +436,9 @@ function createWebPreloadApi(): Partial<PreloadApi> {
     },
     settings: {
       get: async () => getStoredSettings(),
+      // Why: localStorage-backed settings are synchronous in the web client,
+      // so the pre-hydration kill-switch read works the same as desktop.
+      getSync: () => getStoredSettings(),
       set: async (updates) => {
         if (updates.activeRuntimeEnvironmentId === null) {
           disconnectActiveRuntimeEnvironment()
@@ -2258,6 +2261,10 @@ function createPtyApi(): NonNullable<Partial<PreloadApi>['pty']> {
     getCwd: () => Promise.resolve('~'),
     listSessions: () => Promise.resolve([]),
     getMainBufferSnapshot: () => Promise.resolve(null),
+    // Why: remote-runtime PTYs never transit local main, so the web client has
+    // no side-effect facts source; renderer byte parsing stays authoritative.
+    onSideEffect: () => noopUnsubscribe,
+    getSideEffectSnapshot: () => Promise.resolve(null),
     getRendererDeliveryDebugSnapshot: () =>
       Promise.resolve({
         pendingPtyCount: 0,

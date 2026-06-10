@@ -136,6 +136,7 @@ import {
   type SyntheticAgentTitleProfile
 } from '../shared/synthetic-agent-title'
 import type { AgentStatusState } from '../shared/agent-status-types'
+import type { TerminalSideEffectBatch } from '../shared/terminal-side-effect-facts'
 import { KeybindingService } from './keybindings/keybinding-service'
 import { applyElectronProxySettings } from './network/proxy-settings'
 
@@ -986,6 +987,12 @@ function sendSyntheticTitle(ptyId: string, data: string, options: { force?: bool
   ) {
     return
   }
+  // Why: feed the per-PTY tracker directly (never onPtyData — emulator state,
+  // tails, transcripts, and stats must not see fabricated bytes) so synthetic
+  // titles/BELs reach pty:sideEffect consumers when main holds side-effect
+  // authority. The legacy pty:data copy below stays until slice 3 so renderer
+  // byte parsers keep working while the kill switch is off.
+  runtime?.ingestSyntheticTitleFrame(ptyId, data)
   mainWindow.webContents.send('pty:data', { id: ptyId, data })
 }
 
@@ -1224,7 +1231,21 @@ app.whenReady().then(async () => {
     onPtyStopped: clearProviderPtyState,
     onTerminalAgentStatus: (event) => {
       agentHookServer.ingestTerminalStatus(event)
-    }
+    },
+    // Why: derived title/bell/agent facts ride one batched main→renderer
+    // channel (terminal-side-effect-authority.md). The renderer's authority
+    // kill switch decides whether to consume. Headless serve never creates a
+    // window, so the dep is omitted entirely — the runtime then skips fact
+    // batch construction and the per-chunk bell walk.
+    ...(isServeMode
+      ? {}
+      : {
+          onTerminalSideEffects: (batch: TerminalSideEffectBatch) => {
+            if (mainWindow && !mainWindow.isDestroyed()) {
+              mainWindow.webContents.send('pty:sideEffect', batch)
+            }
+          }
+        })
   })
   runtime = runtimeService
   automations = new AutomationService(store, { claudeUsage, codexUsage })

@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import type { TerminalSideEffectFact } from '../../../../shared/terminal-side-effect-facts'
 import type { ParkedTerminalByteWatcherOptions } from './parked-terminal-byte-watcher'
 
 const PTY_ID = 'pty-parked-1'
@@ -21,6 +22,7 @@ type MockStoreState = {
     theme?: 'system' | 'dark' | 'light'
     promptCacheTimerEnabled?: boolean
     experimentalTerminalAttention?: boolean
+    terminalMainSideEffectAuthority?: boolean
     notifications?: { enabled?: boolean; agentTaskComplete?: boolean }
   } | null
   setRuntimePaneTitle: ReturnType<typeof vi.fn>
@@ -52,10 +54,14 @@ vi.mock('@/store', () => ({
 
 function createMockStoreState(): MockStoreState {
   return {
+    // Why: terminalMainSideEffectAuthority false pins the legacy byte-parser
+    // mode this suite was written for; the authority-on fact-consumer mode is
+    // covered by the dedicated describe block below.
     settings: {
       theme: 'system',
       promptCacheTimerEnabled: true,
       experimentalTerminalAttention: false,
+      terminalMainSideEffectAuthority: false,
       notifications: { enabled: true, agentTaskComplete: true }
     },
     setRuntimePaneTitle: vi.fn(),
@@ -456,5 +462,270 @@ describe('startParkedTerminalByteWatcher', () => {
     expect(mockStoreState.setRuntimePaneTitle).toHaveBeenCalledTimes(1)
     expect(mockStoreState.setRuntimePaneTitle).toHaveBeenCalledWith(TAB_ID, 2, IDLE_TITLE)
     second.dispose()
+  })
+
+  // ─── Main side-effect authority (terminal-side-effect-authority.md) ────
+  //
+  // With the kill switch on, the watcher must not register byte parsers —
+  // main is the single byte parser and the watcher's policy block consumes
+  // pty:sideEffect facts instead. The byte sidecar stays only for the 2031
+  // reply and PR-link scan (they move to main in a later slice).
+  describe('with main side-effect authority on', () => {
+    function enableMainAuthority(): void {
+      mockStoreState.settings = {
+        ...mockStoreState.settings,
+        terminalMainSideEffectAuthority: true
+      }
+    }
+
+    async function dispatchFacts(
+      facts: TerminalSideEffectFact[],
+      options: { seq?: number; replay?: boolean } = {}
+    ): Promise<void> {
+      const handler = await import('./terminal-side-effect-facts-handler')
+      handler._dispatchTerminalSideEffectBatchForTest({
+        ptyId: PTY_ID,
+        seq: options.seq ?? 0,
+        ...(options.replay ? { replay: true } : {}),
+        facts
+      })
+    }
+
+    /** Feed chunks the way OrcaRuntimeService.onPtyData does: OSC 9999 strip,
+     *  shared title tracker, one fact batch per chunk — the main half of the
+     *  migration-safety parity check. */
+    async function emitViaMainTrackerFacts(chunks: string[]): Promise<void> {
+      const { createAgentStatusOscProcessor } = await import('../../../../shared/agent-status-osc')
+      const { createTerminalTitleTracker } =
+        await import('../../../../shared/terminal-output-side-effects')
+      const handler = await import('./terminal-side-effect-facts-handler')
+      const processStatusChunk = createAgentStatusOscProcessor()
+      let pending: TerminalSideEffectFact[] = []
+      const tracker = createTerminalTitleTracker({
+        onTitle: (normalizedTitle, rawTitle) =>
+          pending.push({ kind: 'title', normalizedTitle, rawTitle }),
+        onAgentBecameWorking: () => pending.push({ kind: 'agent-working' }),
+        onAgentBecameIdle: (title) => pending.push({ kind: 'agent-idle', title }),
+        onAgentExited: () => pending.push({ kind: 'agent-exited' }),
+        onBell: () => pending.push({ kind: 'bell' })
+      })
+      let seq = 0
+      for (const chunk of chunks) {
+        seq += chunk.length
+        tracker.handleChunk(processStatusChunk(chunk).cleanData)
+        if (pending.length > 0) {
+          handler._dispatchTerminalSideEffectBatchForTest({ ptyId: PTY_ID, seq, facts: pending })
+          pending = []
+        }
+      }
+      tracker.dispose()
+    }
+
+    type RecordedCall = [string, ...unknown[]]
+
+    /** Wrap the policy-visible store actions so byte mode and fact mode can be
+     *  compared as one ordered outcome sequence. Timestamps are masked. */
+    function recordPolicyOutcomes(): RecordedCall[] {
+      const calls: RecordedCall[] = []
+      mockStoreState.setRuntimePaneTitle.mockImplementation((...args: unknown[]) => {
+        calls.push(['setRuntimePaneTitle', ...args])
+      })
+      mockStoreState.updateTabTitle.mockImplementation((...args: unknown[]) => {
+        calls.push(['updateTabTitle', ...args])
+      })
+      mockStoreState.markWorktreeUnread.mockImplementation((...args: unknown[]) => {
+        calls.push(['markWorktreeUnread', ...args])
+      })
+      mockStoreState.markTerminalTabUnread.mockImplementation((...args: unknown[]) => {
+        calls.push(['markTerminalTabUnread', ...args])
+      })
+      mockStoreState.markTerminalPaneUnread.mockImplementation((...args: unknown[]) => {
+        calls.push(['markTerminalPaneUnread', ...args])
+      })
+      mockStoreState.setCacheTimerStartedAt.mockImplementation((key: unknown, at: unknown) => {
+        calls.push(['setCacheTimerStartedAt', key, typeof at === 'number' ? '<ts>' : at])
+      })
+      dispatchTerminalNotification.mockImplementation((...args: unknown[]) => {
+        calls.push(['dispatchTerminalNotification', ...args])
+      })
+      return calls
+    }
+
+    it('does not consume bytes: a byte BEL produces no unread or notification', async () => {
+      enableMainAuthority()
+      const { dispose } = await startWatcher()
+
+      emit('build finished\x07')
+      flushSideEffects()
+      vi.advanceTimersByTime(NOTIFICATION_GRACE_MS * 4)
+
+      expect(mockStoreState.markWorktreeUnread).not.toHaveBeenCalled()
+      expect(mockStoreState.markTerminalTabUnread).not.toHaveBeenCalled()
+      expect(dispatchTerminalNotification).not.toHaveBeenCalled()
+      dispose()
+    })
+
+    it('applies bell facts with the byte-mode policy: unread now, OS notification delayed', async () => {
+      enableMainAuthority()
+      const { dispose } = await startWatcher()
+
+      await dispatchFacts([{ kind: 'bell' }])
+
+      expect(mockStoreState.markWorktreeUnread).toHaveBeenCalledWith(WORKTREE_ID)
+      expect(mockStoreState.markTerminalTabUnread).toHaveBeenCalledWith(TAB_ID)
+      expect(dispatchTerminalNotification).not.toHaveBeenCalled()
+
+      vi.advanceTimersByTime(NOTIFICATION_GRACE_MS)
+      expect(dispatchTerminalNotification).toHaveBeenCalledWith(WORKTREE_ID, {
+        source: 'terminal-bell',
+        paneKey: PANE_KEY
+      })
+      dispose()
+    })
+
+    it('fires the cache timer and completion from working→idle facts', async () => {
+      enableMainAuthority()
+      const { dispose } = await startWatcher()
+
+      await dispatchFacts([
+        { kind: 'title', normalizedTitle: '⠋ Build feature', rawTitle: '⠋ Build feature' },
+        { kind: 'agent-working' }
+      ])
+      expect(mockStoreState.setCacheTimerStartedAt).toHaveBeenLastCalledWith(PANE_KEY, null)
+
+      await dispatchFacts([
+        { kind: 'title', normalizedTitle: IDLE_TITLE, rawTitle: IDLE_TITLE },
+        { kind: 'agent-idle', title: IDLE_TITLE }
+      ])
+      expect(mockStoreState.setCacheTimerStartedAt).toHaveBeenLastCalledWith(
+        PANE_KEY,
+        expect.any(Number)
+      )
+
+      vi.advanceTimersByTime(NOTIFICATION_GRACE_MS)
+      expect(dispatchTerminalNotification).toHaveBeenCalledWith(WORKTREE_ID, {
+        source: 'agent-task-complete',
+        terminalTitle: IDLE_TITLE,
+        paneKey: PANE_KEY
+      })
+      dispose()
+    })
+
+    it('clears state without completion attention for stale-derived idle facts', async () => {
+      enableMainAuthority()
+      const { dispose } = await startWatcher()
+
+      await dispatchFacts([
+        { kind: 'title', normalizedTitle: '⠋ Build feature', rawTitle: '⠋ Build feature' },
+        { kind: 'agent-working' }
+      ])
+      // Main's unthrottled 3s stale-title rewrite: titles/cache clear, but a
+      // merely-paused agent must not earn a task-complete notification.
+      await dispatchFacts([
+        {
+          kind: 'title',
+          normalizedTitle: 'Build feature',
+          rawTitle: 'Build feature',
+          staleWorkingTitleClear: true
+        },
+        { kind: 'agent-idle', title: 'Build feature', staleWorkingTitleClear: true }
+      ])
+
+      expect(mockStoreState.setRuntimePaneTitle).toHaveBeenLastCalledWith(
+        TAB_ID,
+        PANE_ID,
+        'Build feature'
+      )
+      expect(mockStoreState.setCacheTimerStartedAt).toHaveBeenLastCalledWith(PANE_KEY, null)
+      vi.advanceTimersByTime(NOTIFICATION_GRACE_MS * 4)
+      expect(dispatchTerminalNotification).not.toHaveBeenCalled()
+      expect(mockStoreState.markWorktreeUnread).not.toHaveBeenCalled()
+      dispose()
+    })
+
+    it('replay batches restore the title only — attention facts never replay', async () => {
+      enableMainAuthority()
+      const { dispose } = await startWatcher()
+
+      await dispatchFacts(
+        [
+          { kind: 'title', normalizedTitle: IDLE_TITLE, rawTitle: IDLE_TITLE },
+          { kind: 'bell' },
+          { kind: 'agent-idle', title: IDLE_TITLE }
+        ],
+        { replay: true }
+      )
+      vi.advanceTimersByTime(NOTIFICATION_GRACE_MS * 4)
+
+      expect(mockStoreState.setRuntimePaneTitle).toHaveBeenCalledWith(TAB_ID, PANE_ID, IDLE_TITLE)
+      expect(mockStoreState.markWorktreeUnread).not.toHaveBeenCalled()
+      expect(mockStoreState.setCacheTimerStartedAt).not.toHaveBeenCalled()
+      expect(dispatchTerminalNotification).not.toHaveBeenCalled()
+      dispose()
+    })
+
+    it('still answers DECSET 2031 and observes PR links from the byte sidecar', async () => {
+      enableMainAuthority()
+      const { dispose, sendInput } = await startWatcher()
+
+      emit('\x1b[?2031h')
+      expect(sendInput).toHaveBeenCalledWith('\x1b[?997;1n')
+
+      emit('PR: https://github.com/orca-dev/orca/pull/42\r\n')
+      expect(mockStoreState.observeTerminalGitHubPullRequestLink).toHaveBeenCalledTimes(1)
+      dispose()
+    })
+
+    it('dispose unregisters the fact consumer and clears a written title slot', async () => {
+      enableMainAuthority()
+      const { dispose } = await startWatcher()
+
+      await dispatchFacts([{ kind: 'title', normalizedTitle: IDLE_TITLE, rawTitle: IDLE_TITLE }])
+      expect(mockStoreState.setRuntimePaneTitle).toHaveBeenCalledWith(TAB_ID, PANE_ID, IDLE_TITLE)
+
+      dispose()
+      expect(mockStoreState.clearRuntimePaneTitle).toHaveBeenCalledWith(TAB_ID, PANE_ID)
+
+      await dispatchFacts([{ kind: 'bell' }])
+      vi.advanceTimersByTime(NOTIFICATION_GRACE_MS * 4)
+      expect(mockStoreState.markWorktreeUnread).not.toHaveBeenCalled()
+      expect(dispatchTerminalNotification).not.toHaveBeenCalled()
+    })
+
+    // The key migration-safety check: the same bytes produce the identical
+    // ordered store outcome whether the watcher parses them directly (kill
+    // switch off) or consumes main-derived facts over the channel.
+    it('produces identical store outcomes via the channel as the byte parser did', async () => {
+      const fixtureChunks = [WORKING_TITLE_OSC, 'agent response body\r\n', `${IDLE_TITLE_OSC}\x07`]
+
+      // Pass 1: legacy byte-parser mode.
+      const byteModeCalls = recordPolicyOutcomes()
+      {
+        const { dispose } = await startWatcher()
+        for (const chunk of fixtureChunks) {
+          emit(chunk)
+          flushSideEffects()
+        }
+        vi.advanceTimersByTime(NOTIFICATION_GRACE_MS)
+        dispose()
+      }
+
+      // Pass 2: fresh modules/store, authority on, facts derived by the
+      // shared main tracker from the same bytes.
+      vi.resetModules()
+      mockStoreState = createMockStoreState()
+      dispatchTerminalNotification.mockReset()
+      const factModeCalls = recordPolicyOutcomes()
+      {
+        enableMainAuthority()
+        const { dispose } = await startWatcher()
+        await emitViaMainTrackerFacts(fixtureChunks)
+        vi.advanceTimersByTime(NOTIFICATION_GRACE_MS)
+        dispose()
+      }
+
+      expect(byteModeCalls.length).toBeGreaterThan(0)
+      expect(factModeCalls).toEqual(byteModeCalls)
+    })
   })
 })

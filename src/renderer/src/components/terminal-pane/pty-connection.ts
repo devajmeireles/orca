@@ -89,14 +89,22 @@ import {
 } from '../../../../shared/agent-session-resume'
 import { isWslUncPath } from '../../../../shared/wsl-paths'
 import { shouldSkipHiddenRendererOutput } from './hidden-renderer-skip-eligibility'
+import {
+  AGENT_TASK_COMPLETE_NOTIFICATION_GRACE_MS,
+  AGENT_TASK_COMPLETE_NOTIFICATION_MAX_WAIT_MS,
+  canDispatchAgentNotificationAfterGrace,
+  isAgentTaskCompleteOsNotificationEnabledFromState,
+  isAgentTaskCompleteTrackingEnabledFromState
+} from './agent-task-complete-policy'
+import {
+  isMainTerminalSideEffectAuthorityForPty,
+  registerTerminalSideEffectFactConsumer
+} from './terminal-side-effect-facts-handler'
 
 const pendingSpawnByPaneKey = new Map<string, Promise<string | null>>()
 const SSH_SESSION_EXPIRED_ERROR = 'SSH_SESSION_EXPIRED'
 const REMOTE_PTY_ID_PREFIX = 'remote:'
 const PTY_CONNECT_DIAG_LIMIT = 200
-const AGENT_TASK_COMPLETE_NOTIFICATION_GRACE_MS = 250
-const AGENT_TASK_COMPLETE_NOTIFICATION_MAX_WAIT_MS = 1500
-const AGENT_TASK_COMPLETE_NOTIFICATION_DETAIL_MAX_AGE_MS = 10_000
 const COMMAND_CODE_OUTPUT_DONE_SETTLE_MS = 1500
 const HIDDEN_OUTPUT_RESTORE_SCROLLBACK_ROWS = 5000
 const HIDDEN_OUTPUT_RESTORE_PENDING_CHARS = 512 * 1024
@@ -346,37 +354,11 @@ type PanePtyBinding = IDisposable & {
 }
 
 function isAgentTaskCompleteNotificationEnabled(): boolean {
-  return isAgentTaskCompleteNotificationEnabledFromState(useAppStore.getState())
-}
-
-function isAgentTaskCompleteNotificationEnabledFromState(
-  state: ReturnType<typeof useAppStore.getState>
-): boolean {
-  const notifications = state.settings?.notifications
-  return notifications?.enabled !== false && notifications?.agentTaskComplete !== false
-}
-
-function isTerminalAttentionEnabledFromState(
-  state: ReturnType<typeof useAppStore.getState>
-): boolean {
-  return state.settings?.experimentalTerminalAttention === true
+  return isAgentTaskCompleteOsNotificationEnabledFromState(useAppStore.getState())
 }
 
 function isAgentTaskCompleteTrackingEnabled(): boolean {
-  const state = useAppStore.getState()
-  return (
-    isAgentTaskCompleteNotificationEnabledFromState(state) ||
-    isTerminalAttentionEnabledFromState(state)
-  )
-}
-
-function isAgentTaskCompleteTrackingEnabledFromState(
-  state: ReturnType<typeof useAppStore.getState>
-): boolean {
-  return (
-    isAgentTaskCompleteNotificationEnabledFromState(state) ||
-    isTerminalAttentionEnabledFromState(state)
-  )
+  return isAgentTaskCompleteTrackingEnabledFromState(useAppStore.getState())
 }
 
 const agentTaskCompleteTrackingEnabledListeners = new Set<() => void>()
@@ -386,7 +368,7 @@ let agentTaskCompleteTrackingSettingsSnapshot: string | null = null
 function getAgentTaskCompleteTrackingSettingsSnapshot(
   state: ReturnType<typeof useAppStore.getState>
 ): string {
-  return `${isAgentTaskCompleteTrackingEnabledFromState(state)}:${isAgentTaskCompleteNotificationEnabledFromState(state)}`
+  return `${isAgentTaskCompleteTrackingEnabledFromState(state)}:${isAgentTaskCompleteOsNotificationEnabledFromState(state)}`
 }
 
 function subscribeAgentTaskCompleteTrackingEnabled(listener: () => void): () => void {
@@ -418,27 +400,6 @@ function subscribeAgentTaskCompleteTrackingEnabled(listener: () => void): () => 
       agentTaskCompleteTrackingSettingsSnapshot = null
     }
   }
-}
-
-function hasAgentNotificationDetail(entry: AgentStatusEntry | undefined): boolean {
-  return Boolean(
-    entry &&
-    Date.now() - entry.updatedAt <= AGENT_TASK_COMPLETE_NOTIFICATION_DETAIL_MAX_AGE_MS &&
-    (entry.lastAssistantMessage || entry.toolName || entry.toolInput)
-  )
-}
-
-function canDispatchAgentNotificationAfterGrace(
-  entry: AgentStatusEntry | undefined,
-  options: { allowDoneDetailAfterGrace?: boolean } = {}
-): boolean {
-  // Why: hook-backed goal/mission loops can report `done` between milestones.
-  // User-input states may notify as soon as detail arrives, but `done` waits
-  // for the max quiet window so resumed work can cancel the pending banner.
-  return (
-    hasAgentNotificationDetail(entry) &&
-    (entry?.state !== 'done' || options.allowDoneDetailAfterGrace === true)
-  )
 }
 
 function recordPtyConnectDiagnostic(message: string): void {
@@ -1013,6 +974,34 @@ export function connectPanePty(
     bindPanePtyId(pane.id, ptyId, deps.tabId)
     pane.container.dataset.ptyId = ptyId
   }
+
+  // Why: with main side-effect authority on, the pane's title/bell/agent
+  // policy callbacks consume pty:sideEffect facts instead of transport byte
+  // parsers (which stay unregistered) — same policy code, single consumer.
+  // restoreTitleOnRegister replaces the eager-replay title restore: main's
+  // title-only snapshot carries the no-attention-replay rule.
+  let unregisterSideEffectFactConsumer: (() => void) | null = null
+  const registerSideEffectFactConsumerForPty = (ptyId: string): void => {
+    if (!mainSideEffectAuthority || disposed) {
+      return
+    }
+    unregisterSideEffectFactConsumer?.()
+    unregisterSideEffectFactConsumer = registerTerminalSideEffectFactConsumer({
+      ptyId,
+      callbacks: {
+        onTitleChange,
+        onBell,
+        onAgentBecameIdle,
+        onAgentBecameWorking,
+        onAgentExited
+      },
+      restoreTitleOnRegister: true
+    })
+  }
+  const dropSideEffectFactConsumer = (): void => {
+    unregisterSideEffectFactConsumer?.()
+    unregisterSideEffectFactConsumer = null
+  }
   const clearPanePtyFitBinding = (): void => {
     // Why: fit bindings live in a module-level map, so pane teardown must
     // clear them explicitly instead of relying on DOM removal.
@@ -1045,6 +1034,7 @@ export function connectPanePty(
 
   const onExit = (ptyId: string): void => {
     agentCompletionCoordinator.dispose()
+    dropSideEffectFactConsumer()
     clearPanePtyFitBinding()
     // Why: sleep and intentional pane-close/restart paths already record the
     // desired lifecycle state before kill. Do not erase wake hints here.
@@ -1084,10 +1074,18 @@ export function connectPanePty(
   let hasConsideredInitialCacheTimerSeed = false
   let allowInitialIdleCacheSeed = false
 
-  const onTitleChange = (title: string, rawTitle: string): void => {
+  const onTitleChange = (
+    title: string,
+    rawTitle: string,
+    meta?: { staleWorkingTitleClear?: boolean }
+  ): void => {
     manager.setPaneGpuRendering(pane.id, !isGeminiTerminalTitle(rawTitle))
     deps.setRuntimePaneTitle(deps.tabId, pane.id, title)
-    if (syncAgentTaskCompleteTrackingEnabled()) {
+    // Why: a stale-derived cleared title comes from main's unthrottled 3s
+    // timer, not agent output. It must update the visible title but never
+    // feed completion tracking — observeTitle would classify the cleared
+    // title as idle and mint a task-complete for a merely-paused agent.
+    if (!meta?.staleWorkingTitleClear && syncAgentTaskCompleteTrackingEnabled()) {
       agentCompletionCoordinator.observeTitle(rawTitle)
     }
     // Why: only the focused pane should drive the tab title — otherwise two
@@ -1206,6 +1204,7 @@ export function connectPanePty(
 
   const onPtySpawn = (ptyId: string): void => {
     setPanePtyFitBinding(ptyId)
+    registerSideEffectFactConsumerForPty(ptyId)
     deps.syncPanePtyLayoutBinding(pane.id, ptyId)
     deps.updateTabPtyId(deps.tabId, ptyId)
     // Why: Command Code has no prompt-start hook. Seed the visible working row
@@ -1406,7 +1405,16 @@ export function connectPanePty(
   // findable after the OS banner is gone. Double-firing with a concurrent BEL
   // is handled by delaying the BEL OS notification below; main still keeps a
   // 5 s per-worktree dedupe as the final guard.
-  const onAgentBecameIdle = (title: string): void => {
+  const onAgentBecameIdle = (title: string, meta?: { staleWorkingTitleClear?: boolean }): void => {
+    // Why: a stale-derived idle comes from main's UNTHROTTLED 3s timer, not
+    // observed bytes — a merely-paused agent (>3s silent mid-task, window
+    // minimized) would otherwise mint a false task-complete OS notification
+    // that renderer timer throttling previously damped. Clear session-tied
+    // state only; never schedule completion attention from it.
+    if (meta?.staleWorkingTitleClear) {
+      deps.setCacheTimerStartedAt(cacheKey, null)
+      return
+    }
     // Why: only start the prompt-cache countdown for Claude agents — other
     // agents have different (or no) prompt-caching semantics and showing a
     // timer for them would be misleading.
@@ -1488,6 +1496,14 @@ export function connectPanePty(
   const activeRuntimeEnvironmentId = state.settings?.activeRuntimeEnvironmentId?.trim() || null
   const runtimeEnvironmentId = remoteRuntimeOwnerForTransport ?? activeRuntimeEnvironmentId
   const shouldOwnAgentStatusInRenderer = runtimeEnvironmentId !== null
+  // Why: when main holds side-effect authority for this PTY's bytes, the
+  // transport must NOT register title/bell/agent byte parsers — the
+  // pty:sideEffect fact consumer below is the single policy consumer.
+  // Decided once at transport creation so a fact never has two consumers.
+  const mainSideEffectAuthority = isMainTerminalSideEffectAuthorityForPty({
+    settings: state.settings,
+    runtimeEnvironmentId
+  })
   const shouldDeliverStartupViaTerminalPaste = paneStartup?.delivery === 'terminal-paste'
   let lastTerminalInputAt = Number.NEGATIVE_INFINITY
   const markTerminalInputSent = (): void => {
@@ -1509,12 +1525,16 @@ export function connectPanePty(
     ...(shellOverride ? { shellOverride } : {}),
     ...(paneStartup?.telemetry ? { telemetry: paneStartup.telemetry } : {}),
     onPtyExit: onExit,
-    onTitleChange,
     onPtySpawn,
-    onBell,
-    onAgentBecameIdle,
-    onAgentBecameWorking,
-    onAgentExited,
+    ...(mainSideEffectAuthority
+      ? {}
+      : {
+          onTitleChange,
+          onBell,
+          onAgentBecameIdle,
+          onAgentBecameWorking,
+          onAgentExited
+        }),
     // Why: local IPC terminals are now model-owned in main: OrcaRuntimeService
     // parses OSC 9999 before renderer delivery and forwards through the hook
     // server with local/SSH identity. Remote-runtime streams do not pass through
@@ -2792,6 +2812,7 @@ export function connectPanePty(
         return
       }
       setPanePtyFitBinding(ptyId)
+      registerSideEffectFactConsumerForPty(ptyId)
       deps.syncPanePtyLayoutBinding(pane.id, ptyId)
       deps.updateTabPtyId(deps.tabId, ptyId)
       agentCompletionCoordinator.startProcessTracking()
@@ -3274,6 +3295,7 @@ export function connectPanePty(
             onError: reportError
           }
         })
+        registerSideEffectFactConsumerForPty(attachPtyId)
         deps.syncPanePtyLayoutBinding(pane.id, attachPtyId)
         deps.updateTabPtyId(deps.tabId, attachPtyId)
         agentCompletionCoordinator.startProcessTracking()
@@ -3324,6 +3346,7 @@ export function connectPanePty(
                 onError: reportError
               }
             })
+            registerSideEffectFactConsumerForPty(spawnedPtyId)
             // Why: attach sets the transport's PTY id; starting process
             // tracking before this point no-ops because getPtyId() is empty.
             agentCompletionCoordinator.startProcessTracking()
@@ -3373,6 +3396,9 @@ export function connectPanePty(
       unregisterBacklogRecovery = null
       unregisterDocumentVisibilityRecovery?.()
       unregisterDocumentVisibilityRecovery = null
+      // Why: a parked-tab watcher may take over this PTY's facts in the same
+      // effect flush; the pane's consumer must be gone before that handoff.
+      dropSideEffectFactConsumer()
       clearPanePtyFitBinding()
       discardTerminalOutput(pane.terminal)
       unregisterE2ePtyDataInjection()

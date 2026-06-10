@@ -1031,6 +1031,7 @@ export function registerPtyHandlers(
   ipcMain.removeHandler('pty:settlePaneSerializer')
   ipcMain.removeHandler('pty:clearPendingPaneSerializer')
   ipcMain.removeHandler('pty:getMainBufferSnapshot')
+  ipcMain.removeHandler('pty:sideEffectSnapshot')
   ipcMain.removeHandler('pty:getRendererDeliveryDebugSnapshot')
   ipcMain.removeHandler('pty:resetRendererDeliveryDebug')
   ipcMain.removeHandler('pty:writeAccepted')
@@ -1984,6 +1985,17 @@ export function registerPtyHandlers(
       }
     }
   )
+
+  // Why: with main holding side-effect authority the renderer no longer
+  // derives titles from replayed bytes on (re)attach. This title-only replay
+  // snapshot restores title state — never historical bells/completions (the
+  // no-attention-replay rule, terminal-side-effect-authority.md).
+  ipcMain.handle('pty:sideEffectSnapshot', (_event, args: { id: string }) => {
+    if (!runtime || typeof args?.id !== 'string' || args.id.length === 0) {
+      return null
+    }
+    return runtime.getTerminalSideEffectSnapshot(args.id)
+  })
 
   ipcMain.handle('pty:getRendererDeliveryDebugSnapshot', (): PtyRendererDeliveryDebugSnapshot => {
     return getPtyRendererDeliveryDebugSnapshot()

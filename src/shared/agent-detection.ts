@@ -89,6 +89,11 @@ const PI_IDLE_PREFIX = '\u03c0 - ' // π - (Pi titlebar extension idle format)
 // eslint-disable-next-line no-control-regex -- intentional terminal escape sequence matching
 const OSC_TITLE_RE = /\x1b\]([012]);([^\x07\x1b]*?)(?:\x07|\x1b\\)/g
 
+// Braille spinner frame glyphs (U+2800–U+28FF) — the decorative animation
+// class agents rotate through while working.
+// eslint-disable-next-line no-control-regex -- intentional unicode range
+const BRAILLE_SPINNER_RE = /[\u2800-\u28FF]/g
+
 /**
  * Extract the last OSC title-set sequence from raw PTY data.
  * Agent CLIs (Claude Code, Gemini, etc.) set OSC titles to announce their
@@ -188,8 +193,7 @@ export function clearWorkingIndicators(title: string): string {
   cleaned = cleaned.replace(GEMINI_SILENT_WORKING, '')
 
   // Braille spinner characters (U+2800–U+28FF)
-  // eslint-disable-next-line no-control-regex -- intentional unicode range
-  cleaned = cleaned.replace(/[\u2800-\u28FF]/g, '')
+  cleaned = cleaned.replace(BRAILLE_SPINNER_RE, '')
 
   // Claude Code ". " working prefix
   if (cleaned.startsWith('. ')) {
@@ -220,6 +224,9 @@ export function createAgentStatusTracker(
   initialTitle?: string
 ): {
   handleTitle: (title: string) => void
+  /** Seed the last-known status after creation without firing callbacks —
+   *  for trackers restored mid-session (app relaunch with persisted titles). */
+  seedTitle: (title: string) => void
   /** Clear accumulated status so a stale working→idle transition cannot fire
    *  after the owning transport is torn down. */
   reset: () => void
@@ -253,6 +260,9 @@ export function createAgentStatusTracker(
       if (newStatus !== null) {
         lastStatus = newStatus
       }
+    },
+    seedTitle(title: string): void {
+      lastStatus = detectAgentStatusFromTitle(title)
     },
     reset(): void {
       lastStatus = null

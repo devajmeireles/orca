@@ -20,30 +20,32 @@ import {
 import { useAppStore } from '@/store'
 import { getSystemPrefersDark } from '@/lib/terminal-theme'
 import { createTerminalGitHubPRLinkDetector } from '@/lib/terminal-github-pr-link-detector'
+import {
+  AGENT_TASK_COMPLETE_NOTIFICATION_GRACE_MS,
+  isAgentTaskCompleteOsNotificationEnabledFromState,
+  isAgentTaskCompleteTrackingEnabledFromState
+} from './agent-task-complete-policy'
 import { subscribeToPtyData } from './pty-dispatcher'
 import { createPtyOutputProcessor } from './pty-transport'
+import {
+  isMainTerminalSideEffectAuthorityForPty,
+  registerTerminalSideEffectFactConsumer
+} from './terminal-side-effect-facts-handler'
 import { dispatchTerminalNotification } from './use-notification-dispatch'
 
 // Why: mirrors AGENT_TASK_COMPLETE_NOTIFICATION_GRACE_MS in pty-connection.ts.
 // The parked path must keep the live path's BEL-vs-completion race window so
 // notification behavior is identical whether a tab is parked or mounted.
-const PARKED_NOTIFICATION_GRACE_MS = 250
+const PARKED_NOTIFICATION_GRACE_MS = AGENT_TASK_COMPLETE_NOTIFICATION_GRACE_MS
 
 type StoreState = ReturnType<typeof useAppStore.getState>
 
-// Why: these settings predicates are duplicated from pty-connection.ts instead
-// of imported — that module drags the whole pane/xterm dependency graph into a
-// watcher that exists precisely to run without a pane.
 function isAgentTaskCompleteOsNotificationEnabled(state: StoreState): boolean {
-  const notifications = state.settings?.notifications
-  return notifications?.enabled !== false && notifications?.agentTaskComplete !== false
+  return isAgentTaskCompleteOsNotificationEnabledFromState(state)
 }
 
 function isAgentTaskCompleteTrackingEnabled(state: StoreState): boolean {
-  return (
-    isAgentTaskCompleteOsNotificationEnabled(state) ||
-    state.settings?.experimentalTerminalAttention === true
-  )
+  return isAgentTaskCompleteTrackingEnabledFromState(state)
 }
 
 export type ParkedTerminalByteWatcherOptions = {
@@ -131,16 +133,11 @@ export function startParkedTerminalByteWatcher(
     }, PARKED_NOTIFICATION_GRACE_MS)
   }
 
-  // Why: reuse the transport's output processor so the parked path keeps the
-  // exact live-path parsing semantics — all-titles ordering, title
-  // normalization, the cursor-agent native-title drop, the OSC-aware stateful
-  // bell detector, and the working/idle agent tracker.
-  const processor = createPtyOutputProcessor({
-    // Why: an agent that was already working at park time must still produce
-    // a working→idle transition; the fresh tracker would otherwise start cold
-    // and never fire the completion entry point while parked.
-    ...(options.initialTitle !== undefined ? { initialAgentTitle: options.initialTitle } : {}),
-    onTitleChange: (title) => {
+  // Why: one policy block for both consumption modes — byte parsing (kill
+  // switch off) and pty:sideEffect facts (main authority on). The semantics
+  // must be identical or flipping the switch changes notification behavior.
+  const sideEffectCallbacks = {
+    onTitleChange: (title: string): void => {
       const state = useAppStore.getState()
       wroteRuntimeTitleSlot = true
       state.setRuntimePaneTitle(tabId, paneId, title)
@@ -148,7 +145,7 @@ export function startParkedTerminalByteWatcher(
         state.updateTabTitle(tabId, title)
       }
     },
-    onBell: () => {
+    onBell: (): void => {
       const state = useAppStore.getState()
       state.markWorktreeUnread(worktreeId)
       state.markTerminalTabUnread(tabId)
@@ -163,7 +160,14 @@ export function startParkedTerminalByteWatcher(
         scheduleTerminalBellNotification()
       }
     },
-    onAgentBecameIdle: (title) => {
+    onAgentBecameIdle: (title: string, meta?: { staleWorkingTitleClear?: boolean }): void => {
+      // Why: stale-derived idles come from main's unthrottled 3s timer, not
+      // observed bytes — clear session state, never schedule the completion
+      // notification a merely-paused agent did not earn (live-path parity).
+      if (meta?.staleWorkingTitleClear) {
+        useAppStore.getState().setCacheTimerStartedAt(paneKey, null)
+        return
+      }
       const state = useAppStore.getState()
       // Why: mirrors pty-connection — null settings means "not hydrated yet";
       // a spurious timestamp is harmless while a dropped one loses the timer.
@@ -196,7 +200,7 @@ export function startParkedTerminalByteWatcher(
         })
       }, PARKED_NOTIFICATION_GRACE_MS)
     },
-    onAgentBecameWorking: () => {
+    onAgentBecameWorking: (): void => {
       // Why: a new API call refreshes the prompt-cache TTL, so clear any
       // running countdown; it restarts when the agent next becomes idle.
       useAppStore.getState().setCacheTimerStartedAt(paneKey, null)
@@ -205,12 +209,43 @@ export function startParkedTerminalByteWatcher(
         scheduleTerminalBellNotification()
       }
     },
-    onAgentExited: () => {
+    onAgentExited: (): void => {
       // Why: title reverting to a plain shell means the agent session ended;
       // a stale countdown must not survive in the sidebar while parked.
       useAppStore.getState().setCacheTimerStartedAt(paneKey, null)
     }
+  }
+
+  // Why: parking eligibility excludes remote-runtime and SSH PTYs, so every
+  // watched PTY's bytes transit local main — when the authority switch is on,
+  // the watcher must NOT register byte parsers (the fact consumer below is
+  // the single policy consumer; double registration would double-fire bells).
+  const mainSideEffectAuthority = isMainTerminalSideEffectAuthorityForPty({
+    settings: useAppStore.getState().settings,
+    runtimeEnvironmentId: null
   })
+
+  // Why (byte-parser mode only): reuse the transport's output processor so
+  // the parked path keeps the exact live-path parsing semantics — all-titles
+  // ordering, normalization, the cursor-agent native-title drop, the
+  // OSC-aware stateful bell detector, and the working/idle agent tracker.
+  // initialAgentTitle: an agent already working at park time must still
+  // produce a working→idle transition; main's continuous tracker covers this
+  // in fact-consumer mode.
+  const processor = mainSideEffectAuthority
+    ? null
+    : createPtyOutputProcessor({
+        ...(options.initialTitle !== undefined ? { initialAgentTitle: options.initialTitle } : {}),
+        ...sideEffectCallbacks
+      })
+  const unregisterFactConsumer = mainSideEffectAuthority
+    ? registerTerminalSideEffectFactConsumer({
+        ptyId,
+        // Why: no title snapshot on park — the pane's runtime title slot is
+        // already current at park time, exactly like the byte-parser mode.
+        callbacks: sideEffectCallbacks
+      })
+    : null
 
   const respondToMode2031Subscribe = (data: string): void => {
     const scan = scanMode2031Sequences(mode2031ScanTail, data)
@@ -225,10 +260,13 @@ export function startParkedTerminalByteWatcher(
     sendInput(mode2031SequenceFor(resolveTerminalColorSchemeMode(settings, getSystemPrefersDark())))
   }
 
+  // Why: the byte sidecar stays in BOTH modes for the 2031 reply and PR-link
+  // scan — those move to main in a later slice. Only the title/bell/agent
+  // parsing is gated: processor is null when main holds authority.
   const unsubscribe = subscribeToPtyData(ptyId, (data) => {
     // Why: empty pane callbacks — the watcher wants only the parser side
     // effects; there is no xterm to deliver bytes to.
-    processor.processData(data, {})
+    processor?.processData(data, {})
     respondToMode2031Subscribe(data)
     for (const link of observeTerminalGitHubPRLink(data)) {
       useAppStore.getState().observeTerminalGitHubPullRequestLink(worktreeId, link)
@@ -241,10 +279,11 @@ export function startParkedTerminalByteWatcher(
     }
     disposed = true
     unsubscribe()
+    unregisterFactConsumer?.()
     // Why: cancels the deferred side-effect drain, stale-title timer, and
     // tracker/bell-detector state so the watcher cannot fire after the
     // revealed pane's live parsers take over.
-    processor.clearAccumulatedState()
+    processor?.clearAccumulatedState()
     clearBellNotificationTimer()
     clearAgentTaskCompleteTimer()
     pendingBellNotification = false

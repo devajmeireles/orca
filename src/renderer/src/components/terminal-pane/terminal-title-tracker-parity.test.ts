@@ -20,6 +20,7 @@ type TitleFactEvent =
   | { kind: 'became-working' }
   | { kind: 'became-idle'; title: string }
   | { kind: 'agent-exited' }
+  | { kind: 'bell' }
 
 type TitleFactPath = {
   events: TitleFactEvent[]
@@ -32,7 +33,8 @@ function createRendererPath(): TitleFactPath {
     onTitleChange: (normalized, raw) => events.push({ kind: 'title', normalized, raw }),
     onAgentBecameWorking: () => events.push({ kind: 'became-working' }),
     onAgentBecameIdle: (title) => events.push({ kind: 'became-idle', title }),
-    onAgentExited: () => events.push({ kind: 'agent-exited' })
+    onAgentExited: () => events.push({ kind: 'agent-exited' }),
+    onBell: () => events.push({ kind: 'bell' })
   })
   const callbacks = { onData: () => {} }
   return {
@@ -56,7 +58,8 @@ function createMainPath(): TitleFactPath {
     onTitle: (normalized, raw) => events.push({ kind: 'title', normalized, raw }),
     onAgentBecameWorking: () => events.push({ kind: 'became-working' }),
     onAgentBecameIdle: (title) => events.push({ kind: 'became-idle', title }),
-    onAgentExited: () => events.push({ kind: 'agent-exited' })
+    onAgentExited: () => events.push({ kind: 'agent-exited' }),
+    onBell: () => events.push({ kind: 'bell' })
   })
   return {
     events,
@@ -143,6 +146,42 @@ describe('main title tracker parity with the renderer transport processor', () =
   it('ignores a title split across chunk boundaries in both paths', () => {
     feedBoth(paths, `${ESC}]0;split-ti`)
     feedBoth(paths, `tle${BEL}`)
+
+    expect(paths.main.events).toEqual(paths.renderer.events)
+    expect(paths.main.events).toEqual([])
+  })
+
+  it('orders a real BEL after the same chunk titles in both paths', () => {
+    feedBoth(paths, `${ESC}]0;⠋ Claude working${BEL}done text${BEL}`)
+
+    expect(paths.main.events).toEqual(paths.renderer.events)
+    expect(paths.main.events.map((event) => event.kind)).toEqual([
+      'title',
+      'became-working',
+      'bell'
+    ])
+  })
+
+  it('never reports an OSC-terminator BEL as a bell, even spanning chunks', () => {
+    feedBoth(paths, `${ESC}]0;par`)
+    feedBoth(paths, `tial title${BEL}`)
+    feedBoth(paths, `${ESC}]2;st-terminated${ST}`)
+
+    expect(paths.main.events).toEqual(paths.renderer.events)
+    expect(paths.main.events.filter((event) => event.kind === 'bell')).toEqual([])
+  })
+
+  it('treats a BEL after a CAN-cancelled OSC as a real bell in both paths', () => {
+    // ECMA-48 CAN aborts the in-progress OSC; the next BEL is a real bell.
+    feedBoth(paths, `${ESC}]0;truncated`)
+    feedBoth(paths, `\x18${BEL}`)
+
+    expect(paths.main.events).toEqual(paths.renderer.events)
+    expect(paths.main.events).toEqual([{ kind: 'bell' }])
+  })
+
+  it('keeps bells suppressed inside OSC 9999 status payloads in both paths', () => {
+    feedBoth(paths, `${ESC}]9999;{"state":"working","agentType":"codex"}${BEL}`)
 
     expect(paths.main.events).toEqual(paths.renderer.events)
     expect(paths.main.events).toEqual([])

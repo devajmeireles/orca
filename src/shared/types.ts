@@ -2196,6 +2196,12 @@ export type GlobalSettings = {
    *  Defaults to true; `false` disables parking entirely.
    *  See docs/reference/terminal-hidden-view-parking.md. */
   terminalHiddenViewParking?: boolean
+  /** Kill switch for main-process terminal side-effect authority: when true
+   *  (default), local-daemon/SSH PTY title/bell/agent facts are consumed from
+   *  the `pty:sideEffect` channel and renderer byte parsers stay unregistered
+   *  for those PTYs; `false` restores renderer byte parsing.
+   *  See docs/reference/terminal-side-effect-authority.md. */
+  terminalMainSideEffectAuthority?: boolean
   /** Which agent to pre-select in the new-workspace composer.
    *  - null: auto (first detected agent)
    *  - 'blank': blank terminal (no agent launched)

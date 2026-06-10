@@ -17,24 +17,66 @@ import {
   isCursorNativeAgentTitle,
   normalizeTerminalTitle
 } from './agent-detection'
+import { createBellDetector } from './terminal-bell-detector'
 
 /** Ms of title-less output after a working title before it is cleared. */
 export const STALE_WORKING_TITLE_TIMEOUT_MS = 3000
+
+// Braille spinner frame glyphs (U+2800–U+28FF) — the decorative animation
+// class agents rotate through while working. Mirrors the range
+// clearWorkingIndicators strips in agent-detection.ts.
+// eslint-disable-next-line no-control-regex -- intentional unicode range
+const BRAILLE_SPINNER_RE = /[\u2800-\u28FF]/g
+
+/**
+ * Strip decorative braille spinner frame glyphs for change comparisons.
+ * Two working titles that differ only by the animation frame (e.g.
+ * "⠋ Cursor Agent" vs "⠙ Cursor Agent") compare equal after stripping —
+ * the gate consumers use to avoid fan-out churn on spinner ticks.
+ */
+export function stripBrailleSpinnerGlyphs(title: string): string {
+  return title.replace(BRAILLE_SPINNER_RE, '').trim()
+}
+
+/** Provenance for title/idle facts. `staleWorkingTitleClear` marks facts
+ *  synthesized by the 3s stale-working-title timer rather than observed
+ *  bytes — consumers must not treat them as genuine task completions. */
+export type TerminalTitleFactMeta = {
+  staleWorkingTitleClear?: boolean
+}
 
 export type TerminalTitleTrackerCallbacks = {
   /**
    * Fired once per observed OSC title, in byte order — including the
    * synthesized cleared title when the stale-working timer fires.
    */
-  onTitle?: (normalizedTitle: string, rawTitle: string) => void
-  onAgentBecameIdle?: (title: string) => void
+  onTitle?: (normalizedTitle: string, rawTitle: string, meta?: TerminalTitleFactMeta) => void
+  onAgentBecameIdle?: (title: string, meta?: TerminalTitleFactMeta) => void
   onAgentBecameWorking?: () => void
   onAgentExited?: () => void
+  /**
+   * Fired once per chunk containing a real BEL (OSC-aware, escape state kept
+   * across chunks), after the chunk's title facts — the renderer drain order.
+   */
+  onBell?: () => void
 }
 
 export type TerminalTitleTracker = {
   /** Feed one raw PTY chunk; titles are applied synchronously in byte order. */
   handleChunk: (data: string) => void
+  /**
+   * Apply a main-fabricated OSC title/BEL frame (agent hook spinner frames).
+   * Parsed statelessly — never through the chunk bell detector — so a
+   * synthetic tick landing between two real chunks that split an OSC cannot
+   * corrupt the cross-chunk escape state into phantom or swallowed bells.
+   */
+  applySyntheticTitleFrame: (frame: string) => void
+  /**
+   * Seed the last-known title for a tracker created mid-session (app relaunch
+   * with persisted/snapshot titles). No-ops once any title has been observed
+   * or seeded — live state always wins. Fires no callbacks.
+   */
+  seedInitialTitle: (rawTitle: string) => void
   /** Last title surfaced through onTitle, after normalization. */
   getLastNormalizedTitle: () => string | null
   /** Cancel the stale-title timer and clear accumulated tracker state. */
@@ -45,18 +87,26 @@ export function createTerminalTitleTracker(
   callbacks: TerminalTitleTrackerCallbacks,
   options: { initialTitle?: string } = {}
 ): TerminalTitleTracker {
-  const { onTitle, onAgentBecameIdle, onAgentBecameWorking, onAgentExited } = callbacks
+  const { onTitle, onAgentBecameIdle, onAgentBecameWorking, onAgentExited, onBell } = callbacks
+  const bellDetector = onBell ? createBellDetector() : null
   // Why: seed both the emitted-title memory (stale-title probe) and the agent
   // tracker so a mid-session tracker behaves as if it had observed the pane's
   // last live title — parity with the renderer processor's seeding.
   let lastEmittedTitle: string | null =
     options.initialTitle !== undefined ? normalizeTerminalTitle(options.initialTitle) : null
   let staleTitleTimer: ReturnType<typeof setTimeout> | null = null
+  // Why: set while the stale timer's cleared title flows through the agent
+  // tracker so the resulting idle callback carries timer provenance — the
+  // renderer must not turn a stale clear into a task-complete notification.
+  let applyingStaleWorkingTitleClear = false
   const agentTracker =
     onAgentBecameIdle || onAgentBecameWorking || onAgentExited
       ? createAgentStatusTracker(
           (title) => {
-            onAgentBecameIdle?.(title)
+            onAgentBecameIdle?.(
+              title,
+              applyingStaleWorkingTitleClear ? { staleWorkingTitleClear: true } : undefined
+            )
           },
           onAgentBecameWorking,
           onAgentExited,
@@ -84,23 +134,31 @@ export function createTerminalTitleTracker(
   }
 
   function handleChunk(data: string): void {
+    // Why: this is main's per-chunk hot path — scan for the OSC introducer
+    // once and share the result with the bell detector's fast-path gate.
+    const containsOscIntroducer = data.includes('\x1b]')
+    // Why: the bell detector must consume EVERY chunk so OSC sequences that
+    // span chunk boundaries keep their escape state, even when the chunk has
+    // no title. The fact itself is surfaced after the chunk's titles, the
+    // renderer drain's order (payloads → titles → bell).
+    const containsBell = bellDetector
+      ? bellDetector.chunkContainsBell(data, { containsOscIntroducer })
+      : false
     // Why: feed EVERY OSC title in the chunk in byte order, never just the
     // last one. node-pty plus the main-process batch window commonly coalesce
     // multiple title updates into a single payload; a last-title reader drops
     // intra-chunk working→idle transitions (issue #1083).
-    const titles = data.includes('\x1b]') ? extractAllOscTitles(data) : []
+    const titles = containsOscIntroducer ? extractAllOscTitles(data) : []
     if (titles.length > 0) {
       clearStaleTitleTimer()
       for (const title of titles) {
         applyObservedTitle(title)
       }
-      return
-    }
-    // Why: agents that exit without resetting their title leave a stale
-    // working spinner behind. Any title-less output while the last title
-    // classifies as working restarts a 3s timer that rewrites the title to
-    // its cleared form — the renderer transport's stale-title semantics.
-    if (
+    } else if (
+      // Why: agents that exit without resetting their title leave a stale
+      // working spinner behind. Any title-less output while the last title
+      // classifies as working restarts a 3s timer that rewrites the title to
+      // its cleared form — the renderer transport's stale-title semantics.
       data.length > 0 &&
       lastEmittedTitle !== null &&
       detectAgentStatusFromTitle(lastEmittedTitle) === 'working'
@@ -111,19 +169,64 @@ export function createTerminalTitleTracker(
         if (lastEmittedTitle && detectAgentStatusFromTitle(lastEmittedTitle) === 'working') {
           const cleared = clearWorkingIndicators(lastEmittedTitle)
           lastEmittedTitle = cleared
-          onTitle?.(cleared, cleared)
-          agentTracker?.handleTitle(cleared)
+          // Why: tag timer-synthesized facts. Main's timer is unthrottled
+          // (unlike the renderer timers that previously damped this path in
+          // hidden windows), so a merely-paused agent must be distinguishable
+          // from a genuine working→idle completion downstream.
+          applyingStaleWorkingTitleClear = true
+          try {
+            onTitle?.(cleared, cleared, { staleWorkingTitleClear: true })
+            agentTracker?.handleTitle(cleared)
+          } finally {
+            applyingStaleWorkingTitleClear = false
+          }
         }
       }, STALE_WORKING_TITLE_TIMEOUT_MS)
+    }
+    if (containsBell) {
+      onBell?.()
+    }
+  }
+
+  function applySyntheticTitleFrame(frame: string): void {
+    // Why: synthetic frames have an exact main-fabricated shape, so they are
+    // parsed statelessly here. Feeding them through handleChunk would run the
+    // stateful bell detector: a tick landing while a REAL OSC is split across
+    // two chunks would consume the pending escape state, minting a phantom
+    // bell from the continuation chunk or swallowing a real one.
+    const titles = extractAllOscTitles(frame)
+    if (titles.length > 0) {
+      clearStaleTitleTimer()
+      for (const title of titles) {
+        applyObservedTitle(title)
+      }
+    }
+    // The deliberate permission BEL rides outside the OSC title sequence. A
+    // FRESH detector instance keeps the OSC-terminator-vs-bell semantics
+    // while guaranteeing zero interaction with the chunk detector's state.
+    if (onBell && createBellDetector().chunkContainsBell(frame)) {
+      onBell()
     }
   }
 
   return {
     handleChunk,
+    applySyntheticTitleFrame,
+    seedInitialTitle(rawTitle: string): void {
+      // Why: the cursor-agent literal drop applies to seeds too — restoring
+      // the bare native title would stomp synthesized spinner state exactly
+      // like emitting it live would.
+      if (lastEmittedTitle !== null || !rawTitle || isCursorNativeAgentTitle(rawTitle)) {
+        return
+      }
+      lastEmittedTitle = normalizeTerminalTitle(rawTitle)
+      agentTracker?.seedTitle(rawTitle)
+    },
     getLastNormalizedTitle: () => lastEmittedTitle,
     dispose(): void {
       clearStaleTitleTimer()
       agentTracker?.reset()
+      bellDetector?.reset()
     }
   }
 }

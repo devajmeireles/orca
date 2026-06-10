@@ -274,6 +274,7 @@ export function getDefaultSettings(homedir: string): GlobalSettings {
     activeClaudeManagedAccountId: null,
     terminalScopeHistoryByWorktree: true,
     terminalHiddenViewParking: true,
+    terminalMainSideEffectAuthority: true,
     defaultTuiAgent: null,
     disabledTuiAgents: [...DEFAULT_DISABLED_TUI_AGENTS],
     claudeAgentTeamsDefaultDisabledMigrated: true,
