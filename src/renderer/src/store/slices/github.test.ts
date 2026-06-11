@@ -1666,6 +1666,76 @@ describe('createGitHubSlice.fetchPRForBranch', () => {
     }
   })
 
+  it('ignores a direct exact linked PR refresh after the worktree was unlinked', async () => {
+    const store = createTestStore()
+    const repoPath = '/repo'
+    const repoId = 'repo-1'
+    const branch = 'feature/unlinked-direct-pr'
+    const worktreeId = 'wt-unlinked-direct-pr'
+    const hostedReviewCacheKey = getHostedReviewCacheKey(repoPath, branch, null, repoId)
+    let resolveRefresh: (
+      value: Awaited<ReturnType<typeof mockApi.gh.refreshPRNow>>
+    ) => void = () => {}
+    const refresh = new Promise<Awaited<ReturnType<typeof mockApi.gh.refreshPRNow>>>((resolve) => {
+      resolveRefresh = resolve
+    })
+    mockApi.gh.refreshPRNow.mockReturnValueOnce(refresh)
+
+    store.setState({
+      repos: [{ id: repoId, path: repoPath, name: 'repo', kind: 'git' }],
+      worktreesByRepo: {
+        [repoId]: [
+          {
+            id: worktreeId,
+            repoId,
+            path: '/repo/worktrees/unlinked-direct-pr',
+            branch,
+            displayName: 'unlinked-direct-pr',
+            isMainWorktree: false,
+            isBare: false,
+            isArchived: false,
+            linkedPR: 12
+          }
+        ]
+      }
+    } as unknown as Partial<AppState>)
+
+    const request = store.getState().fetchPRForBranch(repoPath, branch, {
+      force: true,
+      repoId,
+      worktreeId,
+      linkedPRNumber: 12
+    })
+    store.setState({
+      worktreesByRepo: {
+        [repoId]: [
+          {
+            id: worktreeId,
+            repoId,
+            path: '/repo/worktrees/unlinked-direct-pr',
+            branch,
+            displayName: 'unlinked-direct-pr',
+            isMainWorktree: false,
+            isBare: false,
+            isArchived: false,
+            linkedPR: null
+          }
+        ]
+      },
+      hostedReviewCache: {},
+      prCache: {}
+    } as unknown as Partial<AppState>)
+    resolveRefresh({
+      kind: 'found',
+      pr: makePR({ number: 12, title: 'Stale exact linked PR' }),
+      fetchedAt: Date.now()
+    })
+
+    await expect(request).resolves.toBeNull()
+    expect(store.getState().prCache[`${repoId}::${branch}`]).toBeUndefined()
+    expect(store.getState().hostedReviewCache[hostedReviewCacheKey]).toBeUndefined()
+  })
+
   it('preserves cached PR data when a forced coordinator refresh errors', async () => {
     const store = createTestStore()
     const repoPath = '/repo'
@@ -2095,6 +2165,51 @@ describe('createGitHubSlice.fetchPRForBranch', () => {
       fetchedAt: 3,
       linkedReviewHintKey: 'github:12'
     })
+  })
+
+  it('ignores a queued exact linked PR refresh after the worktree was unlinked', () => {
+    const store = createTestStore()
+    const repoPath = '/repo'
+    const repoId = 'repo-1'
+    const branch = 'feature/unlinked-event-pr'
+    const cacheKey = `${repoId}::${branch}`
+    const worktreeId = 'wt-unlinked-event-pr'
+    const hostedReviewCacheKey = getHostedReviewCacheKey(repoPath, branch, null, repoId)
+
+    store.setState({
+      worktreesByRepo: {
+        [repoId]: [
+          {
+            id: worktreeId,
+            repoId,
+            path: '/repo/worktrees/unlinked-event-pr',
+            branch,
+            displayName: 'unlinked-event-pr',
+            isMainWorktree: false,
+            isBare: false,
+            isArchived: false,
+            linkedPR: null
+          }
+        ]
+      },
+      hostedReviewCache: {},
+      prCache: {}
+    } as unknown as Partial<AppState>)
+
+    store.getState().applyGitHubPRRefreshEvent({
+      sequence: 1,
+      aliases: [{ cacheKey, repoId, repoPath, branch, worktreeId, linkedPRNumber: 12 }],
+      reason: 'visible',
+      requestStartedAt: Date.now() - 1_000,
+      outcome: {
+        kind: 'found',
+        pr: makePR({ number: 12, title: 'Stale queued linked PR' }),
+        fetchedAt: Date.now()
+      }
+    })
+
+    expect(store.getState().prCache[cacheKey]).toBeUndefined()
+    expect(store.getState().hostedReviewCache[hostedReviewCacheKey]).toBeUndefined()
   })
 
   it('uses the in-flight event entry to allow same-millisecond coordinator refreshes', () => {

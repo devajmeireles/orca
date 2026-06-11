@@ -2501,6 +2501,7 @@ describe('worktree remote runtime mutations', () => {
     expect(fetchPRForBranch).toHaveBeenCalledWith('/repos/orca', 'feature/pr-link', {
       force: true,
       repoId: 'repo1',
+      worktreeId: wt.id,
       linkedPRNumber: null,
       fallbackPRNumber: null,
       fallbackPRSource: 'explicit'
@@ -2546,6 +2547,7 @@ describe('worktree remote runtime mutations', () => {
     expect(fetchPRForBranch).toHaveBeenCalledWith('/repos/orca', 'feature/pr-link', {
       force: true,
       repoId: 'repo1',
+      worktreeId: wt.id,
       linkedPRNumber: null,
       fallbackPRNumber: null,
       fallbackPRSource: 'explicit'
@@ -2735,6 +2737,7 @@ describe('worktree remote runtime mutations', () => {
     expect(fetchPRForBranch).toHaveBeenCalledWith('/repos/orca', 'feature/pr-link', {
       force: true,
       repoId: 'repo1',
+      worktreeId: wt.id,
       linkedPRNumber: null,
       fallbackPRNumber: null,
       fallbackPRSource: 'explicit'
