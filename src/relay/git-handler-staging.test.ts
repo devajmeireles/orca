@@ -80,6 +80,11 @@ describe('GitHandler — commit & staging', () => {
   describe('createInitialCommit', () => {
     it('creates the initial branch ref through the dedicated relay RPC', async () => {
       execFileSync('git', ['init', '--bare', '--quiet'], { cwd: tmpDir, stdio: 'pipe' })
+      // Why: CI git lacks init.defaultBranch, so bare init lands on master there.
+      execFileSync('git', ['symbolic-ref', 'HEAD', 'refs/heads/main'], {
+        cwd: tmpDir,
+        stdio: 'pipe'
+      })
       execFileSync('git', ['config', 'user.email', 'test@test.com'], {
         cwd: tmpDir,
         stdio: 'pipe'
@@ -101,6 +106,11 @@ describe('GitHandler — commit & staging', () => {
 
     it('returns an existing local branch without creating HEAD', async () => {
       execFileSync('git', ['init', '--bare', '--quiet'], { cwd: tmpDir, stdio: 'pipe' })
+      // Why: CI git lacks init.defaultBranch, so bare init lands on master there.
+      execFileSync('git', ['symbolic-ref', 'HEAD', 'refs/heads/main'], {
+        cwd: tmpDir,
+        stdio: 'pipe'
+      })
       execFileSync('git', ['config', 'user.email', 'test@test.com'], {
         cwd: tmpDir,
         stdio: 'pipe'

@@ -29,6 +29,13 @@ function initRepo(dir: string, branch = 'main'): void {
   git(dir, ['symbolic-ref', 'HEAD', `refs/heads/${branch}`])
 }
 
+// Why: CI git has no init.defaultBranch, so bare init lands on master there;
+// pin HEAD so assertions on 'main' hold on every machine.
+function initBareRepo(dir: string, extraArgs: string[] = []): void {
+  git(dir, ['init', '--bare', '--quiet', ...extraArgs])
+  git(dir, ['symbolic-ref', 'HEAD', 'refs/heads/main'])
+}
+
 function configureIdentity(dir: string): void {
   git(dir, ['config', 'user.email', 'test@example.com'])
   git(dir, ['config', 'user.name', 'Test User'])
@@ -113,7 +120,7 @@ describe('createInitialCommit', () => {
   })
 
   it('creates a bare unborn repository ref through plumbing', async () => {
-    git(tmpDir, ['init', '--bare', '--quiet'])
+    initBareRepo(tmpDir)
     configureIdentity(tmpDir)
 
     await expect(createInitialCommit(makeExec(tmpDir))).resolves.toEqual({
@@ -128,7 +135,7 @@ describe('createInitialCommit', () => {
 
   it('creates a sha256 bare unborn repository ref through plumbing when supported', async () => {
     try {
-      git(tmpDir, ['init', '--bare', '--object-format=sha256', '--quiet'])
+      initBareRepo(tmpDir, ['--object-format=sha256'])
     } catch {
       return
     }
@@ -146,7 +153,7 @@ describe('createInitialCommit', () => {
   })
 
   it('creates a bare unborn custom HEAD ref and returns its short name', async () => {
-    git(tmpDir, ['init', '--bare', '--quiet'])
+    initBareRepo(tmpDir)
     configureIdentity(tmpDir)
     git(tmpDir, ['symbolic-ref', 'HEAD', 'refs/heads/trunk'])
 
@@ -206,7 +213,7 @@ describe('createInitialCommit', () => {
   })
 
   it('no-ops in a bare unborn repository when another local branch exists', async () => {
-    git(tmpDir, ['init', '--bare', '--quiet'])
+    initBareRepo(tmpDir)
     configureIdentity(tmpDir)
     const developSha = makeCommitObject(tmpDir)
     git(tmpDir, ['update-ref', 'refs/heads/develop', developSha])
@@ -221,7 +228,7 @@ describe('createInitialCommit', () => {
   })
 
   it('no-ops with a remote-only branch and skips remote HEAD symrefs', async () => {
-    git(tmpDir, ['init', '--bare', '--quiet'])
+    initBareRepo(tmpDir)
     configureIdentity(tmpDir)
     const remoteSha = makeCommitObject(tmpDir)
     git(tmpDir, ['update-ref', 'refs/remotes/origin/develop', remoteSha])
@@ -286,7 +293,7 @@ describe('createInitialCommit', () => {
   })
 
   it('recovers when bare update-ref compare-and-swap loses a race', async () => {
-    git(tmpDir, ['init', '--bare', '--quiet'])
+    initBareRepo(tmpDir)
     configureIdentity(tmpDir)
     let racedSha: string | null = null
     let updateRefCalls = 0
@@ -314,7 +321,7 @@ describe('createInitialCommit', () => {
   })
 
   it('falls back to main for a bare unborn repository with unusual HEAD', async () => {
-    git(tmpDir, ['init', '--bare', '--quiet'])
+    initBareRepo(tmpDir)
     configureIdentity(tmpDir)
     git(tmpDir, ['symbolic-ref', 'HEAD', 'refs/tags/bootstrap'])
 
