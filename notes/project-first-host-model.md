@@ -794,6 +794,10 @@ Landed so far:
 - Updated workspace creation target resolution so selecting a host with
   non-ready setup metadata reports `setup-not-ready` instead of
   `project-not-set-up-on-host`.
+- Broadened project settings setup-host choices to use the shared execution
+  host registry. The setup flow can now offer hydrated runtime hosts even when
+  they are not the currently focused Orca server, and host labels stay aligned
+  with sidebar rename overrides.
 - Added tests for local repos, SSH repos, same-provider multi-host grouping,
   no-identity same-name non-grouping, selector cache behavior, persistence
   backfill, repo mutation synchronization, renderer hydration, runtime RPC
@@ -829,7 +833,8 @@ Important limitation:
 
 Remaining end-to-end work:
 
-- broaden setup-on-host flows beyond known local, SSH, and active runtime hosts
+- continue broadening setup-on-host flows beyond the shared known-host registry
+  toward bulk setup and newly added host onboarding
 - finish SSH clone streamed-progress parity, provisioning, and bulk setup-on-host
   flows
 - add actual provisioning execution APIs instead of only recording independent

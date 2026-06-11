@@ -514,6 +514,8 @@ Already partially landed:
   metadata from hosts that have no setup
 - workspace creation target resolution reports `setup-not-ready` when a
   selected host has non-ready setup metadata
+- project settings setup-host choices now use the shared execution host
+  registry, including hydrated runtime hosts that are not currently focused
 
 Not complete yet:
 

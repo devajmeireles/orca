@@ -162,4 +162,43 @@ describe('execution host registry', () => {
       { id: 'runtime:env-2', kind: 'runtime', label: 'env-2', health: 'available' }
     ])
   })
+
+  it('includes runtime hosts from hydrated status even when they are not focused', () => {
+    const hosts = buildExecutionHostRegistry({
+      repos: [],
+      settings: { activeRuntimeEnvironmentId: null },
+      runtimeStatusByEnvironmentId: new Map([
+        [
+          'gpu',
+          {
+            appVersion: '1.8.0',
+            status: {
+              runtimeId: 'runtime-gpu',
+              rendererGraphEpoch: 1,
+              graphStatus: 'ready',
+              authoritativeWindowId: 1,
+              liveTabCount: 0,
+              liveLeafCount: 0,
+              runtimeProtocolVersion: RUNTIME_PROTOCOL_VERSION,
+              minCompatibleRuntimeClientVersion: 1,
+              capabilities: ['project-host-setup.v1'],
+              hostPlatform: 'linux'
+            }
+          }
+        ]
+      ])
+    })
+
+    expect(hosts).toMatchObject([
+      { id: 'local', health: 'local' },
+      {
+        id: 'runtime:gpu',
+        kind: 'runtime',
+        label: 'gpu',
+        health: 'available',
+        capabilities: ['project-host-setup.v1'],
+        platform: 'linux'
+      }
+    ])
+  })
 })

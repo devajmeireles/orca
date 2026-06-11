@@ -320,4 +320,78 @@ describe('RepositoryHostSetupsSection', () => {
       setupMethod: 'provisioned'
     })
   })
+
+  it('offers inactive runtime hosts discovered from hydrated runtime status', async () => {
+    const createProjectHostSetup = vi.fn().mockResolvedValue({
+      project: makeProject({ id: 'github:stablyai/orca' }),
+      setup: makeSetup({
+        id: 'gpu-setup',
+        projectId: 'github:stablyai/orca',
+        repoId: '',
+        hostId: 'runtime:gpu',
+        path: '',
+        setupState: 'not-set-up',
+        setupMethod: 'provisioned'
+      })
+    })
+    const localRepo = makeRepo({
+      id: 'local-repo',
+      displayName: 'Orca',
+      path: '/Users/alice/orca'
+    })
+    useAppStore.setState({
+      repos: [localRepo],
+      projects: [makeProject({ id: 'github:stablyai/orca' })],
+      projectHostSetups: [
+        makeSetup({
+          id: 'local-repo',
+          projectId: 'github:stablyai/orca',
+          repoId: 'local-repo',
+          hostId: 'local',
+          path: '/Users/alice/orca'
+        })
+      ],
+      settings: { activeRuntimeEnvironmentId: null } as never,
+      runtimeStatusByEnvironmentId: new Map([
+        [
+          'gpu',
+          {
+            checkedAt: 1,
+            appVersion: '1.8.0',
+            status: {
+              runtimeId: 'runtime-gpu',
+              rendererGraphEpoch: 1,
+              graphStatus: 'ready',
+              authoritativeWindowId: 1,
+              liveTabCount: 0,
+              liveLeafCount: 0,
+              runtimeProtocolVersion: 1,
+              minCompatibleRuntimeClientVersion: 1,
+              capabilities: ['project-host-setup.v1']
+            }
+          }
+        ]
+      ]),
+      createProjectHostSetup
+    })
+
+    renderSection(localRepo)
+
+    expect(container.textContent).toContain('gpu')
+    const trackButton = Array.from(container.querySelectorAll('button')).find(
+      (button) => button.textContent === 'Track setup'
+    )
+
+    await act(async () => {
+      trackButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    })
+
+    expect(createProjectHostSetup).toHaveBeenCalledWith({
+      projectId: 'github:stablyai/orca',
+      hostId: 'runtime:gpu',
+      displayName: 'Orca',
+      setupState: 'not-set-up',
+      setupMethod: 'provisioned'
+    })
+  })
 })

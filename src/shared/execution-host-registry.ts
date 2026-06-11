@@ -161,6 +161,9 @@ export function buildExecutionHostRegistry(args: {
       args.runtimeStatusByEnvironmentId
     )
   }
+  for (const environmentId of args.runtimeStatusByEnvironmentId?.keys() ?? []) {
+    addRuntimeHost(hosts, environmentId, environmentId, args.runtimeStatusByEnvironmentId)
+  }
 
   const focusedHost = getSettingsFocusedExecutionHostId(args.settings)
   const parsedFocusedHost = parseExecutionHostId(focusedHost)

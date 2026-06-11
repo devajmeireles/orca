@@ -1,11 +1,11 @@
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { getExecutionHostLabel } from '../../../../shared/execution-host'
+import { type ExecutionHostId } from '../../../../shared/execution-host'
 import {
-  LOCAL_EXECUTION_HOST_ID,
-  toRuntimeExecutionHostId,
-  toSshExecutionHostId,
-  type ExecutionHostId
-} from '../../../../shared/execution-host'
+  buildExecutionHostRegistry,
+  type ExecutionHostRegistryEntry
+} from '../../../../shared/execution-host-registry'
+import { getHostDisplayLabelOverrides } from '../../../../shared/host-setting-overrides'
 import type { ProjectHostSetup, ProjectHostSetupState, Repo } from '../../../../shared/types'
 import { useAppStore } from '../../store'
 import { getProjectHostSetupProjectionFromState } from '../../store/selectors'
@@ -58,35 +58,18 @@ function getSetupStateLabel(setupState: ProjectHostSetupState): string {
 
 function buildSetupHostOptions({
   projectHostSetups,
-  sshTargetLabels,
-  activeRuntimeEnvironmentId
+  hostOptions
 }: {
   projectHostSetups: ProjectHostSetup[]
-  sshTargetLabels: Map<string, string>
-  activeRuntimeEnvironmentId: string | null | undefined
+  hostOptions: readonly ExecutionHostRegistryEntry[]
 }): SetupHostOption[] {
   const setupHostIds = new Set(projectHostSetups.map((setup) => setup.hostId))
-  const options: SetupHostOption[] = []
-  if (!setupHostIds.has(LOCAL_EXECUTION_HOST_ID)) {
-    options.push({
-      id: LOCAL_EXECUTION_HOST_ID,
-      label: getExecutionHostLabel(LOCAL_EXECUTION_HOST_ID)
-    })
-  }
-  for (const [targetId, label] of sshTargetLabels) {
-    const id = toSshExecutionHostId(targetId)
-    if (!setupHostIds.has(id)) {
-      options.push({ id, label })
-    }
-  }
-  const runtimeEnvironmentId = activeRuntimeEnvironmentId?.trim()
-  if (runtimeEnvironmentId) {
-    const id = toRuntimeExecutionHostId(runtimeEnvironmentId)
-    if (!setupHostIds.has(id)) {
-      options.push({ id, label: runtimeEnvironmentId })
-    }
-  }
-  return options
+  return hostOptions
+    .filter((host) => !setupHostIds.has(host.id))
+    .map((host) => ({
+      id: host.id,
+      label: host.label || getExecutionHostLabel(host.id)
+    }))
 }
 
 export function RepositoryHostSetupsSection({
@@ -100,9 +83,30 @@ export function RepositoryHostSetupsSection({
   const setupProjectExistingFolder = useAppStore((state) => state.setupProjectExistingFolder)
   const createProjectHostSetup = useAppStore((state) => state.createProjectHostSetup)
   const deleteProjectHostSetup = useAppStore((state) => state.deleteProjectHostSetup)
+  const repos = useAppStore((state) => state.repos)
   const sshTargetLabels = useAppStore((state) => state.sshTargetLabels)
-  const activeRuntimeEnvironmentId = useAppStore(
-    (state) => state.settings?.activeRuntimeEnvironmentId
+  const sshConnectionStates = useAppStore((state) => state.sshConnectionStates)
+  const settings = useAppStore((state) => state.settings)
+  const runtimeStatusByEnvironmentId = useAppStore((state) => state.runtimeStatusByEnvironmentId)
+  const hostLabelOverrides = useMemo(() => getHostDisplayLabelOverrides(settings), [settings])
+  const hostOptions = useMemo(
+    () =>
+      buildExecutionHostRegistry({
+        repos,
+        settings,
+        sshTargetLabels,
+        sshConnectionStates,
+        runtimeStatusByEnvironmentId,
+        hostLabelOverrides
+      }),
+    [
+      repos,
+      settings,
+      sshTargetLabels,
+      sshConnectionStates,
+      runtimeStatusByEnvironmentId,
+      hostLabelOverrides
+    ]
   )
   const projectHostSetupProjection = useAppStore((state) =>
     getProjectHostSetupProjectionFromState(state)
@@ -117,8 +121,7 @@ export function RepositoryHostSetupsSection({
     : []
   const setupHostOptions = buildSetupHostOptions({
     projectHostSetups,
-    sshTargetLabels,
-    activeRuntimeEnvironmentId
+    hostOptions
   })
   const [selectedSetupHostId, setSelectedSetupHostId] = useState<ExecutionHostId | null>(null)
   const [setupPath, setSetupPath] = useState('')
