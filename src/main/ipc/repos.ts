@@ -11,6 +11,7 @@ import type {
   BaseRefSearchResult,
   Repo,
   ProjectGroup,
+  FolderWorkspace,
   ProjectGroupImportResult,
   ProjectHostSetupCreateArgs,
   ProjectHostSetupCreateResult,
@@ -24,6 +25,7 @@ import type {
   BaseRefDefaultResult,
   SparsePreset
 } from '../../shared/types'
+import type { FolderWorkspacePathStatusRequest } from '../../shared/folder-workspace-path-status'
 import { isFolderRepo } from '../../shared/repo-kind'
 import { DEFAULT_REPO_BADGE_COLOR } from '../../shared/constants'
 import { normalizeRepoBadgeColor } from '../../shared/repo-badge-color'
@@ -34,6 +36,7 @@ import {
   normalizeRuntimePathForComparison,
   relativePathInsideRoot
 } from '../../shared/cross-platform-path'
+import { isTuiAgent } from '../../shared/tui-agent-config'
 import { invalidateAuthorizedRootsCache } from './filesystem-auth'
 import type { ChildProcess } from 'child_process'
 import { access, mkdir, readdir, rm } from 'fs/promises'
@@ -78,6 +81,11 @@ import { detectRepoIconAndUpstream } from '../repo-icon-autodetect'
 import { getProjectHostSetupForRepo } from '../../shared/project-host-setup-projection'
 import { normalizeExecutionHostId, parseExecutionHostId } from '../../shared/execution-host'
 import { joinRemotePath } from '../ssh/ssh-remote-platform'
+import {
+  assertFolderWorkspacePathUsable,
+  getFolderWorkspacePathStatus,
+  getFolderWorkspacePathStatusForPath
+} from '../project-groups/folder-workspace-path-status'
 
 // Why: `method` answers "which entry point did the user take?", not "what did
 // they add?" — so the IPC the renderer invoked IS the method. We never send
@@ -597,6 +605,7 @@ function emitCloneProgressFromText(mainWindow: BrowserWindow, text: string): voi
 const ProjectGroupCreateArgs = z.object({
   name: z.string().min(1),
   parentPath: z.string().nullable().optional(),
+  connectionId: z.string().nullable().optional(),
   parentGroupId: z.string().nullable().optional(),
   createdFrom: z.enum(['manual', 'folder-scan', 'migration']).optional()
 })
@@ -671,6 +680,64 @@ const ProjectHostSetupUpdateIpcArgs = z.object({
 const ProjectHostSetupDeleteIpcArgs = z.object({
   setupId: z.string().min(1)
 })
+
+const FolderWorkspaceLinkedTaskArgs = z
+  .object({
+    provider: z.enum(['github', 'gitlab', 'linear', 'jira']),
+    type: z.enum(['issue', 'pr', 'mr']),
+    number: z.number().finite(),
+    title: z.string().min(1),
+    url: z.string().min(1),
+    linearIdentifier: z.string().min(1).optional(),
+    jiraIdentifier: z.string().min(1).optional(),
+    repoId: z.string().min(1).optional()
+  })
+  .nullable()
+
+const FolderWorkspaceCreateArgs = z.object({
+  projectGroupId: z.string().min(1),
+  name: z.string().optional(),
+  folderPath: z.string().nullable().optional(),
+  connectionId: z.string().nullable().optional(),
+  linkedTask: FolderWorkspaceLinkedTaskArgs.optional(),
+  createdWithAgent: z.string().refine(isTuiAgent).optional(),
+  pendingFirstAgentMessageRename: z.boolean().optional()
+})
+
+const FolderWorkspaceUpdateArgs = z.object({
+  folderWorkspaceId: z.string().min(1),
+  updates: z.object({
+    name: z.string().optional(),
+    folderPath: z.string().optional(),
+    linkedTask: FolderWorkspaceLinkedTaskArgs.optional(),
+    comment: z.string().optional(),
+    isArchived: z.boolean().optional(),
+    isUnread: z.boolean().optional(),
+    isPinned: z.boolean().optional(),
+    sortOrder: z.number().finite().optional(),
+    manualOrder: z.number().finite().optional(),
+    workspaceStatus: z.string().optional(),
+    createdWithAgent: z.string().refine(isTuiAgent).optional(),
+    pendingFirstAgentMessageRename: z.boolean().optional(),
+    firstAgentMessageRenameError: z.string().nullable().optional(),
+    lastActivityAt: z.number().finite().optional()
+  })
+})
+
+const FolderWorkspaceSelectorArgs = z.object({
+  folderWorkspaceId: z.string().min(1)
+})
+
+const FolderWorkspacePathStatusArgs = z.discriminatedUnion('scope', [
+  z.object({
+    scope: z.literal('folder-workspace'),
+    folderWorkspaceId: z.string().min(1)
+  }),
+  z.object({
+    scope: z.literal('project-group'),
+    projectGroupId: z.string().min(1)
+  })
+])
 
 const ProjectGroupScanNestedArgs = z.object({
   path: z.string().min(1),
@@ -988,6 +1055,11 @@ export function registerRepoHandlers(mainWindow: BrowserWindow, store: Store): v
   ipcMain.removeHandler('projectGroups:scanNested')
   ipcMain.removeHandler('projectGroups:cancelNestedScan')
   ipcMain.removeHandler('projectGroups:importNested')
+  ipcMain.removeHandler('folderWorkspaces:list')
+  ipcMain.removeHandler('folderWorkspaces:create')
+  ipcMain.removeHandler('folderWorkspaces:update')
+  ipcMain.removeHandler('folderWorkspaces:delete')
+  ipcMain.removeHandler('folderWorkspaces:getPathStatus')
   ipcMain.removeHandler('repos:pickFolder')
   ipcMain.removeHandler('repos:pickDirectory')
   ipcMain.removeHandler('repos:clone')
@@ -1114,6 +1186,104 @@ export function registerRepoHandlers(mainWindow: BrowserWindow, store: Store): v
 
   ipcMain.handle('projectGroups:list', () => store.getProjectGroups())
 
+  ipcMain.handle('folderWorkspaces:list', (): FolderWorkspace[] => store.getFolderWorkspaces())
+
+  ipcMain.handle('folderWorkspaces:getPathStatus', async (_event, rawArgs: unknown) => {
+    const args = parseProjectGroupIpcArgs(
+      FolderWorkspacePathStatusArgs,
+      rawArgs,
+      'invalid_folder_workspace_path_status_args'
+    ) as FolderWorkspacePathStatusRequest
+    return getFolderWorkspacePathStatus(store, args, { getSshFilesystemProvider })
+  })
+
+  ipcMain.handle(
+    'folderWorkspaces:create',
+    async (_event, rawArgs: unknown): Promise<FolderWorkspace> => {
+      const args = parseProjectGroupIpcArgs(
+        FolderWorkspaceCreateArgs,
+        rawArgs,
+        'invalid_folder_workspace_create_args'
+      )
+      const projectGroups = store.getProjectGroups()
+      const group = projectGroups.find((entry) => entry.id === args.projectGroupId)
+      const folderPath =
+        typeof args.folderPath === 'string' && args.folderPath.trim().length > 0
+          ? args.folderPath
+          : group?.parentPath
+      if (!group || !folderPath) {
+        throw new Error('folder_workspace_project_group_not_found')
+      }
+      const status = await getFolderWorkspacePathStatusForPath(
+        {
+          folderPath,
+          projectGroupId: group.id,
+          connectionId: args.connectionId ?? group.connectionId ?? null,
+          projectGroups,
+          repos: store.getRepos()
+        },
+        { getSshFilesystemProvider }
+      )
+      assertFolderWorkspacePathUsable(status)
+      const workspace = store.createFolderWorkspace(args)
+      notifyReposChanged(mainWindow)
+      return workspace
+    }
+  )
+
+  ipcMain.handle(
+    'folderWorkspaces:update',
+    async (_event, rawArgs: unknown): Promise<FolderWorkspace | null> => {
+      const args = parseProjectGroupIpcArgs(
+        FolderWorkspaceUpdateArgs,
+        rawArgs,
+        'invalid_folder_workspace_update_args'
+      )
+      if (
+        typeof args.updates.folderPath === 'string' &&
+        args.updates.folderPath.trim().length > 0
+      ) {
+        const workspace = store.getFolderWorkspace(args.folderWorkspaceId)
+        if (!workspace) {
+          return null
+        }
+        const projectGroups = store.getProjectGroups()
+        const status = await getFolderWorkspacePathStatusForPath(
+          {
+            folderPath: args.updates.folderPath,
+            projectGroupId: workspace.projectGroupId,
+            connectionId:
+              workspace.connectionId ??
+              projectGroups.find((entry) => entry.id === workspace.projectGroupId)?.connectionId ??
+              null,
+            projectGroups,
+            repos: store.getRepos()
+          },
+          { getSshFilesystemProvider }
+        )
+        assertFolderWorkspacePathUsable(status)
+      }
+      const updated = store.updateFolderWorkspace(args.folderWorkspaceId, args.updates)
+      if (updated) {
+        notifyReposChanged(mainWindow)
+      }
+      return updated
+    }
+  )
+
+  ipcMain.handle('folderWorkspaces:delete', (_event, rawArgs: unknown): boolean => {
+    const args = parseProjectGroupIpcArgs(
+      FolderWorkspaceSelectorArgs,
+      rawArgs,
+      'invalid_folder_workspace_delete_args'
+    )
+    const deleted = store.removeFolderWorkspace(args.folderWorkspaceId)
+    if (deleted) {
+      notifyReposChanged(mainWindow)
+    }
+    return deleted
+  })
+
   ipcMain.handle('projectGroups:create', (_event, rawArgs: unknown): ProjectGroup => {
     const args = parseProjectGroupIpcArgs(
       ProjectGroupCreateArgs,
@@ -1123,6 +1293,7 @@ export function registerRepoHandlers(mainWindow: BrowserWindow, store: Store): v
     const group = store.createProjectGroup({
       name: args.name,
       parentPath: args.parentPath ?? null,
+      connectionId: args.connectionId ?? null,
       parentGroupId: args.parentGroupId ?? null,
       createdFrom: args.createdFrom ?? 'manual'
     })
@@ -1217,6 +1388,8 @@ export function registerRepoHandlers(mainWindow: BrowserWindow, store: Store): v
         parentPath: scan.selectedPath,
         groupName: args.groupName ?? '',
         mode: args.mode,
+        connectionId: args.connectionId ?? null,
+        repoPaths: selection.selectedPaths,
         createGroup: (input) => store.createProjectGroup(input)
       })
       const results: ProjectGroupImportResult['projects'] = selection.rejectedPaths.map(

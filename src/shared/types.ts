@@ -266,6 +266,8 @@ export type ProjectGroup = {
   id: string
   name: string
   parentPath: string | null
+  /** SSH target ID for folder-backed groups imported from a remote root. */
+  connectionId?: string | null
   parentGroupId: string | null
   createdFrom: ProjectGroupCreatedFrom
   tabOrder: number
@@ -273,6 +275,47 @@ export type ProjectGroup = {
   color: string | null
   createdAt: number
   updatedAt: number
+}
+
+export type WorkspaceScope =
+  | { type: 'worktree'; worktreeId: string }
+  | { type: 'folder'; folderWorkspaceId: string }
+
+export type WorkspaceKey = `worktree:${string}` | `folder:${string}`
+
+export type FolderWorkspace = {
+  id: string
+  projectGroupId: string
+  name: string
+  folderPath: string
+  /** SSH target ID for folder workspaces whose folder path lives remotely. */
+  connectionId?: string | null
+  linkedTask: FolderWorkspaceLinkedTask | null
+  comment: string
+  isArchived: boolean
+  isUnread: boolean
+  isPinned: boolean
+  sortOrder: number
+  /** User-authored sidebar ordering. Higher values render earlier in Manual sort. */
+  manualOrder?: number
+  workspaceStatus?: WorkspaceStatus
+  createdWithAgent?: TuiAgent
+  pendingFirstAgentMessageRename?: boolean
+  firstAgentMessageRenameError?: string | null
+  lastActivityAt: number
+  createdAt: number
+  updatedAt: number
+}
+
+export type FolderWorkspaceLinkedTask = {
+  provider: 'github' | 'gitlab' | 'linear' | 'jira'
+  type: 'issue' | 'pr' | 'mr'
+  number: number
+  title: string
+  url: string
+  linearIdentifier?: string
+  jiraIdentifier?: string
+  repoId?: string
 }
 
 export type NestedRepoScanOptions = {
@@ -841,8 +884,11 @@ export type PersistedOpenFile = {
 
 export type WorkspaceSessionState = {
   activeRepoId: string | null
+  /** Scope-aware active owner for folder workspaces. Legacy worktree UI still reads activeWorktreeId. */
+  activeWorkspaceKey?: WorkspaceKey | null
   activeWorktreeId: string | null
   activeTabId: string | null
+  /** Keys may be legacy raw worktree IDs or canonical WorkspaceKey values. */
   tabsByWorktree: Record<string, TerminalTab[]>
   terminalLayoutsByTabId: Record<string, TerminalLayoutSnapshot>
   /** Worktree IDs that had at least one tab with a live PTY at shutdown.
@@ -3064,6 +3110,7 @@ export type PersistedState = {
   projects: Project[]
   projectHostSetups: ProjectHostSetup[]
   projectGroups: ProjectGroup[]
+  folderWorkspaces: FolderWorkspace[]
   /** Sparse-checkout presets keyed by repoId. Empty record on first launch;
    *  presets are managed from the new-workspace composer and repo settings. */
   sparsePresetsByRepo: Record<string, SparsePreset[]>

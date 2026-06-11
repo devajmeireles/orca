@@ -8,6 +8,7 @@ export const HOST_HEADER_ROW_HEIGHT = 32
 const SECONDARY_GROUP_HEADER_TOP_MARGIN = 4
 const IMPORTED_WORKTREES_LINE_ROW_HEIGHT = 36
 const PENDING_CREATION_ROW_HEIGHT = 56
+const FOLDER_WORKSPACE_ROW_HEIGHT = 64
 
 type WorktreeItemRow = Extract<HostSectionRow, { type: 'item' }>
 export type RenderRow =
@@ -64,6 +65,9 @@ export function estimateRenderRowSize(
   }
   if (row?.type === 'pending-creation') {
     return PENDING_CREATION_ROW_HEIGHT
+  }
+  if (row?.type === 'folder-workspace') {
+    return FOLDER_WORKSPACE_ROW_HEIGHT
   }
   return 116
 }

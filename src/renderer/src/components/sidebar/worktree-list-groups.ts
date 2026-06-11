@@ -5,6 +5,7 @@ import type {
   DetectedWorktree,
   Project,
   ProjectHostSetup,
+  FolderWorkspace,
   Repo,
   ProjectGroup,
   ProjectOrderBy,
@@ -12,7 +13,7 @@ import type {
   WorktreeLineage,
   WorkspaceStatusDefinition
 } from '../../../../shared/types'
-import { branchName } from '@/lib/git-utils'
+import { branchName } from '../../lib/git-utils'
 import {
   getWorkspaceStatus,
   getWorkspaceStatusFromGroupKey,
@@ -25,8 +26,8 @@ import {
   ConductorReviewIcon
 } from './workspace-status-icons'
 import { cloneDefaultWorkspaceStatuses } from '../../../../shared/workspace-statuses'
-import type { AppState } from '@/store/types'
-import { getGitHubPRCacheKey, getLegacyGitHubPRCacheKey } from '@/store/slices/github-cache-key'
+import type { AppState } from '../../store/types'
+import { getGitHubPRCacheKey, getLegacyGitHubPRCacheKey } from '../../store/slices/github-cache-key'
 import { UNGROUPED_PROJECT_GROUP_KEY } from '../../../../shared/project-groups'
 import { getRepoDisplayLabelsByPath } from '@/lib/repo-display-labels'
 import { translate } from '@/i18n/i18n'
@@ -82,13 +83,27 @@ export type PendingCreationRow = {
   repo: Repo | undefined
 }
 
+export type FolderWorkspaceRow = {
+  type: 'folder-workspace'
+  key: string
+  folderWorkspace: FolderWorkspace
+  projectGroup: ProjectGroup
+  depth: number
+  groupDepth: number
+}
+
 /** Minimal shape buildRows needs for an in-flight create. Deliberately not the
  *  full PendingWorktreeCreation: row identity depends only on which creates
  *  exist and their repo, so callers can subscribe on this stable shape and keep
  *  progress-field churn (phase/loaderVisible) from rebuilding the whole list. */
 export type PendingCreationRef = { creationId: string; repoId: string }
 
-export type Row = GroupHeaderRow | WorktreeRow | ImportedWorktreesCardRow | PendingCreationRow
+export type Row =
+  | GroupHeaderRow
+  | WorktreeRow
+  | ImportedWorktreesCardRow
+  | PendingCreationRow
+  | FolderWorkspaceRow
 
 function buildPendingCreationRow(
   creation: PendingCreationRef,
@@ -646,7 +661,8 @@ export function buildRows(
   placeholderRepoIds: ReadonlySet<string> = new Set(),
   importedWorktreesByRepo: ReadonlyMap<string, ImportedWorktreesCardCandidate> = new Map(),
   pendingCreations: readonly PendingCreationRef[] = [],
-  projectGrouping?: ProjectGroupingModel
+  projectGrouping?: ProjectGroupingModel,
+  folderWorkspaces: readonly FolderWorkspace[] = []
 ): Row[] {
   const result: Row[] = []
   const projectIndex = buildProjectGroupingIndex(projectGrouping)
@@ -947,6 +963,23 @@ export function buildRows(
   }
 
   const projectGroupsById = new Map(projectGroups.map((group) => [group.id, group]))
+  const folderWorkspacesByProjectGroupId = new Map<string, FolderWorkspace[]>()
+  for (const workspace of folderWorkspaces) {
+    const group = projectGroupsById.get(workspace.projectGroupId)
+    if (!group?.parentPath) {
+      continue
+    }
+    const list = folderWorkspacesByProjectGroupId.get(workspace.projectGroupId) ?? []
+    list.push(workspace)
+    folderWorkspacesByProjectGroupId.set(workspace.projectGroupId, list)
+  }
+  for (const list of folderWorkspacesByProjectGroupId.values()) {
+    list.sort((left, right) => {
+      const leftOrder = left.manualOrder ?? left.sortOrder
+      const rightOrder = right.manualOrder ?? right.sortOrder
+      return rightOrder - leftOrder || left.name.localeCompare(right.name)
+    })
+  }
   const childGroupsByParentId = new Map<string | null, ProjectGroup[]>()
   for (const group of projectGroups) {
     const parentId =
@@ -963,10 +996,11 @@ export function buildRows(
 
   const getProjectGroupSubtreeCount = (groupId: string): number => {
     const directCount = groupByProjectGroupId.get(groupId)?.length ?? 0
+    const folderWorkspaceCount = folderWorkspacesByProjectGroupId.get(groupId)?.length ?? 0
     const children = childGroupsByParentId.get(groupId) ?? []
     return children.reduce(
       (count, child) => count + getProjectGroupSubtreeCount(child.id),
-      directCount
+      directCount + folderWorkspaceCount
     )
   }
 
@@ -985,6 +1019,16 @@ export function buildRows(
       projectGroupDepth: depth
     })
     if (!collapsedGroups.has(key)) {
+      for (const folderWorkspace of folderWorkspacesByProjectGroupId.get(projectGroup.id) ?? []) {
+        result.push({
+          type: 'folder-workspace',
+          key: `folder-workspace:${folderWorkspace.id}`,
+          folderWorkspace,
+          projectGroup,
+          depth: 0,
+          groupDepth: depth + 1
+        })
+      }
       appendOrderedGroups(withRepoSectionDisplayLabels(repoEntries), depth + 1)
       for (const childGroup of childGroups) {
         appendProjectGroup(childGroup, depth + 1)

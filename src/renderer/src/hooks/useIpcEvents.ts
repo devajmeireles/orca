@@ -781,6 +781,7 @@ export function useIpcEvents(): void {
       if (event.type === 'reposChanged') {
         const state = useAppStore.getState()
         void state.fetchProjectGroups()
+        void state.fetchFolderWorkspaces()
         void state.fetchRepos()
         return
       }
@@ -844,6 +845,7 @@ export function useIpcEvents(): void {
         }
         const state = useAppStore.getState()
         void state.fetchProjectGroups()
+        void state.fetchFolderWorkspaces()
         void state.fetchRepos()
       })
     )

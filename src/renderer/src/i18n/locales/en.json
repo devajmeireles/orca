@@ -3095,7 +3095,17 @@
           "8db50afe1a": "Import repositories from folder",
           "5b2e6fe3c8": "Import separately",
           "cf9d382ca1": "Import",
-          "220dd32d83": "Scanning..."
+          "220dd32d83": "Scanning...",
+          "fb33359f69": "Is this a monorepo?",
+          "d75170194e": "Choose this if these projects belong together. Orca will group them and let you work from the parent folder.",
+          "39d51212cc": "Monorepo name",
+          "e907ec8935": "What is a monorepo name?",
+          "aa0247680d": "No, import separately",
+          "a0bc4d1f8e": "Yes, import as monorepo",
+          "8401a7a0d0": "1 repository",
+          "d4f1df62ef": "{{value0}} repositories",
+          "b4263a2ac4": "Found {{value0}} in {{value1}}.",
+          "24eda6c8b2": "Scanning... {{value0}}"
         },
         "AddRepoRemoteStep": {
           "5b205b5281": "Stop scan",
@@ -3590,7 +3600,8 @@
           "f50603c6b2": "Mark Unread",
           "8dacff1fe0": "Mark Read",
           "3baa7d6507": "Pin",
-          "697d0f6e1b": "Unpin"
+          "697d0f6e1b": "Unpin",
+          "250de158fd": "Remove Workspace"
         },
         "WorktreeList": {
           "7a8b9c0d1e": "Update required",
@@ -3627,6 +3638,7 @@
           "c1f4a31623": "Show {{value0}} child workspaces",
           "e97297cb75": "Hide {{value0}} child workspace",
           "0cd15956d4": "Hide {{value0}} child workspaces",
+          "bd37a57ac8": "Create workspace for {{value0}}",
           "b667b59632": "Some projects could not be removed from Orca",
           "f94466bc39": "{{value0}} of {{value1}} contained project{{value2}} remained after deleting the group.",
           "groupDeleteFailed": "Failed to delete group",
@@ -3868,6 +3880,15 @@
           "2d3e4f5a6b": "Check connection",
           "3c4d5e6f7a": "Manage host…",
           "6e7f8a9b0c": "Remove host…"
+        },
+        "FolderWorkspaceComposerDialog": {
+          "connectFailed": "Failed to connect to project.",
+          "noRepos": "Add a Git project under this folder to attach GitHub or GitLab tasks.",
+          "title": "Create Folder Workspace",
+          "createStart": "Create & Start Agent",
+          "create": "Create Workspace",
+          "sourceProject": "Task Source",
+          "chooseSourceProject": "Choose task source"
         }
       },
       "shared": {
