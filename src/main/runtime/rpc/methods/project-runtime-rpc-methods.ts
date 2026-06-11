@@ -15,7 +15,8 @@ const ProjectHostSetupExistingFolder = z.object({
   }),
   path: requiredString('Missing project path'),
   kind: z.enum(['git', 'folder']).optional(),
-  displayName: OptionalString
+  displayName: OptionalString,
+  setupMethod: z.enum(['imported-existing-folder', 'cloned']).optional()
 })
 
 export const PROJECT_RUNTIME_METHODS: RpcMethod[] = [

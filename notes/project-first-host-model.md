@@ -755,15 +755,18 @@ Landed so far:
   lets the user paste a different URL, clones into the selected parent
   directory through the existing local/runtime clone APIs, then links the
   resulting checkout as the project's host setup.
+- Added repo-backed setup method metadata so imported and cloned setup flows
+  survive persistence/projection sync as `imported-existing-folder` or `cloned`
+  while `Repo` remains the compatibility source of truth.
 - Added tests for local repos, SSH repos, same-provider multi-host grouping,
   no-identity same-name non-grouping, selector cache behavior, persistence
   backfill, repo mutation synchronization, renderer hydration, runtime RPC
-  routing, local/runtime clone setup composition, and GitHub clone URL
-  inference. Sidebar row-builder tests now cover project-first multi-host
-  grouping and same-name repo separation without project identity. Workspace
-  target tests cover local-only fallback, focused-host setup selection, explicit
-  project-plus-host resolution, same-name non-merging, and unavailable setup
-  reasons.
+  routing, setup method persistence, local/runtime clone setup composition, and
+  GitHub clone URL inference. Sidebar row-builder tests now cover project-first
+  multi-host grouping and same-name repo separation without project identity.
+  Workspace target tests cover local-only fallback, focused-host setup
+  selection, explicit project-plus-host resolution, same-name non-merging, and
+  unavailable setup reasons.
 
 Important limitation:
 
@@ -778,9 +781,9 @@ Important limitation:
   folder today; true SSH clone should either reuse a remote git-provider exec
   path or add a remote clone flow with progress, abort, safe path derivation,
   cleanup, and auth parity.
-- The current clone setup action records the resulting checkout by calling the
-  existing-folder setup path, so durable `setupMethod: cloned` semantics are not
-  complete while the compatibility projection remains repo-backed.
+- Project-host setup records are still regenerated from repo compatibility
+  records. The setup method now persists through that projection, but the final
+  independent setup table is still future work.
 
 Remaining end-to-end work:
 

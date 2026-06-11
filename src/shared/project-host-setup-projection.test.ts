@@ -71,6 +71,19 @@ describe('project host setup projection', () => {
     })
   })
 
+  it('preserves repo-backed setup method metadata', () => {
+    const projection = projectHostSetupProjectionFromRepos([
+      repo({
+        id: 'repo-1',
+        path: '/Users/alice/orca',
+        displayName: 'orca',
+        projectHostSetupMethod: 'cloned'
+      })
+    ])
+
+    expect(projection.setups[0]?.setupMethod).toBe('cloned')
+  })
+
   it('groups repo checkouts with the same provider identity under one project', () => {
     const projection = projectHostSetupProjectionFromRepos([
       repo({

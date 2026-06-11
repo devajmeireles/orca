@@ -68,6 +68,7 @@ function mergeProjectRepo(project: Project, repo: Repo): Project {
 function createSetupFromRepo(repo: Repo, projectId: string, now: number): ProjectHostSetup {
   const hostId = getRepoExecutionHostId(repo)
   const createdAt = repo.addedAt || now
+  const setupMethod = repo.projectHostSetupMethod ?? 'legacy-repo'
   return {
     id: repo.id,
     projectId,
@@ -83,7 +84,7 @@ function createSetupFromRepo(repo: Repo, projectId: string, now: number): Projec
     ...(repo.gitUsername ? { gitUsername: repo.gitUsername } : {}),
     ...(repo.sourceControlAi ? { sourceControlAi: repo.sourceControlAi } : {}),
     setupState: 'ready',
-    setupMethod: 'legacy-repo',
+    setupMethod,
     createdAt,
     updatedAt: createdAt
   }

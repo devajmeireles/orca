@@ -6484,6 +6484,15 @@ export class OrcaRuntimeService {
       repo = updated
       setup = getProjectHostSetupForRepo(this.listProjectHostSetups(), repo)
     }
+    const setupMethod = args.setupMethod ?? 'imported-existing-folder'
+    const updated = this.store.updateRepo(repo.id, { projectHostSetupMethod: setupMethod })
+    if (!updated) {
+      throw new Error(
+        `Project setup repo disappeared before setup metadata could be linked: ${repo.id}`
+      )
+    }
+    repo = updated
+    setup = getProjectHostSetupForRepo(this.listProjectHostSetups(), repo)
     const project = this.listProjects().find((entry) => entry.id === setup.projectId)
     if (!project) {
       throw new Error(`Project setup was created without a project record: ${setup.projectId}`)

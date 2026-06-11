@@ -2329,6 +2329,21 @@ describe('Store', () => {
     ])
   })
 
+  it('updateRepo preserves repo-backed project host setup method', async () => {
+    const store = await createStore()
+    store.addRepo(makeRepo())
+
+    store.updateRepo('r1', { projectHostSetupMethod: 'cloned' })
+
+    expect(store.getRepo('r1')?.projectHostSetupMethod).toBe('cloned')
+    expect(store.getProjectHostSetups()).toEqual([
+      expect.objectContaining({
+        id: 'r1',
+        setupMethod: 'cloned'
+      })
+    ])
+  })
+
   it('updateRepo drops repo icons that fail shared sanitization', async () => {
     const store = await createStore()
     store.addRepo(makeRepo())

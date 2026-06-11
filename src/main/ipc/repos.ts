@@ -99,7 +99,8 @@ function buildProjectHostSetupResult(store: Store, repo: Repo): ProjectHostSetup
 function alignRepoWithRequestedProject(
   store: Store,
   repo: Repo,
-  projectId: string
+  projectId: string,
+  setupMethod: ProjectHostSetupExistingFolderArgs['setupMethod'] = 'imported-existing-folder'
 ): ProjectHostSetupResult {
   let setup = getProjectHostSetupForRepo(store.getProjectHostSetups(), repo)
   if (setup.projectId !== projectId) {
@@ -122,6 +123,13 @@ function alignRepoWithRequestedProject(
     repo = updated
     setup = getProjectHostSetupForRepo(store.getProjectHostSetups(), repo)
   }
+  const updated = store.updateRepo(repo.id, { projectHostSetupMethod: setupMethod })
+  if (!updated) {
+    throw new Error(
+      `Project setup repo disappeared before setup metadata could be linked: ${repo.id}`
+    )
+  }
+  repo = updated
   return buildProjectHostSetupResult(store, repo)
 }
 
@@ -329,7 +337,8 @@ const ProjectHostSetupExistingFolderIpcArgs = z.object({
   hostId: z.string().min(1),
   path: z.string().min(1),
   kind: z.enum(['git', 'folder']).optional(),
-  displayName: z.string().min(1).optional()
+  displayName: z.string().min(1).optional(),
+  setupMethod: z.enum(['imported-existing-folder', 'cloned']).optional()
 })
 
 const ProjectGroupScanNestedArgs = z.object({
@@ -691,7 +700,7 @@ export function registerRepoHandlers(mainWindow: BrowserWindow, store: Store): v
       invalidateAuthorizedRootsCache()
       notifyReposChanged(mainWindow)
       emitRepoAdded('folder_picker', result.alreadyExisted)
-      return alignRepoWithRequestedProject(store, result.repo, args.projectId)
+      return alignRepoWithRequestedProject(store, result.repo, args.projectId, args.setupMethod)
     }
   )
 

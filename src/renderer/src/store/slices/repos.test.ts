@@ -431,7 +431,7 @@ describe('repo slice runtime routing', () => {
       path: clonedRepo.path,
       displayName: clonedRepo.displayName,
       setupState: 'ready',
-      setupMethod: 'legacy-repo',
+      setupMethod: 'cloned',
       createdAt: 1,
       updatedAt: 1
     }
@@ -462,7 +462,8 @@ describe('repo slice runtime routing', () => {
       hostId: 'local',
       path: clonedRepo.path,
       kind: 'git',
-      displayName: 'Project'
+      displayName: 'Project',
+      setupMethod: 'cloned'
     })
   })
 
@@ -484,7 +485,7 @@ describe('repo slice runtime routing', () => {
       path: clonedRepo.path,
       displayName: clonedRepo.displayName,
       setupState: 'ready',
-      setupMethod: 'legacy-repo',
+      setupMethod: 'cloned',
       createdAt: 1,
       updatedAt: 1
     }
@@ -534,7 +535,8 @@ describe('repo slice runtime routing', () => {
         hostId: 'runtime:env-1',
         path: clonedRepo.path,
         kind: 'git',
-        displayName: 'Project'
+        displayName: 'Project',
+        setupMethod: 'cloned'
       },
       timeoutMs: 15_000
     })

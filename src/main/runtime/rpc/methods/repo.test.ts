@@ -388,7 +388,8 @@ describe('repo RPC methods', () => {
         projectId: 'project-1',
         hostId: 'runtime:env-1',
         path: '/repo',
-        kind: 'git'
+        kind: 'git',
+        setupMethod: 'cloned'
       })
     )
 
@@ -396,7 +397,8 @@ describe('repo RPC methods', () => {
       projectId: 'project-1',
       hostId: 'runtime:env-1',
       path: '/repo',
-      kind: 'git'
+      kind: 'git',
+      setupMethod: 'cloned'
     })
     expect(response).toMatchObject({ ok: true, result: { result } })
   })

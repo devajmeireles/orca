@@ -747,7 +747,8 @@ export const createRepoSlice: StateCreator<AppState, [], [], RepoSlice> = (set, 
         hostId: args.hostId,
         path: repo.path,
         kind: 'git',
-        displayName: args.displayName
+        displayName: args.displayName,
+        setupMethod: 'cloned'
       })
     } catch (err) {
       console.error('Failed to clone project on host:', err)

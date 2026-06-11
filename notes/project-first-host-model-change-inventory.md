@@ -483,11 +483,14 @@ Already partially landed:
 - inline `Run on` import-existing-folder setup for known hosts where the
   selected project is not set up yet
 - inline `Run on` clone setup for not-yet-set-up non-SSH local/runtime hosts
+- repo-backed setup method metadata so imported/cloned setup methods survive
+  compatibility projection and persistence sync
 
 Not complete yet:
 
 - SSH clone/provision flows
-- durable cloned setup metadata while `Repo` remains the compatibility source
+- independent project-host setup persistence beyond the repo-backed
+  compatibility records
 - bulk setup flows and setup for hosts that are not already known to the client
 - project settings split into global and host-specific ownership
 - host settings/capability UI aligned with project setup

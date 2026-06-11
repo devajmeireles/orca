@@ -408,11 +408,13 @@ Already partially landed:
 - inline import-existing-folder setup from the composer
 - inline clone setup from the composer for not-yet-set-up non-SSH
   local/runtime hosts
+- repo-backed setup method metadata for imported/cloned project-host setups
 
 Still needed:
 
 - finish SSH clone/provision flows
-- durable cloned setup metadata while `Repo` remains the compatibility source
+- independent project-host setup persistence beyond the repo-backed
+  compatibility records
 - bulk setup flows and setup for newly added hosts
 - project settings split into global and host-specific ownership
 - host settings/capability UI aligned with project setup

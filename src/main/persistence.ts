@@ -36,6 +36,7 @@ import type {
   PersistedState,
   Project,
   ProjectHostSetup,
+  ProjectHostSetupMethod,
   Repo,
   ProjectGroup,
   SparsePreset,
@@ -741,8 +742,19 @@ function sanitizeRepoUpstream(value: unknown): Repo['upstream'] | undefined {
   return owner && repo ? { owner, repo } : undefined
 }
 
+function sanitizeRepoProjectHostSetupMethod(
+  value: unknown
+): Exclude<ProjectHostSetupMethod, 'legacy-repo'> | undefined {
+  return value === 'imported-existing-folder' || value === 'cloned' ? value : undefined
+}
+
 function sanitizeRepoUpdatesForPersistence<
-  T extends Partial<Pick<Repo, 'badgeColor' | 'repoIcon' | 'upstream' | 'worktreeBasePath'>>
+  T extends Partial<
+    Pick<
+      Repo,
+      'badgeColor' | 'repoIcon' | 'upstream' | 'worktreeBasePath' | 'projectHostSetupMethod'
+    >
+  >
 >(updates: T): T {
   const sanitized = { ...updates }
   if ('badgeColor' in sanitized) {
@@ -775,6 +787,14 @@ function sanitizeRepoUpdatesForPersistence<
       sanitized.worktreeBasePath = sanitized.worktreeBasePath.trim() || undefined
     } else {
       delete sanitized.worktreeBasePath
+    }
+  }
+  if ('projectHostSetupMethod' in sanitized) {
+    const setupMethod = sanitizeRepoProjectHostSetupMethod(sanitized.projectHostSetupMethod)
+    if (setupMethod === undefined) {
+      delete sanitized.projectHostSetupMethod
+    } else {
+      sanitized.projectHostSetupMethod = setupMethod
     }
   }
   return sanitized
@@ -2696,6 +2716,7 @@ export class Store {
         | 'externalWorktreeVisibilityPromptDismissedAt'
         | 'projectGroupId'
         | 'projectGroupOrder'
+        | 'projectHostSetupMethod'
       >
     > & { sourceControlAi?: Repo['sourceControlAi'] | null }
   ): Repo | null {
@@ -2780,11 +2801,13 @@ export class Store {
       repoIcon: rawRepoIcon,
       upstream: rawUpstream,
       sourceControlAi: rawSourceControlAi,
+      projectHostSetupMethod: rawProjectHostSetupMethod,
       ...repoWithoutIcon
     } = repo
     const repoIcon = sanitizeRepoIcon(rawRepoIcon)
     const upstream = sanitizeRepoUpstream(rawUpstream)
     const sourceControlAi = normalizeRepoSourceControlAiOverrides(rawSourceControlAi)
+    const projectHostSetupMethod = sanitizeRepoProjectHostSetupMethod(rawProjectHostSetupMethod)
     const gitUsername = isFolderRepo(repo)
       ? ''
       : (this.gitUsernameCache.get(repo.path) ??
@@ -2799,6 +2822,7 @@ export class Store {
       ...(repoIcon !== undefined ? { repoIcon } : {}),
       ...(upstream !== undefined ? { upstream } : {}),
       ...(sourceControlAi !== undefined ? { sourceControlAi } : {}),
+      ...(projectHostSetupMethod !== undefined ? { projectHostSetupMethod } : {}),
       kind: isFolderRepo(repo) ? 'folder' : 'git',
       gitUsername,
       hookSettings: {
