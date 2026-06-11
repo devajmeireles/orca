@@ -544,6 +544,43 @@ export class SshGitProvider implements IGitProvider {
     }
   }
 
+  async clone(
+    args: string[],
+    cwd: string,
+    options?: {
+      signal?: AbortSignal
+      timeoutMs?: number
+      onProgress?: (progress: { phase: string; percent: number }) => void
+    }
+  ): Promise<{ stdout: string; stderr: string }> {
+    const progressId = `clone-${Date.now()}-${Math.random().toString(36).slice(2)}`
+    const unsubscribe = options?.onProgress
+      ? this.mux.onNotificationByMethod('git.cloneProgress', (params) => {
+          if (params.progressId !== progressId) {
+            return
+          }
+          const phase = params.phase
+          const percent = params.percent
+          if (typeof phase === 'string' && typeof percent === 'number') {
+            options.onProgress?.({ phase, percent })
+          }
+        })
+      : undefined
+    try {
+      const result = await this.mux.request(
+        'git.clone',
+        { args, cwd, progressId },
+        { signal: options?.signal, timeoutMs: options?.timeoutMs }
+      )
+      return result as {
+        stdout: string
+        stderr: string
+      }
+    } finally {
+      unsubscribe?.()
+    }
+  }
+
   async isGitRepoAsync(dirPath: string): Promise<{ isRepo: boolean; rootPath: string | null }> {
     return (await this.mux.request('git.isGitRepo', { dirPath })) as {
       isRepo: boolean

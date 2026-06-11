@@ -39,6 +39,7 @@ const {
     isGitRepo: vi.fn().mockReturnValue(true),
     isGitRepoAsync: vi.fn().mockResolvedValue({ isRepo: true, rootPath: null }),
     exec: vi.fn().mockResolvedValue({ stdout: '', stderr: '' }),
+    clone: vi.fn().mockResolvedValue({ stdout: '', stderr: '' }),
     getHostPlatform: vi.fn().mockReturnValue({
       relayPlatform: 'linux-x64',
       os: 'linux',
@@ -821,6 +822,8 @@ describe('repos:addRemote', () => {
     mockGitProvider.isGitRepoAsync.mockResolvedValue({ isRepo: true, rootPath: null })
     mockGitProvider.exec.mockReset()
     mockGitProvider.exec.mockResolvedValue({ stdout: '', stderr: '' })
+    mockGitProvider.clone.mockReset()
+    mockGitProvider.clone.mockResolvedValue({ stdout: '', stderr: '' })
     mockGitProvider.getHostPlatform.mockReset()
     mockGitProvider.getHostPlatform.mockReturnValue({
       relayPlatform: 'linux-x64',
@@ -902,12 +905,13 @@ describe('repos:addRemote', () => {
       destination: '/home/user'
     })
 
-    expect(mockGitProvider.exec).toHaveBeenCalledWith(
+    expect(mockGitProvider.clone).toHaveBeenCalledWith(
       ['clone', '--progress', '--', 'https://github.com/stablyai/orca.git', 'orca'],
       '/home/user',
       expect.objectContaining({
         signal: expect.any(AbortSignal),
-        timeoutMs: 10 * 60_000
+        timeoutMs: 10 * 60_000,
+        onProgress: expect.any(Function)
       })
     )
     expect(mockStore.addRepo).toHaveBeenCalledWith(
@@ -926,6 +930,30 @@ describe('repos:addRemote', () => {
     })
     expect(result).toHaveProperty('path', '/home/user/orca')
     expect(result).toHaveProperty('connectionId', 'conn-1')
+  })
+
+  it('forwards SSH clone progress through the existing clone progress event', async () => {
+    mockGitProvider.clone.mockImplementationOnce(
+      async (
+        _args: string[],
+        _cwd: string,
+        options?: { onProgress?: (progress: { phase: string; percent: number }) => void }
+      ) => {
+        options?.onProgress?.({ phase: 'Receiving objects', percent: 42 })
+        return { stdout: '', stderr: '' }
+      }
+    )
+
+    await handlers.get('repos:cloneRemote')!(null, {
+      connectionId: 'conn-1',
+      url: 'https://github.com/stablyai/orca.git',
+      destination: '/home/user'
+    })
+
+    expect(mockWindow.webContents.send).toHaveBeenCalledWith('repos:clone-progress', {
+      phase: 'Receiving objects',
+      percent: 42
+    })
   })
 
   it('returns an existing SSH repo instead of cloning the same target again', async () => {
@@ -947,7 +975,7 @@ describe('repos:addRemote', () => {
     })
 
     expect(result).toBe(existing)
-    expect(mockGitProvider.exec).not.toHaveBeenCalled()
+    expect(mockGitProvider.clone).not.toHaveBeenCalled()
     expect(mockStore.addRepo).not.toHaveBeenCalled()
   })
 
@@ -971,12 +999,13 @@ describe('repos:addRemote', () => {
       destination: '/home/user'
     })
 
-    expect(mockGitProvider.exec).toHaveBeenCalledWith(
+    expect(mockGitProvider.clone).toHaveBeenCalledWith(
       ['clone', '--progress', '--', 'https://github.com/stablyai/orca.git', 'orca'],
       '/home/user',
       expect.objectContaining({
         signal: expect.any(AbortSignal),
-        timeoutMs: 10 * 60_000
+        timeoutMs: 10 * 60_000,
+        onProgress: expect.any(Function)
       })
     )
     expect(mockStore.updateRepo).toHaveBeenCalledWith('existing-folder', { kind: 'git' })
@@ -985,7 +1014,7 @@ describe('repos:addRemote', () => {
   })
 
   it('cleans up a fresh SSH clone target after git clone fails', async () => {
-    mockGitProvider.exec.mockRejectedValueOnce(new Error('repository not found'))
+    mockGitProvider.clone.mockRejectedValueOnce(new Error('repository not found'))
     mockFilesystemProvider.stat.mockRejectedValueOnce(new Error('not found'))
 
     await expect(
@@ -1000,7 +1029,7 @@ describe('repos:addRemote', () => {
   })
 
   it('does not clean up a pre-existing SSH clone target after git clone fails', async () => {
-    mockGitProvider.exec.mockRejectedValueOnce(new Error('destination already exists'))
+    mockGitProvider.clone.mockRejectedValueOnce(new Error('destination already exists'))
     mockFilesystemProvider.stat.mockResolvedValueOnce({ type: 'directory', size: 0, mtime: 0 })
 
     await expect(
@@ -1016,7 +1045,7 @@ describe('repos:addRemote', () => {
 
   it('aborts an active SSH clone and reports the abort without deleting pre-existing targets', async () => {
     mockFilesystemProvider.stat.mockResolvedValueOnce({ type: 'directory', size: 0, mtime: 0 })
-    mockGitProvider.exec.mockImplementationOnce(
+    mockGitProvider.clone.mockImplementationOnce(
       async (_args: string[], _cwd: string, options?: { signal?: AbortSignal }) =>
         new Promise<{ stdout: string; stderr: string }>((_resolve, reject) => {
           options?.signal?.addEventListener('abort', () => reject(new Error('aborted by test')))
@@ -1028,12 +1057,12 @@ describe('repos:addRemote', () => {
       url: 'https://github.com/stablyai/orca.git',
       destination: '/home/user'
     })
-    await waitForAssertion(() => expect(mockGitProvider.exec).toHaveBeenCalledTimes(1))
+    await waitForAssertion(() => expect(mockGitProvider.clone).toHaveBeenCalledTimes(1))
 
     await handlers.get('repos:cloneAbort')!(null, undefined)
 
     await expect(clonePromise).rejects.toThrow('Clone aborted')
-    const options = mockGitProvider.exec.mock.calls[0][2] as { signal: AbortSignal }
+    const options = mockGitProvider.clone.mock.calls[0][2] as { signal: AbortSignal }
     expect(options.signal.aborted).toBe(true)
     expect(mockFilesystemProvider.deletePath).not.toHaveBeenCalled()
   })
@@ -1047,7 +1076,7 @@ describe('repos:addRemote', () => {
       })
     ).rejects.toThrow('Clone destination must be an absolute path on the SSH host')
 
-    expect(mockGitProvider.exec).not.toHaveBeenCalled()
+    expect(mockGitProvider.clone).not.toHaveBeenCalled()
   })
 
   it('returns existing repo if same connectionId and path already added', async () => {

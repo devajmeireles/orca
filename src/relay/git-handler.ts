@@ -1,6 +1,6 @@
 /* eslint-disable max-lines -- Why: this relay handler centralizes the git RPC
 protocol surface so local and SSH git behavior stay in one dispatch table. */
-import { execFile } from 'child_process'
+import { execFile, spawn } from 'child_process'
 import { promisify } from 'util'
 import * as path from 'path'
 import type { RelayDispatcher, RequestContext } from './dispatcher'
@@ -94,6 +94,7 @@ export class GitHandler {
     )
     this.dispatcher.onRequest('git.renameCurrentBranch', (p) => this.renameCurrentBranch(p))
     this.dispatcher.onRequest('git.exec', (p, context) => this.exec(p, context))
+    this.dispatcher.onRequest('git.clone', (p, context) => this.clone(p, context))
     this.dispatcher.onRequest('git.isGitRepo', (p) => this.isGitRepo(p))
   }
 
@@ -593,6 +594,87 @@ export class GitHandler {
     validateGitExecArgs(args)
     const { stdout, stderr } = await this.git(args, cwd, { signal: context?.signal })
     return { stdout, stderr }
+  }
+
+  private async clone(params: Record<string, unknown>, context?: RequestContext) {
+    const args = params.args as string[]
+    const cwd = params.cwd as string
+    const progressId = params.progressId
+    validateGitExecArgs(args)
+    if (typeof progressId !== 'string' || progressId.length === 0) {
+      throw new Error('Missing clone progress id.')
+    }
+    if (args[0] !== 'clone') {
+      throw new Error('git.clone only supports clone commands.')
+    }
+    return await this.spawnClone(args, cwd, progressId, context)
+  }
+
+  private async spawnClone(
+    args: string[],
+    cwd: string,
+    progressId: string,
+    context?: RequestContext
+  ): Promise<{ stdout: string; stderr: string }> {
+    return await new Promise((resolve, reject) => {
+      const child = spawn('git', args, {
+        cwd: expandTilde(cwd),
+        env: buildRelayCommandEnv(),
+        stdio: ['ignore', 'pipe', 'pipe']
+      })
+      let stdout = ''
+      let stderr = ''
+      let settled = false
+      const cleanup = (): void => {
+        context?.signal?.removeEventListener('abort', onAbort)
+      }
+      const onAbort = (): void => {
+        child.kill()
+      }
+      context?.signal?.addEventListener('abort', onAbort, { once: true })
+      child.stdout?.on('data', (chunk: Buffer) => {
+        stdout = (stdout + chunk.toString('utf-8')).slice(-4096)
+      })
+      child.stderr?.on('data', (chunk: Buffer) => {
+        const text = chunk.toString('utf-8')
+        stderr = (stderr + text).slice(-4096)
+        for (const line of text.split(/[\r\n]+/)) {
+          const match = line.match(/^([\w\s]+):\s+(\d+)%/)
+          if (match) {
+            this.dispatcher.notify('git.cloneProgress', {
+              progressId,
+              phase: match[1].trim(),
+              percent: parseInt(match[2], 10)
+            })
+          }
+        }
+      })
+      child.on('error', (error) => {
+        if (settled) {
+          return
+        }
+        settled = true
+        cleanup()
+        reject(error)
+      })
+      child.on('close', (code, signal) => {
+        if (settled) {
+          return
+        }
+        settled = true
+        cleanup()
+        if (context?.signal?.aborted) {
+          reject(new Error('Clone aborted'))
+          return
+        }
+        if (code === 0 && !signal) {
+          resolve({ stdout, stderr })
+          return
+        }
+        const lastLine = stderr.trim().split('\n').pop() ?? 'unknown error'
+        reject(new Error(`Clone failed: ${lastLine}`))
+      })
+    })
   }
 
   private async renameCurrentBranch(params: Record<string, unknown>) {

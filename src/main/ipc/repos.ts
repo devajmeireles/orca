@@ -291,6 +291,7 @@ function getRemoteRepoFolderName(remotePath: string): string {
 
 async function cloneRemoteRepo(
   store: Store,
+  mainWindow: BrowserWindow,
   args: {
     connectionId: string
     url: string
@@ -345,12 +346,17 @@ async function cloneRemoteRepo(
     // Why: the SSH relay exposes argv-based git execution, not a shell. Use
     // the repo folder name as the target so git creates it inside the chosen
     // parent, and keep the same flag separator safety as local clone.
-    await gitProvider.exec(
+    await gitProvider.clone(
       ['clone', '--progress', '--', args.url.trim(), repoName],
       trimmedDestination,
       {
         signal: controller.signal,
-        timeoutMs: 10 * 60_000
+        timeoutMs: 10 * 60_000,
+        onProgress: (progress) => {
+          if (!mainWindow.isDestroyed()) {
+            mainWindow.webContents.send('repos:clone-progress', progress)
+          }
+        }
       }
     )
   } catch (err) {
@@ -422,6 +428,18 @@ type CompletedNestedRepoScan = {
 }
 const completedNestedRepoScans = new Map<string, CompletedNestedRepoScan>()
 const MAX_COMPLETED_NESTED_SCAN_RESULTS = 50
+
+function emitCloneProgressFromText(mainWindow: BrowserWindow, text: string): void {
+  for (const line of text.split(/[\r\n]+/)) {
+    const match = line.match(/^([\w\s]+):\s+(\d+)%/)
+    if (match && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('repos:clone-progress', {
+        phase: match[1].trim(),
+        percent: parseInt(match[2], 10)
+      })
+    }
+  }
+}
 
 const ProjectGroupCreateArgs = z.object({
   name: z.string().min(1),
@@ -1662,19 +1680,9 @@ export function registerRepoHandlers(mainWindow: BrowserWindow, store: Store): v
             const text = chunk.toString()
             stderrTail = (stderrTail + text).slice(-4096)
 
-            // Why: git progress lines use \r to overwrite in-place. Split on
-            // both \r and \n to find the latest progress fragment, then extract
-            // the phase name and percentage for the renderer.
-            const lines = text.split(/[\r\n]+/)
-            for (const line of lines) {
-              const match = line.match(/^([\w\s]+):\s+(\d+)%/)
-              if (match && !mainWindow.isDestroyed()) {
-                mainWindow.webContents.send('repos:clone-progress', {
-                  phase: match[1].trim(),
-                  percent: parseInt(match[2], 10)
-                })
-              }
-            }
+            // Why: git progress lines use \r to overwrite in-place; parse
+            // fragments the same way for local and SSH clone flows.
+            emitCloneProgressFromText(mainWindow, text)
           })
 
           const finishClone = async (
@@ -1784,7 +1792,7 @@ export function registerRepoHandlers(mainWindow: BrowserWindow, store: Store): v
       _event,
       args: { connectionId: string; url: string; destination: string }
     ): Promise<Repo> => {
-      const repo = await cloneRemoteRepo(store, args)
+      const repo = await cloneRemoteRepo(store, mainWindow, args)
       notifyReposChanged(mainWindow)
       return repo
     }
