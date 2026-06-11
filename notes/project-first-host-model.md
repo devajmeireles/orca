@@ -762,15 +762,20 @@ Landed so far:
 - Added repo-backed setup method metadata so imported and cloned setup flows
   survive persistence/projection sync as `imported-existing-folder` or `cloned`
   while `Repo` remains the compatibility source of truth.
+- Added a runtime capability contract for project-host setup. New runtimes
+  advertise `project-host-setup.v1`; new clients fall back to repo-derived
+  project/setup projection for reads when that capability is missing and block
+  remote setup/clone mutations before contacting an older server.
 - Added tests for local repos, SSH repos, same-provider multi-host grouping,
   no-identity same-name non-grouping, selector cache behavior, persistence
   backfill, repo mutation synchronization, renderer hydration, runtime RPC
-  routing, setup method persistence, local/runtime/SSH clone setup composition,
-  remote clone IPC, and GitHub clone URL inference. Sidebar row-builder tests
-  now cover project-first multi-host grouping and same-name repo separation
-  without project identity. Workspace target tests cover local-only fallback,
-  focused-host setup selection, explicit project-plus-host resolution, same-name
-  non-merging, and unavailable setup reasons.
+  routing, project-host setup capability gating, setup method persistence,
+  local/runtime/SSH clone setup composition, remote clone IPC, and GitHub clone
+  URL inference. Sidebar row-builder tests now cover project-first multi-host
+  grouping and same-name repo separation without project identity. Workspace
+  target tests cover local-only fallback, focused-host setup selection, explicit
+  project-plus-host resolution, same-name non-merging, and unavailable setup
+  reasons.
 
 Important limitation:
 
@@ -805,8 +810,9 @@ Remaining end-to-end work:
   handling for host/setup-local ownership
 - add project-first CLI/API commands with compatibility aliases for existing
   repo/worktree commands
-- validate migration, creation, settings, sidebar, SSH, and version-skew flows
-  end to end
+- broaden version-skew UI/CLI coverage beyond the current runtime capability
+  guard, and validate migration, creation, settings, sidebar, SSH, and
+  version-skew flows end to end
 
 ## Recommendation
 

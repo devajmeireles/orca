@@ -406,8 +406,10 @@ Needs:
 - structured errors for unsupported old-server actions
 - old client / new server behavior that degrades safely
 
-Current branch status: runtime compatibility exists; project/setup capability
-gating needs to be layered on.
+Current branch status: runtime compatibility exists. Runtimes now advertise
+`project-host-setup.v1`; renderer reads fall back to repo-derived projection
+when the capability is missing, and remote setup/clone mutations are blocked
+before contacting older servers. Broader UI/CLI version-skew validation remains.
 
 ### 10. Caches And Local State
 
@@ -489,6 +491,8 @@ Already partially landed:
 - inline `Run on` clone setup for not-yet-set-up local, runtime, and SSH hosts
 - repo-backed setup method metadata so imported/cloned setup methods survive
   compatibility projection and persistence sync
+- project-host setup runtime capability advertisement, read fallback, and
+  remote mutation gating for older runtime servers
 
 Not complete yet:
 
@@ -499,7 +503,7 @@ Not complete yet:
 - project settings split into global and host-specific ownership
 - host settings/capability UI aligned with project setup
 - complete cache/request ownership audit
-- complete version-skew capability gating
+- broader UI/CLI version-skew validation beyond the runtime capability guard
 - full Electron and SSH end-to-end validation
 
 ## Recommended Implementation Shape

@@ -997,6 +997,11 @@ function createReposApi(): NonNullable<Partial<PreloadApi>['repos']> {
         await callRuntimeResult<{ repo: Repo }>('repo.clone', { url, destination }, 10 * 60_000)
       ).repo
     },
+    cloneRemote: async () => {
+      // Why: SSH relay cloning is owned by the desktop main process; paired web
+      // clients must not pretend they can run that local IPC path directly.
+      throw new Error('SSH clone is unavailable in paired web clients.')
+    },
     cloneAbort: () => Promise.resolve(),
     addRemote: async ({ remotePath, displayName, kind }) => {
       invalidateRuntimeWorktreeCaches()

@@ -20,6 +20,7 @@ import {
   projectHostSetupProjectionFromRepos,
   type ProjectHostSetupProjection
 } from '../../../../shared/project-host-setup-projection'
+import { PROJECT_HOST_SETUP_RUNTIME_CAPABILITY } from '../../../../shared/protocol-version'
 import { isGitRepoKind } from '../../../../shared/repo-kind'
 import { sanitizeRepoIcon } from '../../../../shared/repo-icon'
 import { normalizeRepoBadgeColor } from '../../../../shared/repo-badge-color'
@@ -27,7 +28,11 @@ import { getProjectGroupSubtreeIds } from '../../../../shared/project-groups'
 import { getRepoIdFromWorktreeId } from './worktree-helpers'
 import { reconcileFetchedRepos } from './repo-identity-reconcile'
 import { splitRepoReorderByHost } from './repo-reorder-host-split'
-import { callRuntimeRpc, getActiveRuntimeTarget } from '../../runtime/runtime-rpc-client'
+import {
+  assertRuntimeEnvironmentCapability,
+  callRuntimeRpc,
+  getActiveRuntimeTarget
+} from '../../runtime/runtime-rpc-client'
 import { toRuntimeWorktreeSelector } from '../../runtime/runtime-worktree-selector'
 import { buildDismissedOnboardingFolderAgentStartup } from '@/lib/onboarding-folder-agent-startup'
 import { markOnboardingProjectAdded } from '@/lib/onboarding-project-checklist'
@@ -184,6 +189,7 @@ async function fetchProjectHostSetupCompatibility(
         setups: await projectsApi.listHostSetups()
       }
     }
+    await assertProjectHostSetupRuntimeCapability(target)
     const [projectResponse, setupResponse] = await Promise.all([
       callRuntimeRpc<{ projects: Project[] }>(target, 'project.list', undefined, {
         timeoutMs: 15_000
@@ -201,6 +207,20 @@ async function fetchProjectHostSetupCompatibility(
     // that only know `repo.list`; derive the transitional model locally.
     return projectHostSetupProjectionFromRepos(repos)
   }
+}
+
+async function assertProjectHostSetupRuntimeCapability(
+  target: ReturnType<typeof getActiveRuntimeTarget>
+): Promise<void> {
+  if (target.kind !== 'environment') {
+    return
+  }
+  await assertRuntimeEnvironmentCapability(
+    target.environmentId,
+    PROJECT_HOST_SETUP_RUNTIME_CAPABILITY,
+    'The selected Orca server does not support project host setup yet. Update Orca on the server and try again.',
+    15_000
+  )
 }
 
 function projectCompatibilityFromRepos(
@@ -672,6 +692,7 @@ export const createRepoSlice: StateCreator<AppState, [], [], RepoSlice> = (set, 
   setupProjectExistingFolder: async (args) => {
     try {
       const target = getProjectSetupRuntimeTarget(args.hostId)
+      await assertProjectHostSetupRuntimeCapability(target)
       const result =
         target.kind === 'local'
           ? await window.api.projects.setupExistingFolder(args)
@@ -720,6 +741,9 @@ export const createRepoSlice: StateCreator<AppState, [], [], RepoSlice> = (set, 
     try {
       const parsedHost = parseExecutionHostId(args.hostId)
       const target = getProjectSetupRuntimeTarget(args.hostId)
+      if (parsedHost?.kind !== 'ssh') {
+        await assertProjectHostSetupRuntimeCapability(target)
+      }
       const repo =
         parsedHost?.kind === 'ssh'
           ? await window.api.repos.cloneRemote({
