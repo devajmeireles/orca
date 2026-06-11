@@ -5058,6 +5058,8 @@
           "setupPathPending": "Path pending",
           "openSetup": "Open",
           "removeSetup": "Remove",
+          "hostSetupBlockedVersion": "Orca server version is incompatible",
+          "hostSetupMissingCapability": "Update Orca on this host to set up projects",
           "setupProjectOnHost": "Set up on another host",
           "setupProjectOnHostHelp": "Choose a host, then import an existing checkout, clone the repository there, or track a setup that will be provisioned later.",
           "setupExistingFolder": "Import existing folder",

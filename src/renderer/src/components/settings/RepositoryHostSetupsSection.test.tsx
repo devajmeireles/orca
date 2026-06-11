@@ -4,6 +4,7 @@ import React, { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { toSshExecutionHostId } from '../../../../shared/execution-host'
+import { RUNTIME_PROTOCOL_VERSION } from '../../../../shared/protocol-version'
 import type { Project, ProjectHostSetup, Repo } from '../../../../shared/types'
 import { useAppStore } from '../../store'
 import { RepositoryHostSetupsSection } from './RepositoryHostSetupsSection'
@@ -395,6 +396,70 @@ describe('RepositoryHostSetupsSection', () => {
     })
   })
 
+  it('shows unsupported runtime hosts without enabling setup actions', async () => {
+    const createProjectHostSetup = vi.fn()
+    const setupProjectClone = vi.fn()
+    const setupProjectExistingFolder = vi.fn()
+    const localRepo = makeRepo({
+      id: 'local-repo',
+      displayName: 'Orca',
+      path: '/Users/alice/orca'
+    })
+    useAppStore.setState({
+      repos: [localRepo],
+      projects: [makeProject({ id: 'github:stablyai/orca' })],
+      projectHostSetups: [
+        makeSetup({
+          id: 'local-repo',
+          projectId: 'github:stablyai/orca',
+          repoId: 'local-repo',
+          hostId: 'local',
+          path: '/Users/alice/orca'
+        })
+      ],
+      settings: { activeRuntimeEnvironmentId: null } as never,
+      runtimeStatusByEnvironmentId: new Map([
+        [
+          'gpu',
+          {
+            checkedAt: 1,
+            appVersion: '1.7.0',
+            status: {
+              runtimeId: 'runtime-gpu',
+              rendererGraphEpoch: 1,
+              graphStatus: 'ready',
+              authoritativeWindowId: 1,
+              liveTabCount: 0,
+              liveLeafCount: 0,
+              runtimeProtocolVersion: RUNTIME_PROTOCOL_VERSION,
+              minCompatibleRuntimeClientVersion: 1,
+              capabilities: []
+            }
+          }
+        ]
+      ]),
+      createProjectHostSetup,
+      setupProjectClone,
+      setupProjectExistingFolder
+    })
+
+    renderSection(localRepo)
+
+    expect(container.textContent).toContain('Update Orca on this host to set up projects')
+    const trackButton = Array.from(container.querySelectorAll('button')).find(
+      (button) => button.textContent === 'Track setup'
+    )
+    expect(trackButton?.disabled).toBe(true)
+
+    await act(async () => {
+      trackButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    })
+
+    expect(createProjectHostSetup).not.toHaveBeenCalled()
+    expect(setupProjectClone).not.toHaveBeenCalled()
+    expect(setupProjectExistingFolder).not.toHaveBeenCalled()
+  })
+
   it('offers inactive runtime hosts discovered from hydrated runtime status', async () => {
     const createProjectHostSetup = vi.fn().mockResolvedValue({
       project: makeProject({ id: 'github:stablyai/orca' }),
@@ -439,7 +504,7 @@ describe('RepositoryHostSetupsSection', () => {
               authoritativeWindowId: 1,
               liveTabCount: 0,
               liveLeafCount: 0,
-              runtimeProtocolVersion: 1,
+              runtimeProtocolVersion: RUNTIME_PROTOCOL_VERSION,
               minCompatibleRuntimeClientVersion: 1,
               capabilities: ['project-host-setup.v1']
             }

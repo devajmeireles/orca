@@ -5038,6 +5038,8 @@
           "setupPathPending": "路径待定",
           "openSetup": "打开",
           "removeSetup": "移除",
+          "hostSetupBlockedVersion": "Orca 服务器版本不兼容",
+          "hostSetupMissingCapability": "请更新此主机上的 Orca 以设置项目",
           "setupProjectOnHost": "在另一台主机上设置",
           "setupProjectOnHostHelp": "选择一台主机，然后导入现有检出目录、在该主机上克隆仓库，或跟踪稍后要预配的设置。",
           "setupExistingFolder": "导入现有文件夹",

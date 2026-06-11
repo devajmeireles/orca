@@ -5038,6 +5038,8 @@
           "setupPathPending": "パス保留中",
           "openSetup": "開く",
           "removeSetup": "削除",
+          "hostSetupBlockedVersion": "Orca サーバーのバージョンに互換性がありません",
+          "hostSetupMissingCapability": "プロジェクトをセットアップするには、このホストの Orca を更新してください",
           "setupProjectOnHost": "別のホストにセットアップ",
           "setupProjectOnHostHelp": "ホストを選択し、既存のチェックアウトをインポートするか、そこでリポジトリをクローンするか、後でプロビジョニングされるセットアップを追跡します。",
           "setupExistingFolder": "既存フォルダーをインポート",

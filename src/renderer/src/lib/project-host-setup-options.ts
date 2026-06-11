@@ -155,6 +155,7 @@ function getHostSetupAvailability(host: ExecutionHostRegistryEntry): {
   }
   if (
     host.kind === 'runtime' &&
+    host.capabilities &&
     !host.capabilities?.includes(PROJECT_HOST_SETUP_RUNTIME_CAPABILITY)
   ) {
     return {

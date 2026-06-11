@@ -86,7 +86,12 @@ export function RepositoryHostSetupsSection({
   const [isCloning, setIsCloning] = useState(false)
   const [isCreatingPendingSetup, setIsCreatingPendingSetup] = useState(false)
   const [deletingSetupId, setDeletingSetupId] = useState<string | null>(null)
-  const setupTargetHostId = selectedSetupHostId ?? setupHostOptions[0]?.id ?? null
+  const defaultSetupHostOption =
+    setupHostOptions.find((option) => option.isAvailable) ?? setupHostOptions[0] ?? null
+  const setupTargetHostId = selectedSetupHostId ?? defaultSetupHostOption?.id ?? null
+  const setupTargetHostOption =
+    setupHostOptions.find((option) => option.id === setupTargetHostId) ?? null
+  const canUseSetupTargetHost = setupTargetHostOption?.isAvailable ?? false
 
   if (
     (projectHostSetups.length <= 1 && setupHostOptions.length === 0) ||
@@ -209,8 +214,15 @@ export function RepositoryHostSetupsSection({
               </SelectTrigger>
               <SelectContent>
                 {setupHostOptions.map((option) => (
-                  <SelectItem key={option.id} value={option.id}>
-                    {option.label}
+                  <SelectItem key={option.id} value={option.id} disabled={!option.isAvailable}>
+                    <span className="min-w-0">
+                      <span className="block truncate">{option.label}</span>
+                      {!option.isAvailable ? (
+                        <span className="block truncate text-[11px] text-muted-foreground">
+                          {option.detail}
+                        </span>
+                      ) : null}
+                    </span>
                   </SelectItem>
                 ))}
               </SelectContent>
@@ -245,9 +257,14 @@ export function RepositoryHostSetupsSection({
             <Button
               type="button"
               size="sm"
-              disabled={!setupTargetHostId || !setupPath.trim() || isSettingUp}
+              disabled={!canUseSetupTargetHost || !setupPath.trim() || isSettingUp}
               onClick={async () => {
-                if (!setupTargetHostId || !selectedProjectHostSetup || !setupPath.trim()) {
+                if (
+                  !setupTargetHostId ||
+                  !canUseSetupTargetHost ||
+                  !selectedProjectHostSetup ||
+                  !setupPath.trim()
+                ) {
                   return
                 }
                 setIsSettingUp(true)
@@ -295,11 +312,12 @@ export function RepositoryHostSetupsSection({
               type="button"
               size="sm"
               disabled={
-                !setupTargetHostId || !cloneUrl.trim() || !cloneDestination.trim() || isCloning
+                !canUseSetupTargetHost || !cloneUrl.trim() || !cloneDestination.trim() || isCloning
               }
               onClick={async () => {
                 if (
                   !setupTargetHostId ||
+                  !canUseSetupTargetHost ||
                   !selectedProjectHostSetup ||
                   !cloneUrl.trim() ||
                   !cloneDestination.trim()
@@ -334,9 +352,9 @@ export function RepositoryHostSetupsSection({
               type="button"
               variant="outline"
               size="sm"
-              disabled={!setupTargetHostId || isCreatingPendingSetup}
+              disabled={!canUseSetupTargetHost || isCreatingPendingSetup}
               onClick={async () => {
-                if (!setupTargetHostId || !selectedProjectHostSetup) {
+                if (!setupTargetHostId || !canUseSetupTargetHost || !selectedProjectHostSetup) {
                   return
                 }
                 setIsCreatingPendingSetup(true)
