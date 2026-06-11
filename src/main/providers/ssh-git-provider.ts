@@ -21,6 +21,7 @@ import { JsonRpcErrorCode } from '../ssh/relay-protocol'
 import type { CommitMessageDraftContext } from '../../shared/commit-message-generation'
 import type { CommitMessagePlan } from '../../shared/commit-message-plan'
 import type { RemoteCommitMessageExecResult } from '../text-generation/commit-message-text-generation'
+import type { RemoteHostPlatform } from '../ssh/ssh-remote-platform'
 
 type NonInteractiveExecQueueEntry = {
   started: boolean
@@ -56,13 +57,21 @@ export class SshGitProvider implements IGitProvider {
   private nonInteractiveExecQueues = new Map<string, NonInteractiveExecQueueEntry[]>()
   private loggedWorktreeIsCleanFallback = false
 
-  constructor(connectionId: string, mux: SshChannelMultiplexer) {
+  constructor(
+    connectionId: string,
+    mux: SshChannelMultiplexer,
+    private readonly hostPlatform: RemoteHostPlatform | null = null
+  ) {
     this.connectionId = connectionId
     this.mux = mux
   }
 
   getConnectionId(): string {
     return this.connectionId
+  }
+
+  getHostPlatform(): RemoteHostPlatform | null {
+    return this.hostPlatform
   }
 
   async getStatus(

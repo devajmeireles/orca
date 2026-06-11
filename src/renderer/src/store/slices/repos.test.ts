@@ -37,6 +37,7 @@ const reposList = vi.fn()
 const reposAdd = vi.fn()
 const reposPickFolder = vi.fn()
 const reposClone = vi.fn()
+const reposCloneRemote = vi.fn()
 const reposRemove = vi.fn()
 const reposUpdate = vi.fn()
 const reposReorder = vi.fn()
@@ -52,6 +53,7 @@ beforeEach(() => {
   reposAdd.mockReset()
   reposPickFolder.mockReset()
   reposClone.mockReset()
+  reposCloneRemote.mockReset()
   reposRemove.mockReset()
   reposUpdate.mockReset()
   reposReorder.mockReset()
@@ -69,6 +71,7 @@ beforeEach(() => {
         list: reposList,
         add: reposAdd,
         clone: reposClone,
+        cloneRemote: reposCloneRemote,
         pickFolder: reposPickFolder,
         remove: reposRemove,
         update: reposUpdate,
@@ -539,6 +542,61 @@ describe('repo slice runtime routing', () => {
         setupMethod: 'cloned'
       },
       timeoutMs: 15_000
+    })
+  })
+
+  it('clones a project on an SSH host before aligning it as a host setup', async () => {
+    const project: Project = {
+      id: 'project-1',
+      displayName: 'Project',
+      badgeColor: '#000',
+      sourceRepoIds: ['ssh-repo'],
+      createdAt: 1,
+      updatedAt: 1
+    }
+    const clonedRepo = { ...sshRepo, path: '/srv/project' }
+    const setup: ProjectHostSetup = {
+      id: clonedRepo.id,
+      projectId: project.id,
+      hostId: 'ssh:ssh-1',
+      repoId: clonedRepo.id,
+      path: clonedRepo.path,
+      displayName: clonedRepo.displayName,
+      setupState: 'ready',
+      setupMethod: 'cloned',
+      createdAt: 1,
+      updatedAt: 1
+    }
+    reposCloneRemote.mockResolvedValue(clonedRepo)
+    projectsSetupExistingFolder.mockResolvedValue({ project, setup, repo: clonedRepo })
+    const store = createTestStore()
+
+    await expect(
+      store.getState().setupProjectClone({
+        projectId: project.id,
+        hostId: 'ssh:ssh-1',
+        url: 'https://github.com/stablyai/orca.git',
+        destination: '/srv',
+        displayName: 'Project'
+      })
+    ).resolves.toEqual({
+      project,
+      setup,
+      repo: { ...clonedRepo, executionHostId: 'ssh:ssh-1' }
+    })
+
+    expect(reposCloneRemote).toHaveBeenCalledWith({
+      connectionId: 'ssh-1',
+      url: 'https://github.com/stablyai/orca.git',
+      destination: '/srv'
+    })
+    expect(projectsSetupExistingFolder).toHaveBeenCalledWith({
+      projectId: project.id,
+      hostId: 'ssh:ssh-1',
+      path: clonedRepo.path,
+      kind: 'git',
+      displayName: 'Project',
+      setupMethod: 'cloned'
     })
   })
 

@@ -456,8 +456,7 @@ export default function NewWorkspaceComposerCard({
       setPendingSetupImporting(false)
     }
   }, [onProjectHostExistingFolderSetup, pendingSetupHostOption, pendingSetupKind, pendingSetupPath])
-  const canClonePendingSetup =
-    !!pendingSetupHostOption && !pendingSetupHostOption.hostId.startsWith('ssh:')
+  const canClonePendingSetup = !!pendingSetupHostOption
   const handleCloneProjectHost = React.useCallback(async (): Promise<void> => {
     if (!pendingSetupHostOption || !pendingCloneUrl.trim() || !pendingCloneDestination.trim()) {
       return

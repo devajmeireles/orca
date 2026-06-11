@@ -719,29 +719,30 @@ export const createRepoSlice: StateCreator<AppState, [], [], RepoSlice> = (set, 
   setupProjectClone: async (args) => {
     try {
       const parsedHost = parseExecutionHostId(args.hostId)
-      if (parsedHost?.kind === 'ssh') {
-        throw new Error(
-          'Clone setup is not available for SSH hosts yet. Import an existing folder on that host instead.'
-        )
-      }
       const target = getProjectSetupRuntimeTarget(args.hostId)
       const repo =
-        target.kind === 'local'
-          ? await window.api.repos.clone({
+        parsedHost?.kind === 'ssh'
+          ? await window.api.repos.cloneRemote({
+              connectionId: parsedHost.targetId,
               url: args.url,
               destination: args.destination
             })
-          : (
-              await callRuntimeRpc<{ repo: Repo }>(
-                target,
-                'repo.clone',
-                {
-                  url: args.url,
-                  destination: args.destination
-                },
-                { timeoutMs: 10 * 60_000 }
-              )
-            ).repo
+          : target.kind === 'local'
+            ? await window.api.repos.clone({
+                url: args.url,
+                destination: args.destination
+              })
+            : (
+                await callRuntimeRpc<{ repo: Repo }>(
+                  target,
+                  'repo.clone',
+                  {
+                    url: args.url,
+                    destination: args.destination
+                  },
+                  { timeoutMs: 10 * 60_000 }
+                )
+              ).repo
       return await get().setupProjectExistingFolder({
         projectId: args.projectId,
         hostId: args.hostId,

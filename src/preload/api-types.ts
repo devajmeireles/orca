@@ -751,6 +751,7 @@ export type PreloadApi = {
     pickFolder: () => Promise<string | null>
     pickDirectory: () => Promise<string | null>
     clone: (args: { url: string; destination: string }) => Promise<Repo>
+    cloneRemote: (args: { connectionId: string; url: string; destination: string }) => Promise<Repo>
     cloneAbort: () => Promise<void>
     // Why: error union matches the IPC handler's return shape; renderer callers branch on `'error' in result`.
     addRemote: (args: {

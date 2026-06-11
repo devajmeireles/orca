@@ -238,8 +238,8 @@ Needs:
   internals while old APIs remain
 
 Status: partially implemented. Ready setups and setup-target rows exist in the
-composer; inline import exists; inline clone is wired for non-SSH local/runtime
-hosts; SSH clone and provisioning remain.
+composer; inline import exists; inline clone is wired for local, runtime, and
+SSH hosts; provisioning remains.
 
 ### 5. Project Setup Flow
 
@@ -255,8 +255,7 @@ Needs:
 - future cloud provisioning hook
 
 Status: existing-folder setup is partially implemented; clone-on-host is wired
-for local/runtime from the composer; SSH clone, provisioning, and bulk setup
-remain.
+for local/runtime/SSH from the composer; provisioning and bulk setup remain.
 
 ### 6. Sidebar Row Model
 
@@ -406,13 +405,13 @@ Already partially landed:
 - setup-target `Run on` rows for known hosts where the selected project is not
   set up yet
 - inline import-existing-folder setup from the composer
-- inline clone setup from the composer for not-yet-set-up non-SSH
-  local/runtime hosts
+- inline clone setup from the composer for not-yet-set-up local, runtime, and
+  SSH hosts
 - repo-backed setup method metadata for imported/cloned project-host setups
 
 Still needed:
 
-- finish SSH clone/provision flows
+- finish SSH clone progress/abort/cleanup parity and provisioning flows
 - independent project-host setup persistence beyond the repo-backed
   compatibility records
 - bulk setup flows and setup for newly added hosts

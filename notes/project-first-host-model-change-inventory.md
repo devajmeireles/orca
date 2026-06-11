@@ -317,9 +317,9 @@ Needs:
 Current branch status: partially implemented. Ready project-host setups can be
 selected from the composer `Run on` menu, and known hosts that still need setup
 now appear as setup-target rows instead of being invisible. The composer can
-import an existing folder for those hosts and can clone onto non-SSH
-local/runtime hosts, then switch to the new ready setup. SSH clone and
-provisioning actions are still missing.
+import an existing folder for those hosts and can clone onto local, runtime, and
+SSH hosts, then switch to the new ready setup. Provisioning actions are still
+missing.
 
 ### 5. Project Setup Flow
 
@@ -337,8 +337,9 @@ Needs:
 Current branch status: existing-folder setup is partially implemented through
 API/CLI plumbing and a project settings import form for known local, SSH, and
 active runtime hosts. Composer clone setup is implemented for local/runtime
-hosts by composing the existing clone APIs with existing-folder setup. SSH
-clone, provisioning, and bulk setup are not complete.
+hosts by composing the existing clone APIs with existing-folder setup; SSH clone
+uses the relay git provider and then links the cloned path. Provisioning and
+bulk setup are not complete.
 
 ### 6. Sidebar Row Model
 
@@ -482,13 +483,13 @@ Already partially landed:
   set up yet
 - inline `Run on` import-existing-folder setup for known hosts where the
   selected project is not set up yet
-- inline `Run on` clone setup for not-yet-set-up non-SSH local/runtime hosts
+- inline `Run on` clone setup for not-yet-set-up local, runtime, and SSH hosts
 - repo-backed setup method metadata so imported/cloned setup methods survive
   compatibility projection and persistence sync
 
 Not complete yet:
 
-- SSH clone/provision flows
+- SSH clone progress/abort/cleanup parity and provisioning flows
 - independent project-host setup persistence beyond the repo-backed
   compatibility records
 - bulk setup flows and setup for hosts that are not already known to the client

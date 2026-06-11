@@ -38,7 +38,16 @@ const {
   mockGitProvider: {
     isGitRepo: vi.fn().mockReturnValue(true),
     isGitRepoAsync: vi.fn().mockResolvedValue({ isRepo: true, rootPath: null }),
-    exec: vi.fn().mockResolvedValue({ stdout: '', stderr: '' })
+    exec: vi.fn().mockResolvedValue({ stdout: '', stderr: '' }),
+    getHostPlatform: vi.fn().mockReturnValue({
+      relayPlatform: 'linux-x64',
+      os: 'linux',
+      arch: 'x64',
+      pathFlavor: 'posix',
+      commandDialect: 'posix',
+      pathSeparator: '/',
+      pathDelimiter: ':'
+    })
   },
   mockFilesystemProvider: {
     readDir: vi.fn().mockResolvedValue([]),
@@ -809,6 +818,18 @@ describe('repos:addRemote', () => {
     mockStore.updateRepo.mockReset()
     mockGitProvider.isGitRepoAsync.mockReset()
     mockGitProvider.isGitRepoAsync.mockResolvedValue({ isRepo: true, rootPath: null })
+    mockGitProvider.exec.mockReset()
+    mockGitProvider.exec.mockResolvedValue({ stdout: '', stderr: '' })
+    mockGitProvider.getHostPlatform.mockReset()
+    mockGitProvider.getHostPlatform.mockReturnValue({
+      relayPlatform: 'linux-x64',
+      os: 'linux',
+      arch: 'x64',
+      pathFlavor: 'posix',
+      commandDialect: 'posix',
+      pathSeparator: '/',
+      pathDelimiter: ':'
+    })
     mockMultiplexer.request.mockReset()
     mockMultiplexer.notify.mockReset()
     gitSpawnMock.mockReset()
@@ -825,6 +846,10 @@ describe('repos:addRemote', () => {
 
   it('registers the repos:addRemote handler', () => {
     expect(handlers.has('repos:addRemote')).toBe(true)
+  })
+
+  it('registers the repos:cloneRemote handler', () => {
+    expect(handlers.has('repos:cloneRemote')).toBe(true)
   })
 
   it('creates a remote repo with connectionId', async () => {
@@ -863,6 +888,99 @@ describe('repos:addRemote', () => {
       })
     )
     expect(result).toHaveProperty('repo.displayName', 'My Server Repo')
+  })
+
+  it('clones a repo on an SSH target and registers the cloned path', async () => {
+    const result = await handlers.get('repos:cloneRemote')!(null, {
+      connectionId: 'conn-1',
+      url: 'https://github.com/stablyai/orca.git',
+      destination: '/home/user'
+    })
+
+    expect(mockGitProvider.exec).toHaveBeenCalledWith(
+      ['clone', '--', 'https://github.com/stablyai/orca.git', 'orca'],
+      '/home/user'
+    )
+    expect(mockStore.addRepo).toHaveBeenCalledWith(
+      expect.objectContaining({
+        path: '/home/user/orca',
+        connectionId: 'conn-1',
+        kind: 'git',
+        displayName: 'orca',
+        badgeColor: DEFAULT_REPO_BADGE_COLOR,
+        externalWorktreeVisibility: 'hide',
+        externalWorktreeVisibilityLegacy: false
+      })
+    )
+    expect(mockMultiplexer.notify).toHaveBeenCalledWith('session.registerRoot', {
+      rootPath: '/home/user/orca'
+    })
+    expect(result).toHaveProperty('path', '/home/user/orca')
+    expect(result).toHaveProperty('connectionId', 'conn-1')
+  })
+
+  it('returns an existing SSH repo instead of cloning the same target again', async () => {
+    const existing = {
+      id: 'existing-id',
+      path: '/home/user/orca',
+      connectionId: 'conn-1',
+      displayName: 'orca',
+      badgeColor: '#fff',
+      addedAt: 1000,
+      kind: 'git'
+    }
+    mockStore.getRepos.mockReturnValue([existing])
+
+    const result = await handlers.get('repos:cloneRemote')!(null, {
+      connectionId: 'conn-1',
+      url: 'https://github.com/stablyai/orca.git',
+      destination: '/home/user'
+    })
+
+    expect(result).toBe(existing)
+    expect(mockGitProvider.exec).not.toHaveBeenCalled()
+    expect(mockStore.addRepo).not.toHaveBeenCalled()
+  })
+
+  it('upgrades an existing SSH folder repo after cloning into that path', async () => {
+    const existing = {
+      id: 'existing-folder',
+      path: '/home/user/orca',
+      connectionId: 'conn-1',
+      displayName: 'orca',
+      badgeColor: '#fff',
+      addedAt: 1000,
+      kind: 'folder'
+    }
+    const updated = { ...existing, kind: 'git' }
+    mockStore.getRepos.mockReturnValue([existing])
+    mockStore.updateRepo.mockReturnValue(updated)
+
+    const result = await handlers.get('repos:cloneRemote')!(null, {
+      connectionId: 'conn-1',
+      url: 'https://github.com/stablyai/orca.git',
+      destination: '/home/user'
+    })
+
+    expect(mockGitProvider.exec).toHaveBeenCalledWith(
+      ['clone', '--', 'https://github.com/stablyai/orca.git', 'orca'],
+      '/home/user'
+    )
+    expect(mockStore.updateRepo).toHaveBeenCalledWith('existing-folder', { kind: 'git' })
+    expect(mockStore.addRepo).not.toHaveBeenCalled()
+    expect(result).toBe(updated)
+  })
+
+  it('rejects SSH clone destinations that are not absolute host paths', async () => {
+    await expect(
+      handlers.get('repos:cloneRemote')!(null, {
+        connectionId: 'conn-1',
+        url: 'https://github.com/stablyai/orca.git',
+        destination: 'relative/path'
+      })
+    ).rejects.toThrow('Clone destination must be an absolute path on the SSH host')
+
+    expect(mockGitProvider.exec).not.toHaveBeenCalled()
   })
 
   it('returns existing repo if same connectionId and path already added', async () => {

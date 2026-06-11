@@ -22,15 +22,20 @@ import { DEFAULT_REPO_BADGE_COLOR } from '../../shared/constants'
 import { normalizeRepoBadgeColor } from '../../shared/repo-badge-color'
 import { sanitizeRepoIcon } from '../../shared/repo-icon'
 import { normalizeRepoSourceControlAiOverrides } from '../../shared/source-control-ai'
+import {
+  isRuntimePathAbsolute,
+  normalizeRuntimePathForComparison,
+  relativePathInsideRoot
+} from '../../shared/cross-platform-path'
 import { invalidateAuthorizedRootsCache } from './filesystem-auth'
 import type { ChildProcess } from 'child_process'
 import { access, mkdir, readdir, rm } from 'fs/promises'
 import { gitExecFileAsync, gitSpawn } from '../git/runner'
 import { isAbsolute, join, posix } from 'path'
-import { normalizeRuntimePathForComparison } from '../../shared/cross-platform-path'
 import {
   cleanupClaimedCloneTarget,
   claimCloneTarget,
+  deriveCloneRepoNameFromUrl,
   deriveValidatedClonePath,
   getClonePathComparisonKey
 } from '../git/repo-clone-path'
@@ -65,6 +70,7 @@ import type { RepoMethod } from '../../shared/telemetry-events'
 import { detectRepoIconAndUpstream } from '../repo-icon-autodetect'
 import { getProjectHostSetupForRepo } from '../../shared/project-host-setup-projection'
 import { parseExecutionHostId } from '../../shared/execution-host'
+import { joinRemotePath } from '../ssh/ssh-remote-platform'
 
 // Why: `method` answers "which entry point did the user take?", not "what did
 // they add?" — so the IPC the renderer invoked IS the method. We never send
@@ -275,6 +281,68 @@ function getRemoteRepoFolderName(remotePath: string): string {
     return remotePath
   }
   return trimmed.split(/[\\/]/).at(-1) || remotePath
+}
+
+async function cloneRemoteRepo(
+  store: Store,
+  args: {
+    connectionId: string
+    url: string
+    destination: string
+  }
+): Promise<Repo> {
+  const gitProvider = getSshGitProvider(args.connectionId)
+  if (!gitProvider) {
+    throw new Error(`SSH connection "${args.connectionId}" not found or not connected`)
+  }
+  const host = gitProvider.getHostPlatform?.()
+  if (!host) {
+    throw new Error('SSH host platform is unavailable. Reconnect the SSH target before cloning.')
+  }
+  const trimmedDestination = args.destination.trim()
+  if (!isRuntimePathAbsolute(trimmedDestination, host.pathFlavor)) {
+    throw new Error('Clone destination must be an absolute path on the SSH host')
+  }
+  const repoName = deriveCloneRepoNameFromUrl(args.url.trim())
+  const clonePath = joinRemotePath(host, trimmedDestination, repoName)
+  if (relativePathInsideRoot(trimmedDestination, clonePath) === null) {
+    throw new Error('Clone path must be inside the destination directory')
+  }
+  const clonePathKey = normalizeRuntimePathForComparison(clonePath)
+  const existing = store.getRepos().find((repo) => {
+    return (
+      repo.connectionId === args.connectionId &&
+      normalizeRuntimePathForComparison(repo.path) === clonePathKey
+    )
+  })
+  if (existing && !isFolderRepo(existing)) {
+    emitRepoAdded('clone_url', true)
+    return existing
+  }
+
+  // Why: the SSH relay exposes argv-based git execution, not a shell. Use the
+  // repo folder name as the target so git creates it inside the chosen parent.
+  await gitProvider.exec(['clone', '--', args.url.trim(), repoName], trimmedDestination)
+  if (existing && isFolderRepo(existing)) {
+    const updated = store.updateRepo(existing.id, { kind: 'git' })
+    if (updated) {
+      emitRepoAdded('clone_url', false)
+      getActiveMultiplexer(args.connectionId)?.notify('session.registerRoot', {
+        rootPath: clonePath
+      })
+      return updated
+    }
+  }
+  const result = await addRemoteRepoFromPath(store, {
+    connectionId: args.connectionId,
+    remotePath: clonePath,
+    kind: 'git'
+  })
+  if ('error' in result) {
+    throw new Error(result.error)
+  }
+  emitRepoAdded('clone_url', result.alreadyExisted)
+  return result.repo
 }
 
 type ActiveCloneMetadata = {
@@ -642,6 +710,7 @@ export function registerRepoHandlers(mainWindow: BrowserWindow, store: Store): v
   ipcMain.removeHandler('repos:pickDirectory')
   ipcMain.removeHandler('repos:clone')
   ipcMain.removeHandler('repos:cloneAbort')
+  ipcMain.removeHandler('repos:cloneRemote')
   ipcMain.removeHandler('repos:getGitUsername')
   ipcMain.removeHandler('repos:getBaseRefDefault')
   ipcMain.removeHandler('repos:searchBaseRefs')
@@ -1556,6 +1625,18 @@ export function registerRepoHandlers(mainWindow: BrowserWindow, store: Store): v
           }
         }
       })
+    }
+  )
+
+  ipcMain.handle(
+    'repos:cloneRemote',
+    async (
+      _event,
+      args: { connectionId: string; url: string; destination: string }
+    ): Promise<Repo> => {
+      const repo = await cloneRemoteRepo(store, args)
+      notifyReposChanged(mainWindow)
+      return repo
     }
   )
 
