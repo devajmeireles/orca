@@ -146,6 +146,7 @@ import type {
   WorkspaceSessionState
 } from '../shared/types'
 import type { PtyModelRestoreNeededEvent } from '../shared/pty-model-restore-marker'
+import type { TerminalViewAttributes } from '../shared/terminal-view-attributes'
 import type { SetupScriptImportCandidate } from '../shared/setup-script-imports'
 import type { GitHistoryOptions, GitHistoryResult } from '../shared/git-history'
 import type { PublicKnownRuntimeEnvironment } from '../shared/runtime-environments'
@@ -943,6 +944,9 @@ export type PreloadApi = {
     /** Ref-counted-on-the-renderer delivery-interest signal that suppresses
      *  the hidden-delivery gate while any raw-byte consumer is registered. */
     setPtyDeliveryInterest: (id: string, interested: boolean) => void
+    /** View-attribute bridge (Phase 5 slice 2): app-global composed terminal
+     *  appearance push backing main's hidden-PTY OSC/DSR color replies. */
+    publishTerminalViewAttributes: (attributes: TerminalViewAttributes) => void
     hasChildProcesses: (id: string) => Promise<boolean>
     getForegroundProcess: (id: string) => Promise<string | null>
     getCwd: (id: string) => Promise<string>

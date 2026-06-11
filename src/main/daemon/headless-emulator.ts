@@ -1,8 +1,13 @@
 import './xterm-env-polyfill'
 import { Terminal } from '@xterm/headless'
 import { SerializeAddon } from '@xterm/addon-serialize'
-import { extractLastOscTitle } from '../../shared/agent-detection'
+import type { TerminalViewAttributes } from '../../shared/terminal-view-attributes'
 import { TerminalMouseModeMirror } from './terminal-mouse-mode-mirror'
+import { TerminalOscCwdTitleScanner } from './terminal-osc-cwd-title-scanner'
+import {
+  installTerminalViewAttributeResponder,
+  type TerminalViewAttributeResponder
+} from './terminal-view-attribute-responder'
 import type { TerminalSnapshot, TerminalModes } from './types'
 
 export type HeadlessEmulatorOptions = {
@@ -45,46 +50,16 @@ const DEFAULT_SCROLLBACK = 5000
 // Keep in sync with the renderer twin in terminal-conpty-device-attributes.ts
 // (main must not import renderer modules).
 const CONPTY_DA1_RESPONSE = '\x1b[?61;4c'
-const OSC_SCAN_TAIL_LIMIT = 4096
-
-function parseFileUriPath(uri: string): string | null {
-  try {
-    const url = new URL(uri)
-    if (url.protocol !== 'file:') {
-      return null
-    }
-
-    const decodedPath = decodeURIComponent(url.pathname)
-    if (process.platform !== 'win32') {
-      return decodedPath
-    }
-
-    // Why: Windows OSC-7 cwd updates can describe both drive-letter paths
-    // (`file:///C:/repo`) and UNC shares (`file://server/share/repo`). Use the
-    // hostname when present so live cwd tracking, snapshots, and restore all
-    // round-trip to a native Windows path instead of dropping the server name.
-    if (url.hostname) {
-      return `\\\\${url.hostname}${decodedPath.replace(/\//g, '\\')}`
-    }
-    if (/^\/[A-Za-z]:/.test(decodedPath)) {
-      return decodedPath.slice(1)
-    }
-    return decodedPath.replace(/\//g, '\\')
-  } catch {
-    return null
-  }
-}
 
 export class HeadlessEmulator {
   private terminal: Terminal
   private serializer: SerializeAddon
-  private cwd: string | null = null
-  private lastTitle: string | null = null
-  private oscScanTail = ''
+  private oscText = new TerminalOscCwdTitleScanner()
   private mouseModes = new TerminalMouseModeMirror()
   private disposed = false
   private onQueryReply: ((reply: string) => void) | null
   private conptyDa1OverrideInstalled = false
+  private viewAttributeResponder: TerminalViewAttributeResponder | null = null
   // Why: replies must be scoped to the exact write that carried the query.
   // The window opens around the parse of a forward-flagged chunk and closes
   // with it, so seeds/snapshots and unsolicited core emissions (e.g. native
@@ -149,6 +124,39 @@ export class HeadlessEmulator {
     })
   }
 
+  /** Phase-5 slice-2 view-attribute bridge: the headless core has no theme
+   *  service, so OSC 4/10/11/12 queries and DSR ?996n are answered from the
+   *  renderer's pushed attributes via these parser handlers — never from
+   *  emulator defaults. Runtime-only, like onQueryReply: the daemon Session
+   *  must NEVER call this (its emulator stays write-only forever). */
+  installViewAttributeResponder(getBaseAttributes: () => TerminalViewAttributes | null): void {
+    if (this.viewAttributeResponder) {
+      return
+    }
+    this.viewAttributeResponder = installTerminalViewAttributeResponder({
+      parser: this.terminal.parser,
+      getBaseAttributes,
+      // emitQueryReply keeps replies inside the per-chunk forwarding window,
+      // so seeded/replayed view-attribute queries answer no one.
+      emitReply: (reply) => this.emitQueryReply(reply)
+    })
+  }
+
+  /** Applies a renderer view-attribute push: cursor options make xterm core
+   *  answer DECRQSS DECSCUSR / DECRQM 12 renderer-true, and the per-PTY OSC
+   *  color overrides are dropped because a theme apply overwrites mutated
+   *  colors on visible panes too (ThemeService._setTheme parity). Option
+   *  writes happen outside any forwarding window, so any core emission they
+   *  trigger is discarded (main-side replay guard). */
+  applyPushedViewAttributes(attributes: TerminalViewAttributes): void {
+    if (this.disposed) {
+      return
+    }
+    this.terminal.options.cursorStyle = attributes.cursorStyle
+    this.terminal.options.cursorBlink = attributes.cursorBlink
+    this.viewAttributeResponder?.clearColorOverrides()
+  }
+
   private emitQueryReply(reply: string): void {
     if (this.queryReplyForwardingDepth > 0 && this.onQueryReply) {
       this.onQueryReply(reply)
@@ -167,13 +175,7 @@ export class HeadlessEmulator {
       return Promise.resolve()
     }
 
-    const oscInput = this.oscScanTail + data
-    this.oscScanTail = this.extractOscScanTail(oscInput)
-    this.scanOsc7(oscInput)
-    const lastTitle = extractLastOscTitle(oscInput)
-    if (lastTitle !== null) {
-      this.lastTitle = lastTitle
-    }
+    this.oscText.scan(data)
     const forwardQueryReplies = opts.forwardQueryReplies === true
     const writeSync = (this.terminal as TerminalWithSynchronousWrite)._core?.writeSync
     if (typeof writeSync === 'function') {
@@ -233,12 +235,12 @@ export class HeadlessEmulator {
       snapshotAnsi,
       scrollbackAnsi: '',
       rehydrateSequences: this.buildRehydrateSequences(modes),
-      cwd: this.cwd,
+      cwd: this.oscText.cwd,
       modes,
       cols: this.terminal.cols,
       rows: this.terminal.rows,
       scrollbackLines: this.terminal.buffer.normal.length - this.terminal.rows,
-      lastTitle: this.lastTitle ?? undefined
+      lastTitle: this.oscText.lastTitle ?? undefined
     }
   }
 
@@ -256,15 +258,15 @@ export class HeadlessEmulator {
   }
 
   getCwd(): string | null {
-    return this.cwd
+    return this.oscText.cwd
   }
 
   setCwd(cwd: string | null): void {
-    this.cwd = cwd
+    this.oscText.cwd = cwd
   }
 
   setLastTitle(title: string): void {
-    this.lastTitle = title
+    this.oscText.lastTitle = title
   }
 
   clearScrollback(): void {
@@ -274,31 +276,6 @@ export class HeadlessEmulator {
   dispose(): void {
     this.disposed = true
     this.terminal.dispose()
-  }
-
-  private scanOsc7(data: string): void {
-    // OSC-7 format: ESC ] 7 ; <uri> BEL  or  ESC ] 7 ; <uri> ST
-    // BEL = \x07, ST = ESC \
-    // oxlint-disable-next-line no-control-regex -- terminal escape sequences require control chars
-    const osc7Re = /\x1b\]7;([^\x07\x1b]*?)(?:\x07|\x1b\\)/g
-    let match: RegExpExecArray | null
-    while ((match = osc7Re.exec(data)) !== null) {
-      this.parseOsc7Uri(match[1])
-    }
-  }
-
-  private extractOscScanTail(input: string): string {
-    const lastOsc = input.lastIndexOf('\x1b]')
-    const lastEscape = input.endsWith('\x1b') ? input.length - 1 : -1
-    const start = Math.max(lastOsc, lastEscape)
-    if (start === -1) {
-      return ''
-    }
-    const suffix = input.slice(start)
-    if (suffix.includes('\x07') || suffix.includes('\x1b\\')) {
-      return ''
-    }
-    return suffix.slice(-OSC_SCAN_TAIL_LIMIT)
   }
 
   private normalizeSnapshotAnsiForModes(snapshotAnsi: string, modes: TerminalModes): string {
@@ -314,13 +291,6 @@ export class HeadlessEmulator {
     // mouse modes. Dropping SerializeAddon's duplicate ?1049h keeps mobile's
     // "slice from last alt-screen marker" replay from discarding those modes.
     return snapshotAnsi.slice(start + alternateScreenMarker.length)
-  }
-
-  private parseOsc7Uri(uri: string): void {
-    const parsed = parseFileUriPath(uri)
-    if (parsed) {
-      this.cwd = parsed
-    }
   }
 
   private getModes(): TerminalModes {

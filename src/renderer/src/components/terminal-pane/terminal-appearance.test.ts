@@ -1,7 +1,9 @@
 import { describe, expect, it, vi } from 'vitest'
 import { Terminal } from '@xterm/headless'
-import type { ManagedPane } from '@/lib/pane-manager/pane-manager'
+import type { ManagedPane, PaneManager } from '@/lib/pane-manager/pane-manager'
+import { getDefaultSettings } from '../../../../shared/constants'
 import {
+  applyTerminalAppearance,
   hexToRgba,
   installMode2031Handlers,
   maybePushMode2031Flip,
@@ -370,6 +372,68 @@ describe('installMode2031Handlers', () => {
       term1.dispose()
       term2.dispose()
     }
+  })
+})
+
+describe('applyTerminalAppearance theme assignment', () => {
+  // xterm's OptionsService fires the theme change on object IDENTITY, and
+  // ThemeService._setTheme then rebuilds the palette, discarding OSC
+  // 4/10/11/12 SET mutations. Attribute-neutral applies (font size, padding,
+  // zoom) compose a fresh-but-value-identical theme; assigning it anyway
+  // wipes TUI color mutations on visible panes while the deduped publisher
+  // keeps hidden overlays — so the assignment must be value-gated.
+  function makePane(id: number): ManagedPane {
+    return { id, terminal: { options: {}, cols: 80, rows: 24 } } as unknown as ManagedPane
+  }
+
+  function makeManager(panes: ManagedPane[]): PaneManager {
+    return {
+      getPanes: () => panes,
+      setPaneLigaturesEnabled: vi.fn(),
+      setPaneStyleOptions: vi.fn()
+    } as unknown as PaneManager
+  }
+
+  function apply(pane: ManagedPane, settings: ReturnType<typeof getDefaultSettings>): void {
+    applyTerminalAppearance(
+      makeManager([pane]),
+      settings,
+      true,
+      new Map(),
+      new Map(),
+      'false',
+      new Map(),
+      new Map()
+    )
+  }
+
+  it('keeps options.theme identity across attribute-neutral applies (font size tweak)', () => {
+    const pane = makePane(1)
+    const settings = getDefaultSettings('/tmp')
+
+    apply(pane, settings)
+    const firstTheme = pane.terminal.options.theme
+    expect(firstTheme).toBeDefined()
+
+    apply(pane, { ...settings, terminalFontSize: settings.terminalFontSize + 2 })
+
+    // Identity-stable theme means xterm never re-runs _setTheme, so a TUI's
+    // modifyColors mutation survives the font tweak.
+    expect(pane.terminal.options.theme).toBe(firstTheme)
+    expect(pane.terminal.options.fontSize).toBe(settings.terminalFontSize + 2)
+  })
+
+  it('still assigns a fresh theme when composed values actually change', () => {
+    const pane = makePane(1)
+    const settings = getDefaultSettings('/tmp')
+
+    apply(pane, settings)
+    const firstTheme = pane.terminal.options.theme
+
+    apply(pane, { ...settings, terminalColorOverrides: { background: '#102030' } })
+
+    expect(pane.terminal.options.theme).not.toBe(firstTheme)
+    expect(pane.terminal.options.theme?.background).toBe('#102030')
   })
 })
 

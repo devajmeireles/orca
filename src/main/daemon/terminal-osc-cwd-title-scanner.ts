@@ -1,0 +1,78 @@
+import { extractLastOscTitle } from '../../shared/agent-detection'
+
+const OSC_SCAN_TAIL_LIMIT = 4096
+
+function parseFileUriPath(uri: string): string | null {
+  try {
+    const url = new URL(uri)
+    if (url.protocol !== 'file:') {
+      return null
+    }
+
+    const decodedPath = decodeURIComponent(url.pathname)
+    if (process.platform !== 'win32') {
+      return decodedPath
+    }
+
+    // Why: Windows OSC-7 cwd updates can describe both drive-letter paths
+    // (`file:///C:/repo`) and UNC shares (`file://server/share/repo`). Use the
+    // hostname when present so live cwd tracking, snapshots, and restore all
+    // round-trip to a native Windows path instead of dropping the server name.
+    if (url.hostname) {
+      return `\\\\${url.hostname}${decodedPath.replace(/\//g, '\\')}`
+    }
+    if (/^\/[A-Za-z]:/.test(decodedPath)) {
+      return decodedPath.slice(1)
+    }
+    return decodedPath.replace(/\//g, '\\')
+  } catch {
+    return null
+  }
+}
+
+function extractOscScanTail(input: string): string {
+  const lastOsc = input.lastIndexOf('\x1b]')
+  const lastEscape = input.endsWith('\x1b') ? input.length - 1 : -1
+  const start = Math.max(lastOsc, lastEscape)
+  if (start === -1) {
+    return ''
+  }
+  const suffix = input.slice(start)
+  if (suffix.includes('\x07') || suffix.includes('\x1b\\')) {
+    return ''
+  }
+  return suffix.slice(-OSC_SCAN_TAIL_LIMIT)
+}
+
+/** Regex-side mirror of the OSC sequences the emulator tracks outside xterm:
+ *  OSC 7 cwd updates and OSC 0/2 titles. Keeps an unterminated-sequence tail
+ *  so sequences split across PTY chunks still parse. */
+export class TerminalOscCwdTitleScanner {
+  private scanTail = ''
+  cwd: string | null = null
+  lastTitle: string | null = null
+
+  scan(data: string): void {
+    const input = this.scanTail + data
+    this.scanTail = extractOscScanTail(input)
+    this.scanOsc7(input)
+    const lastTitle = extractLastOscTitle(input)
+    if (lastTitle !== null) {
+      this.lastTitle = lastTitle
+    }
+  }
+
+  private scanOsc7(data: string): void {
+    // OSC-7 format: ESC ] 7 ; <uri> BEL  or  ESC ] 7 ; <uri> ST
+    // BEL = \x07, ST = ESC \
+    // oxlint-disable-next-line no-control-regex -- terminal escape sequences require control chars
+    const osc7Re = /\x1b\]7;([^\x07\x1b]*?)(?:\x07|\x1b\\)/g
+    let match: RegExpExecArray | null
+    while ((match = osc7Re.exec(data)) !== null) {
+      const parsed = parseFileUriPath(match[1])
+      if (parsed) {
+        this.cwd = parsed
+      }
+    }
+  }
+}

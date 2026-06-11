@@ -45,6 +45,7 @@ import type {
   WorktreeRemoteBranchConflictEvent
 } from '../shared/types'
 import type { PtyModelRestoreNeededEvent } from '../shared/pty-model-restore-marker'
+import type { TerminalViewAttributes } from '../shared/terminal-view-attributes'
 import type { GitHistoryOptions, GitHistoryResult } from '../shared/git-history'
 import type { ShellOpenLocalPathResult } from '../shared/shell-open-types'
 import type { SkillDiscoveryResult, SkillDiscoveryTarget } from '../shared/skills'
@@ -716,6 +717,12 @@ const api = {
      *  hidden-delivery gate for that PTY while registered. */
     setPtyDeliveryInterest: (id: string, interested: boolean): void => {
       ipcRenderer.send('pty:setPtyDeliveryInterest', { id, interested })
+    },
+    /** View-attribute bridge (Phase 5 slice 2): app-global composed terminal
+     *  appearance push that lets main's model responder answer OSC 4/10/11/12
+     *  and DSR ?996n for hidden-gated PTYs with renderer-true values. */
+    publishTerminalViewAttributes: (attributes: TerminalViewAttributes): void => {
+      ipcRenderer.send('pty:terminalViewAttributes', attributes)
     },
 
     kill: (id: string, opts?: { keepHistory?: boolean }): Promise<void> =>

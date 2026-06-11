@@ -2258,6 +2258,9 @@ function createPtyApi(): NonNullable<Partial<PreloadApi>['pty']> {
     setActiveRendererPty: () => {},
     setHiddenRendererPty: () => {},
     setPtyDeliveryInterest: () => {},
+    // Why no-op: remote-runtime PTYs are never hidden-gate markable, so the
+    // web client has no main-side responder to feed.
+    publishTerminalViewAttributes: () => {},
     hasChildProcesses: () => Promise.resolve(false),
     getForegroundProcess: () => Promise.resolve(null),
     getCwd: () => Promise.resolve('~'),

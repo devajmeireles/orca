@@ -484,6 +484,10 @@ import {
   registerConptyDa1OverrideInstaller,
   shouldModelAnswerHiddenPtyQueries
 } from './terminal-model-query-authority'
+import {
+  getTerminalViewAttributes,
+  registerTerminalViewAttributesApplier
+} from './terminal-view-attribute-store'
 import { killAllProcessesForWorktree } from './worktree-teardown'
 import { MOBILE_SUBSCRIBE_SCROLLBACK_ROWS } from './scrollback-limits'
 import type { IFilesystemProvider, IPtyProvider } from '../providers/types'
@@ -1687,6 +1691,15 @@ export class OrcaRuntimeService {
     // created this PTY's emulator; the mark retrofits the DA1 override here
     // (terminal-query-authority.md §ConPTY DA1).
     registerConptyDa1OverrideInstaller((ptyId) => this.ensureNativeWindowsConptyDa1Override(ptyId))
+    // Why: a renderer attribute push must reach already-live emulators too —
+    // cursor options for DECRQSS/DECRQM parity plus the per-PTY OSC color
+    // override reset a theme apply implies (terminal-query-authority.md
+    // §View-attribute bridge).
+    registerTerminalViewAttributesApplier((attributes) => {
+      for (const state of this.headlessTerminals.values()) {
+        state.emulator.applyPushedViewAttributes(attributes)
+      }
+    })
   }
 
   getLocalProvider(): IPtyProvider | null {
@@ -4238,6 +4251,13 @@ export class OrcaRuntimeService {
     })
     if (isNativeWindowsConptyPty(ptyId)) {
       emulator.installConptyPrimaryDeviceAttributesOverride()
+    }
+    // Why the lazy getter: replies must use the freshest renderer push at
+    // parse time, and stay silent (never default) before the first push.
+    emulator.installViewAttributeResponder(() => getTerminalViewAttributes())
+    const viewAttributes = getTerminalViewAttributes()
+    if (viewAttributes) {
+      emulator.applyPushedViewAttributes(viewAttributes)
     }
     state = { emulator, outputSequence: 0, writeChain: Promise.resolve() }
     return state

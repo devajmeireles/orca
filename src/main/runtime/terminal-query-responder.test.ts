@@ -16,6 +16,11 @@ import {
   _resetTerminalModelQueryAuthorityForTest,
   markNativeWindowsConptyPty
 } from './terminal-model-query-authority'
+import {
+  _resetTerminalViewAttributesForTest,
+  setTerminalViewAttributes
+} from './terminal-view-attribute-store'
+import type { TerminalViewAttributes, TerminalViewRgb } from '../../shared/terminal-view-attributes'
 
 const settingsState = {
   terminalMainSideEffectAuthority: true as boolean,
@@ -75,9 +80,30 @@ async function settle(runtime: OrcaRuntimeService, ptyId: string): Promise<void>
   await runtime.serializeMainTerminalBuffer(ptyId)
 }
 
+/** Renderer-pushed attribute snapshot with distinct, pinned slot values so
+ *  reply fixtures cannot pass by coincidence. */
+function viewAttributes(overrides: Partial<TerminalViewAttributes> = {}): TerminalViewAttributes {
+  const ansi = Array.from(
+    { length: 256 },
+    (_, i) => [i, (i * 2) % 256, (i * 3) % 256] as TerminalViewRgb
+  )
+  ansi[1] = [0xcc, 0x00, 0x00]
+  return {
+    foreground: [0xd0, 0xd0, 0xd0],
+    background: [0x1e, 0x1e, 0x2e],
+    cursor: [0xff, 0x99, 0x00],
+    ansi,
+    colorSchemeMode: 'dark',
+    cursorStyle: 'bar',
+    cursorBlink: true,
+    ...overrides
+  }
+}
+
 afterEach(() => {
   _resetHiddenRendererPtyDeliveryGateForTest()
   _resetTerminalModelQueryAuthorityForTest()
+  _resetTerminalViewAttributesForTest()
   settingsState.terminalMainSideEffectAuthority = true
   settingsState.terminalHiddenDeliveryGate = true
   settingsState.terminalModelQueryAuthority = true
@@ -443,5 +469,328 @@ describe('HeadlessEmulator forwarding window', () => {
     } finally {
       emulator.dispose()
     }
+  })
+})
+
+describe('view-attribute bridge replies (after renderer push)', () => {
+  // Reply bytes pinned to the renderer xterm's format: OSC replies use the
+  // queried ident, 16-bit doubled-byte channels, and ST termination
+  // (CoreBrowserTerminal._handleColorEvent + toRgbString); ?996n answers with
+  // the contour 997 report, same bytes as mode2031SequenceFor.
+  it.each([
+    ['OSC 10 foreground', '\x1b]10;?\x07', ['\x1b]10;rgb:d0d0/d0d0/d0d0\x1b\\']],
+    ['OSC 11 background', '\x1b]11;?\x07', ['\x1b]11;rgb:1e1e/1e1e/2e2e\x1b\\']],
+    ['OSC 12 cursor color', '\x1b]12;?\x1b\\', ['\x1b]12;rgb:ffff/9999/0000\x1b\\']],
+    ['OSC 4 named palette slot', '\x1b]4;1;?\x07', ['\x1b]4;1;rgb:cccc/0000/0000\x1b\\']],
+    ['OSC 4 extended palette slot', '\x1b]4;196;?\x07', ['\x1b]4;196;rgb:c4c4/8888/4c4c\x1b\\']],
+    [
+      'OSC 4 multiple slots in one sequence',
+      '\x1b]4;1;?;196;?\x07',
+      ['\x1b]4;1;rgb:cccc/0000/0000\x1b\\', '\x1b]4;196;rgb:c4c4/8888/4c4c\x1b\\']
+    ],
+    [
+      'OSC 10 stacked params report foreground then background',
+      '\x1b]10;?;?\x07',
+      ['\x1b]10;rgb:d0d0/d0d0/d0d0\x1b\\', '\x1b]11;rgb:1e1e/1e1e/2e2e\x1b\\']
+    ],
+    ['DSR ?996n dark', '\x1b[?996n', ['\x1b[?997;1n']],
+    ['DECRQSS DECSCUSR from pushed cursor options', '\x1bP$q q\x1b\\', ['\x1bP1$r5 q\x1b\\']],
+    ['DECRQM ?12 from pushed cursorBlink', '\x1b[?12$p', ['\x1b[?12;1$y']]
+  ])('%s', async (_label, chunk, expectedReplies) => {
+    const { runtime, replies } = createResponderRuntime()
+    markHiddenRendererPty('pty-view')
+    setTerminalViewAttributes(viewAttributes())
+
+    runtime.onPtyData('pty-view', chunk, Date.now())
+    await settle(runtime, 'pty-view')
+
+    expect(replies.map((reply) => reply.data)).toEqual(expectedReplies)
+  })
+
+  it('answers ?996n from palette luminance, not the pushed app mode (dark palette, light app mode)', async () => {
+    const { runtime, replies } = createResponderRuntime()
+    markHiddenRendererPty('pty-lum-dark')
+    // Supported divergence: light app mode with terminalUseSeparateLightTheme
+    // off renders a dark terminal theme. A visible xterm answers ?996n from
+    // bg/fg relative luminance (CoreBrowserTerminal._reportColorScheme), so
+    // the hidden reply must say dark here too.
+    setTerminalViewAttributes(viewAttributes({ colorSchemeMode: 'light' }))
+
+    runtime.onPtyData('pty-lum-dark', '\x1b[?996n', Date.now())
+    await settle(runtime, 'pty-lum-dark')
+
+    expect(replies.map((reply) => reply.data)).toEqual(['\x1b[?997;1n'])
+  })
+
+  it('answers ?996n light for a light palette regardless of the pushed app mode', async () => {
+    const { runtime, replies } = createResponderRuntime()
+    markHiddenRendererPty('pty-lum-light')
+    setTerminalViewAttributes(
+      viewAttributes({
+        foreground: [0x33, 0x33, 0x33],
+        background: [0xfa, 0xfa, 0xfa],
+        colorSchemeMode: 'dark'
+      })
+    )
+
+    runtime.onPtyData('pty-lum-light', '\x1b[?996n', Date.now())
+    await settle(runtime, 'pty-lum-light')
+
+    expect(replies.map((reply) => reply.data)).toEqual(['\x1b[?997;2n'])
+  })
+
+  it('answers ?996n from OSC-SET-mutated colors like a visible xterm', async () => {
+    // _reportColorScheme reads the CURRENT theme-service colors, which include
+    // OSC 10/11 SET mutations — the per-PTY overlays layer the same way.
+    const { runtime, replies } = createResponderRuntime()
+    markHiddenRendererPty('pty-lum-set')
+    setTerminalViewAttributes(viewAttributes())
+
+    runtime.onPtyData('pty-lum-set', '\x1b]11;#ffffff\x07\x1b]10;#101010\x07\x1b[?996n', Date.now())
+    await settle(runtime, 'pty-lum-set')
+
+    expect(replies.map((reply) => reply.data)).toEqual(['\x1b[?997;2n'])
+  })
+
+  it('stays silent before the first push, then answers the same query after it', async () => {
+    const { runtime, replies } = createResponderRuntime()
+    markHiddenRendererPty('pty-first')
+
+    runtime.onPtyData('pty-first', '\x1b]11;?\x07\x1b[?996n', Date.now())
+    await settle(runtime, 'pty-first')
+    // No fabricated defaults: silence is the documented hidden status quo.
+    expect(replies).toEqual([])
+
+    setTerminalViewAttributes(viewAttributes())
+    runtime.onPtyData('pty-first', '\x1b]11;?\x07', Date.now())
+    await settle(runtime, 'pty-first')
+    expect(replies.map((reply) => reply.data)).toEqual(['\x1b]11;rgb:1e1e/1e1e/2e2e\x1b\\'])
+  })
+
+  it('retrofits cursor options onto already-live emulators when the push lands late', async () => {
+    const { runtime, replies } = createResponderRuntime()
+    markHiddenRendererPty('pty-late')
+
+    // Emulator exists before any push: core default DECSCUSR is steady block.
+    runtime.onPtyData('pty-late', '\x1bP$q q\x1b\\', Date.now())
+    await settle(runtime, 'pty-late')
+    expect(replies.map((reply) => reply.data)).toEqual(['\x1bP1$r2 q\x1b\\'])
+
+    setTerminalViewAttributes(viewAttributes({ cursorStyle: 'underline', cursorBlink: false }))
+    runtime.onPtyData('pty-late', '\x1bP$q q\x1b\\', Date.now())
+    await settle(runtime, 'pty-late')
+    expect(replies.map((reply) => reply.data).at(-1)).toBe('\x1bP1$r4 q\x1b\\')
+  })
+})
+
+describe('per-PTY OSC color SET layering', () => {
+  it('layers an OSC 4 SET over the pushed base, isolated per PTY', async () => {
+    const { runtime, replies } = createResponderRuntime()
+    markHiddenRendererPty('pty-a')
+    markHiddenRendererPty('pty-b')
+    setTerminalViewAttributes(viewAttributes())
+
+    runtime.onPtyData('pty-a', '\x1b]4;1;rgb:00/ff/00\x07\x1b]4;1;?\x07', Date.now())
+    runtime.onPtyData('pty-b', '\x1b]4;1;?\x07', Date.now())
+    await settle(runtime, 'pty-a')
+    await settle(runtime, 'pty-b')
+
+    expect(replies).toEqual([
+      { ptyId: 'pty-a', data: '\x1b]4;1;rgb:0000/ffff/0000\x1b\\' },
+      { ptyId: 'pty-b', data: '\x1b]4;1;rgb:cccc/0000/0000\x1b\\' }
+    ])
+  })
+
+  it('restores a single indexed color via OSC 104;<idx>', async () => {
+    const { runtime, replies } = createResponderRuntime()
+    markHiddenRendererPty('pty-104')
+    setTerminalViewAttributes(viewAttributes())
+
+    runtime.onPtyData('pty-104', '\x1b]4;1;#00ff00\x07\x1b]104;1\x07\x1b]4;1;?\x07', Date.now())
+    await settle(runtime, 'pty-104')
+
+    expect(replies.map((reply) => reply.data)).toEqual(['\x1b]4;1;rgb:cccc/0000/0000\x1b\\'])
+  })
+
+  it('restores the whole indexed table via bare OSC 104', async () => {
+    const { runtime, replies } = createResponderRuntime()
+    markHiddenRendererPty('pty-104all')
+    setTerminalViewAttributes(viewAttributes())
+
+    runtime.onPtyData(
+      'pty-104all',
+      '\x1b]4;1;#00ff00;196;#0000ff\x07\x1b]104\x07\x1b]4;1;?;196;?\x07',
+      Date.now()
+    )
+    await settle(runtime, 'pty-104all')
+
+    expect(replies.map((reply) => reply.data)).toEqual([
+      '\x1b]4;1;rgb:cccc/0000/0000\x1b\\',
+      '\x1b]4;196;rgb:c4c4/8888/4c4c\x1b\\'
+    ])
+  })
+
+  it('layers OSC 10/11/12 SETs and restores them via 110/111/112', async () => {
+    const { runtime, replies } = createResponderRuntime()
+    markHiddenRendererPty('pty-special')
+    setTerminalViewAttributes(viewAttributes())
+
+    runtime.onPtyData(
+      'pty-special',
+      '\x1b]10;#010203\x07\x1b]11;rgb:ff/ff/ff\x07\x1b]12;#0a0b0c\x07' +
+        '\x1b]10;?\x07\x1b]11;?\x07\x1b]12;?\x07' +
+        '\x1b]110\x07\x1b]111\x07\x1b]112\x07' +
+        '\x1b]10;?\x07\x1b]11;?\x07\x1b]12;?\x07',
+      Date.now()
+    )
+    await settle(runtime, 'pty-special')
+
+    expect(replies.map((reply) => reply.data)).toEqual([
+      '\x1b]10;rgb:0101/0202/0303\x1b\\',
+      '\x1b]11;rgb:ffff/ffff/ffff\x1b\\',
+      '\x1b]12;rgb:0a0a/0b0b/0c0c\x1b\\',
+      '\x1b]10;rgb:d0d0/d0d0/d0d0\x1b\\',
+      '\x1b]11;rgb:1e1e/1e1e/2e2e\x1b\\',
+      '\x1b]12;rgb:ffff/9999/0000\x1b\\'
+    ])
+  })
+
+  it('tracks SET mutations parsed from a seed without replying, like renderer replay', async () => {
+    // Cold-restore scrollback replayed into a visible renderer xterm re-applies
+    // OSC SETs to its theme service; the model mirrors that state — but the
+    // replay guard still keeps the seed from ANSWERING anything.
+    const { runtime, replies } = createResponderRuntime()
+    markHiddenRendererPty('pty-seedset')
+    setTerminalViewAttributes(viewAttributes())
+
+    runtime.seedHeadlessTerminal('pty-seedset', 'restored\x1b]4;1;#00ff00\x07\x1b]4;1;?\x07')
+    await settle(runtime, 'pty-seedset')
+    expect(replies).toEqual([])
+
+    runtime.onPtyData('pty-seedset', '\x1b]4;1;?\x07', Date.now())
+    await settle(runtime, 'pty-seedset')
+    expect(replies.map((reply) => reply.data)).toEqual(['\x1b]4;1;rgb:0000/ffff/0000\x1b\\'])
+  })
+
+  it('preserves per-PTY overrides on an identical re-push (fresh renderer process)', async () => {
+    const { runtime, replies } = createResponderRuntime()
+    markHiddenRendererPty('pty-idem')
+    setTerminalViewAttributes(viewAttributes())
+
+    runtime.onPtyData('pty-idem', '\x1b]11;#ffffff\x07', Date.now())
+    await settle(runtime, 'pty-idem')
+
+    // A second window / renderer reload / macOS re-activation re-pushes
+    // byte-identical attributes (its publisher dedupe is per-process). That is
+    // not a theme apply, so the OSC SET overlay must survive.
+    setTerminalViewAttributes(viewAttributes())
+    runtime.onPtyData('pty-idem', '\x1b]11;?\x07', Date.now())
+    await settle(runtime, 'pty-idem')
+
+    expect(replies.map((reply) => reply.data)).toEqual(['\x1b]11;rgb:ffff/ffff/ffff\x1b\\'])
+  })
+
+  it('clears per-PTY overrides when a new push lands (theme apply parity)', async () => {
+    const { runtime, replies } = createResponderRuntime()
+    markHiddenRendererPty('pty-clear')
+    setTerminalViewAttributes(viewAttributes())
+
+    runtime.onPtyData('pty-clear', '\x1b]11;#ffffff\x07', Date.now())
+    await settle(runtime, 'pty-clear')
+
+    // A theme apply overwrites OSC-SET-mutated colors on visible panes too
+    // (ThemeService._setTheme), so the model mirrors that on every CHANGED
+    // push (identical re-pushes are filtered — see the test above).
+    setTerminalViewAttributes(viewAttributes({ background: [0x10, 0x20, 0x30] }))
+    runtime.onPtyData('pty-clear', '\x1b]11;?\x07', Date.now())
+    await settle(runtime, 'pty-clear')
+
+    expect(replies.map((reply) => reply.data)).toEqual(['\x1b]11;rgb:1010/2020/3030\x1b\\'])
+  })
+})
+
+describe('view-attribute replay guard and suppression', () => {
+  it('never answers view-attribute queries embedded in a seeded snapshot', async () => {
+    const { runtime, replies } = createResponderRuntime()
+    markHiddenRendererPty('pty-vseed')
+    setTerminalViewAttributes(viewAttributes())
+
+    runtime.seedHeadlessTerminal('pty-vseed', 'prompt\x1b]11;?\x07\x1b[?996n')
+    await settle(runtime, 'pty-vseed')
+    expect(replies).toEqual([])
+
+    runtime.onPtyData('pty-vseed', '\x1b]11;?\x07', Date.now())
+    await settle(runtime, 'pty-vseed')
+    expect(replies.map((reply) => reply.data)).toEqual(['\x1b]11;rgb:1e1e/1e1e/2e2e\x1b\\'])
+  })
+
+  it('never answers view-attribute queries replayed by renderer-buffer hydration', async () => {
+    const { runtime, replies } = createResponderRuntime({
+      rendererBuffer: { data: 'restored\x1b]11;?\x07\x1b[?996n', cols: 80, rows: 24 }
+    })
+    markHiddenRendererPty('pty-vhyd')
+    setTerminalViewAttributes(viewAttributes())
+
+    runtime.onPtyData('pty-vhyd', 'live output', Date.now())
+    await settle(runtime, 'pty-vhyd')
+
+    expect(replies).toEqual([])
+  })
+
+  it('never answers a delivered (unmarked) view-attribute query — the visible xterm owns it', async () => {
+    const { runtime, replies } = createResponderRuntime()
+    setTerminalViewAttributes(viewAttributes())
+
+    runtime.onPtyData('pty-vvis', '\x1b]11;?\x07\x1b[?996n', Date.now())
+    await settle(runtime, 'pty-vvis')
+
+    expect(replies).toEqual([])
+  })
+
+  it('never answers while renderer delivery interest holds the chunk delivered', async () => {
+    const { runtime, replies } = createResponderRuntime()
+    markHiddenRendererPty('pty-vint')
+    setRendererPtyDeliveryInterest('pty-vint', true)
+    setTerminalViewAttributes(viewAttributes())
+
+    runtime.onPtyData('pty-vint', '\x1b]11;?\x07', Date.now())
+    await settle(runtime, 'pty-vint')
+
+    expect(replies).toEqual([])
+  })
+
+  it('yields view-attribute replies while a remote view subscriber is attached', async () => {
+    const { runtime, replies } = createResponderRuntime()
+    markHiddenRendererPty('pty-vrem')
+    setTerminalViewAttributes(viewAttributes())
+    const release = runtime.registerRemoteTerminalViewSubscriber('pty-vrem')
+
+    runtime.onPtyData('pty-vrem', '\x1b]11;?\x07', Date.now())
+    await settle(runtime, 'pty-vrem')
+    expect(replies).toEqual([])
+
+    release()
+    runtime.onPtyData('pty-vrem', '\x1b]11;?\x07', Date.now())
+    await settle(runtime, 'pty-vrem')
+    expect(replies.map((reply) => reply.data)).toEqual(['\x1b]11;rgb:1e1e/1e1e/2e2e\x1b\\'])
+  })
+
+  it.each([
+    ['terminalModelQueryAuthority', () => (settingsState.terminalModelQueryAuthority = false)],
+    ['terminalHiddenDeliveryGate', () => (settingsState.terminalHiddenDeliveryGate = false)],
+    [
+      'terminalMainSideEffectAuthority',
+      () => (settingsState.terminalMainSideEffectAuthority = false)
+    ]
+  ])('never answers view-attribute queries with kill switch %s off', async (_label, flip) => {
+    flip()
+    const { runtime, replies } = createResponderRuntime()
+    markHiddenRendererPty('pty-vkill')
+    setTerminalViewAttributes(viewAttributes())
+
+    runtime.onPtyData('pty-vkill', '\x1b]11;?\x07\x1b[?996n', Date.now())
+    await settle(runtime, 'pty-vkill')
+
+    expect(replies).toEqual([])
   })
 })

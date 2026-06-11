@@ -78,6 +78,8 @@ import {
   isNativeWindowsLocalPtySpawn,
   markNativeWindowsConptyPty
 } from '../runtime/terminal-model-query-authority'
+import { setTerminalViewAttributes } from '../runtime/terminal-view-attribute-store'
+import { validateTerminalViewAttributes } from '../../shared/terminal-view-attributes'
 import type { PtyModelRestoreReason } from '../../shared/pty-model-restore-marker'
 import type { CodexAccountSelectionTarget } from '../codex-accounts/runtime-selection'
 import { isHostCodexHomeForWsl, isWslCodexHomeForHost } from '../pty/codex-home-wsl-env'
@@ -2971,6 +2973,17 @@ export function registerPtyHandlers(
     // idempotent, while a missed restore leaves a corrupt pane.
     if (droppedWhileHidden) {
       sendModelRestoreNeededMarker(args.id, 'unhide', runtime?.getPtyOutputSequence(args.id))
+    }
+  })
+
+  ipcMain.removeAllListeners('pty:terminalViewAttributes')
+  ipcMain.on('pty:terminalViewAttributes', (_event, args: unknown) => {
+    // Why validate-or-drop: the responder must never store a malformed
+    // palette — a wrong color reply breaks TUI theme detection worse than
+    // the documented silent-until-first-push behavior.
+    const attributes = validateTerminalViewAttributes(args)
+    if (attributes) {
+      setTerminalViewAttributes(attributes)
     }
   })
 
