@@ -1,4 +1,8 @@
 import type { GlobalSettings } from '../../../../shared/types'
+import {
+  buildWslLoginShellCommand,
+  escapeWslShCommandForWindows
+} from '../../../../shared/wsl-login-shell-command'
 import { toast } from 'sonner'
 import type { CliInstallStatus } from '../../../../shared/cli-install-types'
 import {
@@ -67,7 +71,16 @@ export function buildSkillInstallCommandForRuntime(
   const distroArg = runtime.wslDistro?.trim()
     ? ` -d ${quotePowerShellSingle(runtime.wslDistro.trim())}`
     : ''
-  return `wsl.exe${distroArg} -- bash -lc ${quotePowerShellSingle(command)}`
+  const wslCommand = escapeWslShCommandForWindows(buildWslLoginShellCommand(command))
+  return `wsl.exe${distroArg} -- sh -c ${quotePowerShellSingle(wslCommand)}`
+}
+
+export function getSkillDiscoveryTargetForRuntime(
+  runtime: LocalAgentRuntime
+): { runtime: 'wsl'; wslDistro?: string | null } | undefined {
+  return runtime.runtime === 'wsl'
+    ? { runtime: 'wsl', wslDistro: runtime.wslDistro ?? null }
+    : undefined
 }
 
 export function getAgentSkillTerminalShellOverride(
