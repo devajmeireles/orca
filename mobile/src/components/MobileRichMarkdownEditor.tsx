@@ -73,12 +73,14 @@ type Props = {
   content: string
   editable: boolean
   onChange: (content: string) => void
+  onKeyboardInsetChange?: (bottom: number) => void
 }
 
 type EditorWebViewMessage =
   | { type: 'ready' }
   | { type: 'change'; markdown: string; generation: number }
   | { type: 'openLink'; url: string }
+  | { type: 'keyboardInset'; bottom: number }
 
 type ToolbarItem = {
   command: RichMarkdownCommand
@@ -104,7 +106,12 @@ const TOOLBAR_ITEMS: ToolbarItem[] = [
   { command: 'codeBlock', label: 'Code block', icon: FileCode2 }
 ]
 
-function MobileRichMarkdownEditorInner({ content, editable, onChange }: Props) {
+function MobileRichMarkdownEditorInner({
+  content,
+  editable,
+  onChange,
+  onKeyboardInsetChange
+}: Props) {
   const webViewRef = useRef<WebView>(null)
   const readyRef = useRef(false)
   const documentGenerationRef = useRef(0)
@@ -150,6 +157,12 @@ function MobileRichMarkdownEditorInner({ content, editable, onChange }: Props) {
     }
   }, [applyEditable, editable])
 
+  // Clear any reported keyboard inset when the editor unmounts so a lifted
+  // Save/Discard bar settles back once the tab closes.
+  useEffect(() => {
+    return () => onKeyboardInsetChange?.(0)
+  }, [onKeyboardInsetChange])
+
   const handleMessage = useCallback(
     (event: WebViewMessageEvent) => {
       let message: unknown
@@ -182,9 +195,13 @@ function MobileRichMarkdownEditorInner({ content, editable, onChange }: Props) {
         if (url) {
           void Linking.openURL(url).catch(() => {})
         }
+        return
+      }
+      if (editorMessage.type === 'keyboardInset' && typeof editorMessage.bottom === 'number') {
+        onKeyboardInsetChange?.(editorMessage.bottom)
       }
     },
-    [applyContent, applyEditable, content, editable, onChange]
+    [applyContent, applyEditable, content, editable, onChange, onKeyboardInsetChange]
   )
 
   const handleShouldStartLoadWithRequest = useCallback((request: { url?: string }) => {

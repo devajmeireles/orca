@@ -131,6 +131,7 @@ import {
   type MobileNewTabAgentSettings
 } from '../../../../src/session/mobile-new-tab-agent-options'
 import { resolveMarkdownFloatingActionsBottom } from '../../../../src/session/markdown-floating-actions-layout'
+import { resolveTabStripScrollOffset } from '../../../../src/session/tab-strip-scroll'
 import {
   createMobileSessionCreateWarningState,
   dismissMobileSessionCreateWarningState,
@@ -431,6 +432,10 @@ function MarkdownReader({
   onDiscard: () => void
   keyboardLift: number
 }) {
+  // The editor lives in a WebView; native Keyboard events under-report its
+  // covered area, so prefer the inset measured inside the WebView when larger.
+  const [webviewKeyboardInset, setWebviewKeyboardInset] = useState(0)
+  const effectiveKeyboardLift = Math.max(keyboardLift, webviewKeyboardInset)
   if (!doc || doc.status === 'loading') {
     return (
       <View style={styles.markdownState}>
@@ -469,6 +474,7 @@ function MarkdownReader({
         content={doc.localContent}
         editable={doc.editable && !doc.saving}
         onChange={onChange}
+        onKeyboardInsetChange={setWebviewKeyboardInset}
       />
       {showFloatingActions ? (
         <View
@@ -479,7 +485,7 @@ function MarkdownReader({
             // Save/Discard controls lifted instead of resizing that surface.
             {
               bottom: resolveMarkdownFloatingActionsBottom({
-                keyboardLift,
+                keyboardLift: effectiveKeyboardLift,
                 restingBottom: spacing.lg,
                 liftedClearance: spacing.md
               })
@@ -948,6 +954,13 @@ export default function SessionScreen() {
   const [activeHandle, setActiveHandle] = useState<string | null>(null)
   const [activeSessionTabId, setActiveSessionTabId] = useState<string | null>(null)
   const activeSessionTabIdRef = useRef<string | null>(null)
+  // Auto-scroll the tab strip so the active tab (synced from desktop on
+  // worktree entry) is revealed without a manual scroll.
+  const tabStripRef = useRef<ScrollView>(null)
+  const tabStripOffsetRef = useRef(0)
+  const tabStripViewportWidthRef = useRef(0)
+  const tabStripContentWidthRef = useRef(0)
+  const tabLayoutsRef = useRef<Map<string, { x: number; width: number }>>(new Map())
   const [markdownDocs, setMarkdownDocs] = useState<Map<string, MarkdownDocState>>(new Map())
   const markdownDocsRef = useRef<Map<string, MarkdownDocState>>(new Map())
   const [fileDocs, setFileDocs] = useState<Map<string, FileDocState>>(new Map())
@@ -2294,6 +2307,33 @@ export default function SessionScreen() {
       hideSub.remove()
     }
   }, [])
+
+  const scrollActiveTabIntoView = useCallback((tabId: string | null, animated: boolean) => {
+    if (!tabId) {
+      return
+    }
+    const layout = tabLayoutsRef.current.get(tabId)
+    if (!layout) {
+      return
+    }
+    const nextOffset = resolveTabStripScrollOffset({
+      tabX: layout.x,
+      tabWidth: layout.width,
+      viewportWidth: tabStripViewportWidthRef.current,
+      contentWidth: tabStripContentWidthRef.current,
+      currentOffset: tabStripOffsetRef.current
+    })
+    if (nextOffset !== tabStripOffsetRef.current) {
+      tabStripRef.current?.scrollTo({ x: nextOffset, animated })
+    }
+  }, [])
+
+  // Reveal the active tab whenever it changes (e.g. desktop's open tab synced on
+  // worktree entry). Defer one frame so freshly mounted tab layouts are recorded.
+  useEffect(() => {
+    const id = requestAnimationFrame(() => scrollActiveTabIntoView(activeSessionTabId, true))
+    return () => cancelAnimationFrame(id)
+  }, [activeSessionTabId, scrollActiveTabIntoView])
 
   useEffect(() => {
     if (hostId && worktreeId) {
@@ -3867,16 +3907,33 @@ export default function SessionScreen() {
                   (#5106); leaving a non-live tab still closes the keyboard
                   because the live input unmounts. */}
               <ScrollView
+                ref={tabStripRef}
                 horizontal
                 showsHorizontalScrollIndicator={false}
                 style={styles.tabScroll}
                 contentContainerStyle={styles.tabContent}
                 keyboardShouldPersistTaps="handled"
+                scrollEventThrottle={16}
+                onScroll={(e) => {
+                  tabStripOffsetRef.current = e.nativeEvent.contentOffset.x
+                }}
+                onLayout={(e) => {
+                  tabStripViewportWidthRef.current = e.nativeEvent.layout.width
+                  scrollActiveTabIntoView(activeSessionTabIdRef.current, false)
+                }}
+                onContentSizeChange={(width) => {
+                  tabStripContentWidthRef.current = width
+                  scrollActiveTabIntoView(activeSessionTabIdRef.current, false)
+                }}
               >
                 {visibleTabs.map((t) => (
                   <Pressable
                     key={t.id}
                     style={[styles.tab, t.id === activeSessionTabId && styles.tabActive]}
+                    onLayout={(e) => {
+                      const { x, width } = e.nativeEvent.layout
+                      tabLayoutsRef.current.set(t.id, { x, width })
+                    }}
                     onPress={() => switchSessionTab(t)}
                     onLongPress={() => {
                       triggerMediumImpact()
