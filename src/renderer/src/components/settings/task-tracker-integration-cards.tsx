@@ -265,6 +265,10 @@ export function LinearIntegrationCard(): React.JSX.Element {
             loading={linearTicketsSkill.loading}
             error={linearTicketsSkill.error}
             icon={<TicketCheck className="size-4" />}
+            installLabel={translate(
+              'auto.components.settings.task.tracker.integration.cards.linearSkillInstall',
+              'Install CLI & Skill'
+            )}
             preInstallNotice={AGENT_SKILL_CLI_PREREQUISITE_NOTICE}
             getPrerequisiteStatus={
               agentRuntime.runtime === 'wsl'

@@ -3947,7 +3947,7 @@
           "panelDescription": "Install the host agent skill for linked Linear task handoffs.",
           "terminalTitle": "Install Linear agent skill",
           "terminalAria": "Linear agent skill installer terminal",
-          "install": "Install",
+          "install": "CLI 및 스킬 설치",
           "wslCopy": "Install it for WSL agent handoffs from linked Linear work.",
           "wslLabel": "WSL default"
         },
@@ -7555,6 +7555,7 @@
                 "linearSkillDescription": "Install the host agent skill agents use for richer linked Linear task handoffs.",
                 "linearSkillTerminalTitle": "Install Linear agent skill",
                 "linearSkillTerminalAria": "Linear agent skill installer terminal",
+                "linearSkillInstall": "CLI 및 스킬 설치",
                 "linearSkillOptionalHint": "Optional next step: install the Linear agent skill for ticket-aware agent handoffs.",
                 "linearSkillDismissHint": "Dismiss optional Linear agent skill setup note",
                 "linearSkillWslDescription": "Install the WSL agent skill agents use for richer linked Linear task handoffs.",
@@ -8660,7 +8661,7 @@
           }
         },
         "AgentFeatureSetupStep": {
-          "97dcdc010f": "기능 활성화"
+          "97dcdc010f": "CLI 및 스킬 설치"
         }
       },
       "new": {

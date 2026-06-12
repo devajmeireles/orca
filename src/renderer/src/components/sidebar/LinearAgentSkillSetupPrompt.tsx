@@ -5,6 +5,13 @@ import type { SkillDiscoveryTarget } from '../../../../shared/skills'
 import type { GlobalSettings } from '../../../../shared/types'
 import { Button } from '@/components/ui/button'
 import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle
+} from '@/components/ui/dialog'
+import {
   GLOBAL_AGENT_SKILL_SOURCE_KINDS,
   useInstalledAgentSkill
 } from '@/hooks/useInstalledAgentSkills'
@@ -53,7 +60,7 @@ export function LinearAgentSkillSetupPrompt({
 }: LinearAgentSkillSetupPromptProps): React.JSX.Element | null {
   const [cliStatus, setCliStatus] = useState<CliInstallStatus | null>(null)
   const [cliLoading, setCliLoading] = useState(linked)
-  const [expanded, setExpanded] = useState(false)
+  const [setupDialogOpen, setSetupDialogOpen] = useState(false)
   const [sessionDismissed, setSessionDismissed] = useState(false)
   const agentRuntime = useMemo(
     () => getLinearPromptAgentRuntime(settings, currentPlatform, remote),
@@ -203,7 +210,7 @@ export function LinearAgentSkillSetupPrompt({
         </Button>
       </div>
       <div className="mt-2 flex flex-wrap items-center gap-1.5">
-        <Button type="button" variant="outline" size="xs" onClick={() => setExpanded(true)}>
+        <Button type="button" variant="outline" size="xs" onClick={() => setSetupDialogOpen(true)}>
           {translate('auto.components.sidebar.LinearAgentSkillSetupPrompt.setup', 'Set up')}
         </Button>
         <Button
@@ -220,60 +227,77 @@ export function LinearAgentSkillSetupPrompt({
           {translate('auto.components.sidebar.LinearAgentSkillSetupPrompt.recheck', 'Re-check')}
         </Button>
       </div>
-      {expanded ? (
-        <AgentSkillSetupPanel
-          className="mt-2"
-          variant="inline"
-          title={translate(
-            'auto.components.sidebar.LinearAgentSkillSetupPrompt.panelTitle',
-            'Linear agent skill'
-          )}
-          description={translate(
-            'auto.components.sidebar.LinearAgentSkillSetupPrompt.panelDescription',
-            'Install the host agent skill for linked Linear task handoffs.'
-          )}
-          command={command}
-          terminalTitle={translate(
-            'auto.components.sidebar.LinearAgentSkillSetupPrompt.terminalTitle',
-            'Install Linear agent skill'
-          )}
-          terminalAriaLabel={translate(
-            'auto.components.sidebar.LinearAgentSkillSetupPrompt.terminalAria',
-            'Linear agent skill installer terminal'
-          )}
-          terminalWorktreeId="sidebar-linear-agent-skill-setup"
-          terminalShellOverride={terminalShellOverride}
-          installed={skill.installed}
-          loading={skill.loading}
-          error={skill.error}
-          installLabel={translate(
-            'auto.components.sidebar.LinearAgentSkillSetupPrompt.install',
-            'Install'
-          )}
-          preInstallNotice={AGENT_SKILL_CLI_PREREQUISITE_NOTICE}
-          getPrerequisiteStatus={
-            agentRuntime.runtime === 'wsl'
-              ? () => window.api.cli.getWslInstallStatus(getWslCliDistroRequest(agentRuntime))
-              : undefined
-          }
-          isPrerequisiteAvailable={isOrcaCliAvailableOnPath}
-          onBeforeOpenTerminal={async () => {
-            const nextStatus =
+      <Dialog open={setupDialogOpen} onOpenChange={setSetupDialogOpen}>
+        <DialogContent className="gap-0 overflow-hidden p-0 sm:max-w-[640px]">
+          <div className="px-6 pt-6 pr-14">
+            <DialogHeader className="gap-2">
+              <DialogTitle className="text-base leading-snug">
+                {translate(
+                  'auto.components.sidebar.LinearAgentSkillSetupPrompt.panelTitle',
+                  'Linear agent skill'
+                )}
+              </DialogTitle>
+              <DialogDescription className="text-xs leading-relaxed">
+                {translate(
+                  'auto.components.sidebar.LinearAgentSkillSetupPrompt.panelDescription',
+                  'Install the host agent skill for linked Linear task handoffs.'
+                )}
+              </DialogDescription>
+            </DialogHeader>
+          </div>
+          <AgentSkillSetupPanel
+            className="px-6 pt-4 pb-6"
+            variant="inline"
+            hideHeader
+            title={translate(
+              'auto.components.sidebar.LinearAgentSkillSetupPrompt.panelTitle',
+              'Linear agent skill'
+            )}
+            description={missingLabel}
+            command={command}
+            terminalTitle={translate(
+              'auto.components.sidebar.LinearAgentSkillSetupPrompt.terminalTitle',
+              'Install Linear agent skill'
+            )}
+            terminalAriaLabel={translate(
+              'auto.components.sidebar.LinearAgentSkillSetupPrompt.terminalAria',
+              'Linear agent skill installer terminal'
+            )}
+            terminalWorktreeId="sidebar-linear-agent-skill-setup"
+            terminalHeightPx={240}
+            terminalShellOverride={terminalShellOverride}
+            installed={skill.installed}
+            loading={skill.loading}
+            error={skill.error}
+            installLabel={translate(
+              'auto.components.sidebar.LinearAgentSkillSetupPrompt.install',
+              'Install CLI & Skill'
+            )}
+            preInstallNotice={AGENT_SKILL_CLI_PREREQUISITE_NOTICE}
+            getPrerequisiteStatus={
               agentRuntime.runtime === 'wsl'
-                ? await ensureWslCliAvailableForAgentSkillTerminal(agentRuntime)
-                : await ensureOrcaCliAvailableForAgentSkillTerminal({
-                    onStatusChange: setCliStatus
-                  })
-            if (agentRuntime.runtime === 'wsl') {
-              setCliStatus(nextStatus)
+                ? () => window.api.cli.getWslInstallStatus(getWslCliDistroRequest(agentRuntime))
+                : undefined
             }
-          }}
-          onRecheck={async () => {
-            await refreshCliStatus()
-            await skill.refresh()
-          }}
-        />
-      ) : null}
+            isPrerequisiteAvailable={isOrcaCliAvailableOnPath}
+            onBeforeOpenTerminal={async () => {
+              const nextStatus =
+                agentRuntime.runtime === 'wsl'
+                  ? await ensureWslCliAvailableForAgentSkillTerminal(agentRuntime)
+                  : await ensureOrcaCliAvailableForAgentSkillTerminal({
+                      onStatusChange: setCliStatus
+                    })
+              if (agentRuntime.runtime === 'wsl') {
+                setCliStatus(nextStatus)
+              }
+            }}
+            onRecheck={async () => {
+              await refreshCliStatus()
+              await skill.refresh()
+            }}
+          />
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

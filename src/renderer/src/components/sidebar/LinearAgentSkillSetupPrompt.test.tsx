@@ -257,7 +257,7 @@ describe('LinearAgentSkillSetupPrompt', () => {
       setupButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
     })
 
-    expect(rendered.textContent).toContain("wsl.exe -d 'Fedora' -- bash -lc 'npx skills add")
+    expect(document.body.textContent).toContain("wsl.exe -d 'Fedora' -- bash -lc 'npx skills add")
     expect(mocks.panelProps.at(-1)).toEqual(
       expect.objectContaining({
         terminalShellOverride: 'powershell.exe',
@@ -269,7 +269,7 @@ describe('LinearAgentSkillSetupPrompt', () => {
     await (getPrerequisiteStatus as () => Promise<unknown>)()
     expect(mocks.getWslCliStatus).toHaveBeenLastCalledWith({ distro: 'Fedora' })
 
-    const installButton = Array.from(rendered.querySelectorAll('button')).find(
+    const installButton = Array.from(document.body.querySelectorAll('button')).find(
       (button) => button.textContent === 'Mock install'
     )
     await act(async () => {
@@ -321,10 +321,10 @@ describe('LinearAgentSkillSetupPrompt', () => {
     expect(mocks.getWslCliStatus).toHaveBeenCalledWith(undefined)
   })
 
-  it('expands the terminal setup panel only after the user asks to set up', async () => {
+  it('opens the terminal setup panel in a dialog only after the user asks to set up', async () => {
     const rendered = await renderPrompt({ linked: true, remote: false })
 
-    expect(rendered.querySelector('[data-testid="linear-skill-inline-panel"]')).toBeNull()
+    expect(document.body.querySelector('[data-testid="linear-skill-inline-panel"]')).toBeNull()
 
     const setupButton = Array.from(rendered.querySelectorAll('button')).find(
       (button) => button.textContent === 'Set up'
@@ -333,10 +333,10 @@ describe('LinearAgentSkillSetupPrompt', () => {
       setupButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
     })
 
-    expect(rendered.querySelector('[data-testid="linear-skill-inline-panel"]')).not.toBeNull()
-    expect(rendered.textContent).toContain('linear-tickets')
+    expect(document.body.querySelector('[data-testid="linear-skill-inline-panel"]')).not.toBeNull()
+    expect(document.body.textContent).toContain('linear-tickets')
 
-    const installButton = Array.from(rendered.querySelectorAll('button')).find(
+    const installButton = Array.from(document.body.querySelectorAll('button')).find(
       (button) => button.textContent === 'Mock install'
     )
     await act(async () => {
