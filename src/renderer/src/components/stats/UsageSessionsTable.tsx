@@ -69,7 +69,7 @@ export function UsageSessionsTable({
               {translate('auto.components.stats.UsageSessionsTable.c17bed0416', 'Project')}
             </th>
             <th className="px-2 py-2 font-medium">
-              {translate('auto.components.stats.UsageSessionsTable.1afc25eb06', 'Model')}
+              {translate('auto.components.stats.UsageSessionsTable.f6a2c8d019', 'Model')}
             </th>
             <th className="px-2 py-2 font-medium">{eventsLabel}</th>
             <th className="px-2 py-2 font-medium">

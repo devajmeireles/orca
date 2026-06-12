@@ -2991,6 +2991,22 @@
               "d9a4b3e2f1c5": "eventos"
             }
           }
+        },
+        "UsageBreakdownSection": {
+          "7765a4c3e1": "n / A",
+          "247c93ca92": "• precios inferidos"
+        },
+        "UsageSessionsTable": {
+          "1afc25eb06": "vueltas",
+          "0f03975d59": "Eventos",
+          "21ea00bfa8": "Cache",
+          "e0b988599d": "Total",
+          "01476891c7": "Último activo",
+          "c17bed0416": "Proyecto",
+          "f6a2c8d019": "Modelo",
+          "faf3444859": "Aporte",
+          "a8b7487ff7": "Producción",
+          "cfe2282ffa": "Desconocido"
         }
       },
       "sparse": {
