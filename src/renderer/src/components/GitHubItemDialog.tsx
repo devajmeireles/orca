@@ -167,7 +167,10 @@ import type {
   PRCheckDetail,
   PRComment
 } from '../../../shared/types'
-import type { TaskSourceContext } from '../../../shared/task-source-context'
+import {
+  getTaskSourceRuntimeSettings,
+  type TaskSourceContext
+} from '../../../shared/task-source-context'
 import { PER_REPO_FETCH_LIMIT } from '../../../shared/work-items'
 import { translate } from '@/i18n/i18n'
 import { getSettingsForRepoRuntimeOwner } from '@/lib/repo-runtime-owner'
@@ -456,9 +459,18 @@ function PRReviewersPanel({
     reviewRequests: item.reviewRequests
   }))
   const patchWorkItem = useAppStore((s) => s.patchWorkItem)
-  const settings = useAppStore((s) => s.settings)
   const repoOwnerSettings = useAppStore(
     useShallow((s) => getSettingsForRepoRuntimeOwner(s, item.repoId ?? null))
+  )
+  const sourceSettings = useMemo(
+    () =>
+      sourceContext?.provider === 'github'
+        ? ({
+            ...repoOwnerSettings,
+            ...getTaskSourceRuntimeSettings(sourceContext)
+          } as typeof repoOwnerSettings)
+        : repoOwnerSettings,
+    [repoOwnerSettings, sourceContext]
   )
   const reviewerInputRef = useRef<HTMLInputElement | null>(null)
   const reviewerInputFocusFrameRef = useRef<number | null>(null)
@@ -534,11 +546,12 @@ function PRReviewersPanel({
     open && reviewSlug ? reviewSlug.owner : null,
     open && reviewSlug ? reviewSlug.repo : null,
     reviewerSeedUsers.map((user) => user.login),
-    settings
+    sourceSettings
   )
   const reviewerMetadataByPath = useRepoAssignees(
     open && !reviewSlug ? repoPath : null,
-    open && !reviewSlug ? item.repoId : null
+    open && !reviewSlug ? item.repoId : null,
+    sourceSettings
   )
   const reviewerMetadata = reviewSlug ? reviewerMetadataBySlug : reviewerMetadataByPath
   const displayItem = { ...item, reviewRequests: localReviewRequests }
@@ -638,7 +651,7 @@ function PRReviewersPanel({
     item.reviewRequests !== undefined ||
     item.latestReviews !== undefined
   const canRequestReview =
-    !!repoPath || getActiveRuntimeTarget(repoOwnerSettings).kind === 'environment'
+    !!repoPath || getActiveRuntimeTarget(sourceSettings).kind === 'environment'
 
   const measureReviewerPickerPlacement = useCallback(() => {
     const rect = reviewerInputRef.current?.getBoundingClientRect()
@@ -681,7 +694,7 @@ function PRReviewersPanel({
       )
       return
     }
-    const target = getActiveRuntimeTarget(repoOwnerSettings)
+    const target = getActiveRuntimeTarget(sourceSettings)
     if (target.kind !== 'environment' && !repoPath) {
       toast.error(
         translate(
@@ -759,7 +772,7 @@ function PRReviewersPanel({
     if (logins.length === 0) {
       return
     }
-    const target = getActiveRuntimeTarget(repoOwnerSettings)
+    const target = getActiveRuntimeTarget(sourceSettings)
     if (target.kind !== 'environment' && !repoPath) {
       toast.error(
         translate(
@@ -4545,6 +4558,19 @@ function GHEditSection({
   const assigneesItemKey = `${item.repoId}\0${item.id}`
   const patchWorkItem = useAppStore((s) => s.patchWorkItem)
   const patchProjectRowContent = useAppStore((s) => s.patchProjectRowContent)
+  const repoOwnerSettings = useAppStore(
+    useShallow((s) => getSettingsForRepoRuntimeOwner(s, item.repoId ?? null))
+  )
+  const sourceSettings = useMemo(
+    () =>
+      sourceContext?.provider === 'github'
+        ? ({
+            ...repoOwnerSettings,
+            ...getTaskSourceRuntimeSettings(sourceContext)
+          } as typeof repoOwnerSettings)
+        : repoOwnerSettings,
+    [repoOwnerSettings, sourceContext]
+  )
   const { isPending, run } = useImmediateMutation()
   // Why: when the dialog opens from a Project view, mutations route through
   // *BySlug IPCs and we must keep `projectViewCache` in sync alongside
@@ -4568,16 +4594,18 @@ function GHEditSection({
   const slugRepo = projectOrigin?.repo ?? null
   const repoLabelsByPath = useRepoLabels(
     projectOrigin ? null : repoPath,
-    projectOrigin ? null : repoId
+    projectOrigin ? null : repoId,
+    sourceSettings
   )
-  const repoLabelsBySlug = useRepoLabelsBySlug(slugOwner, slugRepo)
+  const repoLabelsBySlug = useRepoLabelsBySlug(slugOwner, slugRepo, sourceSettings)
   const repoLabels = projectOrigin ? repoLabelsBySlug : repoLabelsByPath
   const repositoryLabelsUrl = useMemo(() => getGitHubRepositoryLabelsUrl(item.url), [item.url])
   const repoAssigneesByPath = useRepoAssignees(
     projectOrigin ? null : repoPath,
-    projectOrigin ? null : repoId
+    projectOrigin ? null : repoId,
+    sourceSettings
   )
-  const repoAssigneesBySlug = useRepoAssigneesBySlug(slugOwner, slugRepo, assignees)
+  const repoAssigneesBySlug = useRepoAssigneesBySlug(slugOwner, slugRepo, assignees, sourceSettings)
   const repoAssignees = projectOrigin ? repoAssigneesBySlug : repoAssigneesByPath
   const hasAttachedWorkspace =
     attachedWorkspaceLabel !== null && attachedWorkspaceLabel !== undefined

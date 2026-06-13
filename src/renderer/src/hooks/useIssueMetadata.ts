@@ -31,6 +31,7 @@ type MetadataState<T> = {
 
 type GitHubMetadataOptions = {
   runtimeEnvironmentId?: string | null
+  activeRuntimeEnvironmentId?: string | null
 }
 
 // ─── GitHub ────────────────────────────────────────────────
@@ -54,7 +55,8 @@ export function useRepoLabels(
     if (!repoPath && !repoId) {
       return
     }
-    const runtimeEnvironmentId = options?.runtimeEnvironmentId?.trim() || null
+    const runtimeEnvironmentId =
+      options?.runtimeEnvironmentId?.trim() || options?.activeRuntimeEnvironmentId?.trim() || null
     const repoSelector = repoId ?? repoPath ?? ''
     // Why: SSH/runtime metadata must not reuse host-path cache entries; the same
     // repo id may resolve through a different credential/runtime boundary.
@@ -107,7 +109,7 @@ export function useRepoLabels(
           error: err instanceof Error ? err.message : 'Failed to load labels'
         }))
       })
-  }, [repoPath, repoId, options?.runtimeEnvironmentId])
+  }, [repoPath, repoId, options?.runtimeEnvironmentId, options?.activeRuntimeEnvironmentId])
 
   return state
 }
@@ -128,7 +130,8 @@ export function useRepoAssignees(
     if (!repoPath && !repoId) {
       return
     }
-    const runtimeEnvironmentId = options?.runtimeEnvironmentId?.trim() || null
+    const runtimeEnvironmentId =
+      options?.runtimeEnvironmentId?.trim() || options?.activeRuntimeEnvironmentId?.trim() || null
     const repoSelector = repoId ?? repoPath ?? ''
     // Why: SSH/runtime metadata must not reuse host-path cache entries; the same
     // repo id may resolve through a different credential/runtime boundary.
@@ -181,7 +184,7 @@ export function useRepoAssignees(
           error: err instanceof Error ? err.message : 'Failed to load assignees'
         }))
       })
-  }, [repoPath, repoId, options?.runtimeEnvironmentId])
+  }, [repoPath, repoId, options?.runtimeEnvironmentId, options?.activeRuntimeEnvironmentId])
 
   return state
 }
