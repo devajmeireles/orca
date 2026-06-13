@@ -215,6 +215,7 @@ import type {
   TaskProvider,
   TaskViewPresetId
 } from '../../../shared/types'
+import type { GitLabProjectRef } from '../../../shared/gitlab-types'
 import {
   LINEAR_ISSUE_LIST_MAX,
   clampLinearIssueListLimit
@@ -328,7 +329,8 @@ function getJiraIssueWorkspaceSeed(issue: JiraIssue): string {
 
 function getTaskPageRepoSourceContext(
   repo: Repo | null | undefined,
-  provider: 'github' | 'gitlab'
+  provider: 'github' | 'gitlab',
+  gitlabProjectRef?: GitLabProjectRef | null
 ): TaskSourceContext | null {
   if (!repo) {
     return null
@@ -339,7 +341,9 @@ function getTaskPageRepoSourceContext(
   const providerIdentity =
     provider === 'github' && project?.providerIdentity?.provider === 'github'
       ? project.providerIdentity
-      : null
+      : provider === 'gitlab' && gitlabProjectRef
+        ? buildGitLabProviderIdentity(gitlabProjectRef)
+        : null
   return normalizeTaskSourceContext({
     provider,
     projectId: setup?.projectId ?? project?.id ?? repo.id,
@@ -348,6 +352,22 @@ function getTaskPageRepoSourceContext(
     repoId: repo.id,
     providerIdentity
   })
+}
+
+function buildGitLabProviderIdentity(projectRef: GitLabProjectRef) {
+  const pathParts = projectRef.path
+    .split('/')
+    .map((part) => part.trim())
+    .filter(Boolean)
+  const projectName = pathParts.at(-1) ?? null
+  const namespace = pathParts.length > 1 ? pathParts.slice(0, -1).join('/') : null
+  return {
+    provider: 'gitlab' as const,
+    projectId: projectRef.path,
+    namespace,
+    project: projectName,
+    webUrl: `https://${projectRef.host}/${projectRef.path}`
+  }
 }
 
 function getTaskSourceHostAvailabilityForHost(
@@ -3343,15 +3363,17 @@ export default function TaskPage(): React.JSX.Element {
     [gitlabDialogItem, primaryRepo, selectedRepos]
   )
   const gitlabDialogSourceContext = useMemo(() => {
+    if (!gitlabDialogItem) {
+      return null
+    }
     if (
-      gitlabDialogItem &&
       pageData.openGitLabSourceContext?.provider === 'gitlab' &&
       pageData.openGitLabWorkItem?.id === gitlabDialogItem.id &&
       pageData.openGitLabWorkItem.repoId === gitlabDialogItem.repoId
     ) {
       return pageData.openGitLabSourceContext
     }
-    return getTaskPageRepoSourceContext(gitlabDialogRepo, 'gitlab')
+    return getTaskPageRepoSourceContext(gitlabDialogRepo, 'gitlab', gitlabDialogItem.projectRef)
   }, [
     gitlabDialogItem,
     gitlabDialogRepo,
@@ -3403,7 +3425,11 @@ export default function TaskPage(): React.JSX.Element {
           taskSource: 'gitlab',
           preselectedRepoId: item.repoId,
           openGitLabWorkItem: item,
-          openGitLabSourceContext: getTaskPageRepoSourceContext(repoMap.get(item.repoId), 'gitlab')
+          openGitLabSourceContext: getTaskPageRepoSourceContext(
+            repoMap.get(item.repoId),
+            'gitlab',
+            item.projectRef
+          )
         },
         { recordTasksInteraction: false }
       )
@@ -6031,7 +6057,11 @@ export default function TaskPage(): React.JSX.Element {
       }
       openModal('new-workspace-composer', {
         linkedWorkItem,
-        taskSourceContext: getTaskPageRepoSourceContext(repoMap.get(item.repoId), 'gitlab'),
+        taskSourceContext: getTaskPageRepoSourceContext(
+          repoMap.get(item.repoId),
+          'gitlab',
+          item.projectRef
+        ),
         prefilledName: getGitLabWorkItemWorkspaceSeed(item),
         initialRepoId: item.repoId,
         telemetrySource: 'sidebar'

@@ -39,4 +39,28 @@ describe('TaskPage source switching host boundary', () => {
     expect(section).toContain("reason: 'checking-task-source-capability'")
     expect(section).toContain("reason: 'missing-task-source-capability'")
   })
+
+  it('preserves exact GitLab project identity when opening or starting from an item', () => {
+    const sourceContextBuilder = sourceBetween(
+      TASK_PAGE_SOURCE,
+      'function getTaskPageRepoSourceContext',
+      'function getTaskSourceHostAvailabilityForHost'
+    )
+    expect(sourceContextBuilder).toContain('gitlabProjectRef?: GitLabProjectRef | null')
+    expect(sourceContextBuilder).toContain('buildGitLabProviderIdentity(gitlabProjectRef)')
+
+    const openGitLabDetail = sourceBetween(
+      TASK_PAGE_SOURCE,
+      'const openGitLabDetailPage = useCallback(',
+      'const patchTaskPageWorkItemRows = useCallback('
+    )
+    expect(openGitLabDetail).toContain('item.projectRef')
+
+    const startGitLabWorkspace = sourceBetween(
+      TASK_PAGE_SOURCE,
+      'const openComposerForGitLabItem = useCallback(',
+      'const handleUseGitLabItem = useCallback('
+    )
+    expect(startGitLabWorkspace).toContain('item.projectRef')
+  })
 })
