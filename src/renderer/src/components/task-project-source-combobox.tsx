@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Check, ChevronRight, ChevronsUpDown } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Command, CommandInput, CommandList } from '@/components/ui/command'
@@ -110,6 +110,7 @@ export default function TaskProjectSourceCombobox({
   const [sourceMenuProjectKey, setSourceMenuProjectKey] = useState<string | null>(null)
   const [query, setQuery] = useState('')
   const [commandValue, setCommandValue] = useState('')
+  const sourceMenuCloseTimerRef = useRef<number | null>(null)
 
   const filteredGroups = useMemo(() => {
     const trimmed = query.trim()
@@ -127,6 +128,34 @@ export default function TaskProjectSourceCombobox({
       setSourceMenuProjectKey(null)
     }
   }, [])
+
+  const clearSourceMenuCloseTimer = useCallback(() => {
+    if (sourceMenuCloseTimerRef.current !== null) {
+      window.clearTimeout(sourceMenuCloseTimerRef.current)
+      sourceMenuCloseTimerRef.current = null
+    }
+  }, [])
+
+  const openSourceMenu = useCallback(
+    (projectKey: string) => {
+      clearSourceMenuCloseTimer()
+      setSourceMenuProjectKey(projectKey)
+    },
+    [clearSourceMenuCloseTimer]
+  )
+
+  const scheduleSourceMenuClose = useCallback(
+    (projectKey: string) => {
+      clearSourceMenuCloseTimer()
+      sourceMenuCloseTimerRef.current = window.setTimeout(() => {
+        setSourceMenuProjectKey((current) => (current === projectKey ? null : current))
+        sourceMenuCloseTimerRef.current = null
+      }, 120)
+    },
+    [clearSourceMenuCloseTimer]
+  )
+
+  useEffect(() => clearSourceMenuCloseTimer, [clearSourceMenuCloseTimer])
 
   const toggleProject = useCallback(
     (group: TaskProjectPickerGroup) => {
@@ -289,8 +318,15 @@ export default function TaskProjectSourceCombobox({
                             'auto.components.task.project.source.combobox.chooseSource',
                             'Choose task source'
                           )}
+                          onMouseEnter={() => openSourceMenu(group.projectKey)}
+                          onMouseLeave={() => scheduleSourceMenuClose(group.projectKey)}
+                          onFocus={() => openSourceMenu(group.projectKey)}
+                          onClick={(event) => {
+                            event.preventDefault()
+                            openSourceMenu(group.projectKey)
+                          }}
                           onMouseDown={(event) => event.preventDefault()}
-                          className="flex w-8 shrink-0 items-center justify-center text-muted-foreground opacity-0 transition-opacity group-hover/source-row:opacity-100 focus-visible:opacity-100 data-[state=open]:opacity-100"
+                          className="flex w-8 shrink-0 items-center justify-center text-muted-foreground"
                         >
                           <ChevronRight className="size-3.5" />
                         </button>
@@ -300,6 +336,8 @@ export default function TaskProjectSourceCombobox({
                         align="start"
                         sideOffset={6}
                         className="w-[min(300px,calc(100vw-1rem))] p-1"
+                        onMouseEnter={() => openSourceMenu(group.projectKey)}
+                        onMouseLeave={() => scheduleSourceMenuClose(group.projectKey)}
                       >
                         <div className="border-b border-border px-2 py-1.5">
                           <div className="truncate text-xs font-medium text-foreground">
