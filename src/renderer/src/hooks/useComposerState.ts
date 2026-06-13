@@ -103,6 +103,7 @@ import {
   type NewWorkspaceProjectOption
 } from '@/lib/new-workspace-project-options'
 import { buildExecutionHostRegistry } from '../../../shared/execution-host-registry'
+import { normalizeExecutionHostId, type ExecutionHostId } from '../../../shared/execution-host'
 import { getHostDisplayLabelOverrides } from '../../../shared/host-setting-overrides'
 import { queueNewWorkspaceTerminalFocus } from '@/lib/new-workspace-terminal-focus'
 import { getSettingsForRepoRuntimeOwner } from '@/lib/repo-runtime-owner'
@@ -281,6 +282,34 @@ export type UseComposerStateResult = {
   createDisabled: boolean
 }
 
+export type InitialWorkspaceRunSeedInput = {
+  draftProjectId?: string | null
+  draftHostId?: string | null
+  draftProjectHostSetupId?: string | null
+  initialTaskSourceContext?: Pick<
+    TaskSourceContext,
+    'projectId' | 'hostId' | 'projectHostSetupId'
+  > | null
+}
+
+export function resolveInitialWorkspaceRunSeed({
+  draftProjectId,
+  draftHostId,
+  draftProjectHostSetupId,
+  initialTaskSourceContext
+}: InitialWorkspaceRunSeedInput): {
+  projectId: string | null
+  hostId: ExecutionHostId | null
+  projectHostSetupId: string | null
+} {
+  return {
+    projectId: draftProjectId ?? initialTaskSourceContext?.projectId ?? null,
+    hostId: normalizeExecutionHostId(draftHostId ?? initialTaskSourceContext?.hostId),
+    projectHostSetupId:
+      draftProjectHostSetupId ?? initialTaskSourceContext?.projectHostSetupId ?? null
+  }
+}
+
 // Why: both the full-page TaskPage composer and the Cmd+J modal can be
 // mounted simultaneously. Without instance scoping, a single native file
 // drop fires every subscriber and duplicates attachments/prompt edits across
@@ -363,6 +392,15 @@ export function useComposerState(options: UseComposerStateOptions): UseComposerS
   const draftProjectHostSetupId = persistDraft
     ? (newWorkspaceDraft?.projectHostSetupId ?? null)
     : null
+  // Why: Tasks can start work from Linear/Jira source contexts that are not
+  // repo-backed. Seed the run target from the logical project/source host so
+  // the modal does not silently fall back to the ambient active repo.
+  const initialRunSeed = resolveInitialWorkspaceRunSeed({
+    draftProjectId,
+    draftHostId,
+    draftProjectHostSetupId,
+    initialTaskSourceContext
+  })
   const resolvedInitialWorkspaceStatus = useMemo(
     () =>
       initialWorkspaceStatus && isWorkspaceStatusId(initialWorkspaceStatus, workspaceStatuses)
@@ -378,9 +416,9 @@ export function useComposerState(options: UseComposerStateOptions): UseComposerS
     draftRepoId,
     initialRepoId,
     activeRepoId,
-    projectId: draftProjectId,
-    hostId: draftHostId,
-    projectHostSetupId: draftProjectHostSetupId,
+    projectId: initialRunSeed.projectId,
+    hostId: initialRunSeed.hostId,
+    projectHostSetupId: initialRunSeed.projectHostSetupId,
     focusedHostScope: workspaceHostScope
   })
 

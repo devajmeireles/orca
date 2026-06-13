@@ -57,7 +57,7 @@ Done means: users can tell where Tasks are being fetched from, and changing exec
 ## 4. New Workspace Modal, Start Work, And Workspace Creation
 
 - [x] Split “start from task/issue/PR” source context from workspace run target in New Workspace modal state.
-- [~] When opening the New Workspace modal from Tasks, preselect the logical project and a reasonable run host without treating the source repo as the only execution target.
+- [x] When opening the New Workspace modal from Tasks, preselect the logical project and a reasonable run host without treating the source repo as the only execution target.
 - [x] Ensure pending worktree/workspace creation persists both the source task context and selected run host.
 - [x] Make “create workspace on host” only show hosts where the project has a ProjectHostSetup.
 - [x] Keep “add project to host” as the path for making a project available on another host; do not present workspace creation as if Orca is responsible for bootstrapping repos/dependencies.
@@ -189,6 +189,7 @@ Done means: reviewers and future agents can understand the vision, implementatio
 - [x] 2026-06-12: Added Linear/Jira Settings account-scope diagnostics showing whether provider credentials and account checks are owned by the local desktop client or the selected remote server; verified with provider account-scope tests and web typecheck.
 - [x] 2026-06-12: Added repo-backed Tasks empty-state copy that distinguishes missing project sources from no matching GitHub/GitLab work, then verified with focused empty-state tests and web typecheck.
 - [x] 2026-06-12: Scoped Jira Tasks drawer/list cache reconciliation by Jira task source context and site id so same-key issues from different hosts/accounts cannot replace each other; verified with focused cache selector tests, targeted oxlint, and full typecheck.
+- [x] 2026-06-12: Seeded New Workspace run-target selection from the incoming task source context so Linear/Jira starts preselect the logical project/source host instead of the ambient active repo; verified with a focused composer host-boundary test, targeted oxlint, and full typecheck.
 - [x] 2026-06-12: Fed Tasks source-context diagnostics from the shared execution-host registry so the source chip now reports SSH availability and blocked/incompatible remote-server hosts; verified with summary tests and web typecheck.
 - [x] 2026-06-12: Extended Linear/Jira Tasks source diagnostics to include the account-owning host plus blocked remote-server availability, keeping account source separate from workspace run host; verified with summary tests and web typecheck.
 - [x] 2026-06-12: Started the user-facing Host copy audit by replacing stale “remote project” and “Remote SSH” UI labels with project-on-host / SSH-host language; verified with web typecheck.

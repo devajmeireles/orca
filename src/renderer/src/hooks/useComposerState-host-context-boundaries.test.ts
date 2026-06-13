@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
+import { resolveInitialWorkspaceRunSeed } from './useComposerState'
 
 const HOOK_SOURCE = readFileSync(join(__dirname, 'useComposerState.ts'), 'utf8')
 
@@ -37,5 +38,46 @@ describe('useComposerState host-context boundaries', () => {
     expect(section).toContain('const runRepo = selectedRepo ??')
     expect(section).toContain('repoId: runRepo.id')
     expect(section).not.toContain('repoId: repoForItem.id')
+  })
+
+  it('seeds initial workspace run target from the task source context', () => {
+    expect(
+      resolveInitialWorkspaceRunSeed({
+        initialTaskSourceContext: {
+          projectId: 'logical-project',
+          hostId: 'ssh:builder',
+          projectHostSetupId: 'setup-builder'
+        }
+      })
+    ).toEqual({
+      projectId: 'logical-project',
+      hostId: 'ssh:builder',
+      projectHostSetupId: 'setup-builder'
+    })
+
+    expect(
+      resolveInitialWorkspaceRunSeed({
+        draftProjectId: 'draft-project',
+        draftHostId: 'local',
+        draftProjectHostSetupId: 'setup-local',
+        initialTaskSourceContext: {
+          projectId: 'logical-project',
+          hostId: 'ssh:builder',
+          projectHostSetupId: 'setup-builder'
+        }
+      })
+    ).toEqual({
+      projectId: 'draft-project',
+      hostId: 'local',
+      projectHostSetupId: 'setup-local'
+    })
+
+    const section = sourceBetween(HOOK_SOURCE, 'const initialRunSeed', 'const [internalRepoId')
+
+    expect(section).toContain('resolveInitialWorkspaceRunSeed')
+    expect(section).toContain('initialTaskSourceContext')
+    expect(section).toContain('projectId: initialRunSeed.projectId')
+    expect(section).toContain('hostId: initialRunSeed.hostId')
+    expect(section).toContain('projectHostSetupId: initialRunSeed.projectHostSetupId')
   })
 })
