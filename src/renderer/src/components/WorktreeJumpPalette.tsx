@@ -81,9 +81,14 @@ import {
   getComposerEligibleRepos,
   resolveComposerGitRepoId
 } from '@/lib/new-workspace-composer-repo'
+import {
+  lookupGitHubWorkItemByOwnerRepoForSource,
+  lookupGitHubWorkItemForSource
+} from '@/lib/github-work-item-source-lookup'
 import type { SettingsNavTarget } from '@/lib/settings-navigation-types'
 import type { BrowserPage, BrowserWorkspace, Worktree } from '../../../shared/types'
 import { isGitRepoKind } from '../../../shared/repo-kind'
+import { buildTaskSourceContextFromRepo } from '../../../shared/task-source-context'
 import { translate } from '@/i18n/i18n'
 
 type WorktreePaletteItem = {
@@ -1183,6 +1188,11 @@ export default function WorktreeJumpPalette(): React.JSX.Element | null {
       }
 
       prefetchCreateWorkspaceBaseForComposer(repoForLookup.id)
+      const sourceContext = buildTaskSourceContextFromRepo({
+        provider: 'github',
+        projectId: repoForLookup.id,
+        repo: repoForLookup
+      })
       // Why: awaiting inside the user gesture would leave the palette open
       // indefinitely on slow networks. Close immediately and populate the
       // composer once the lookup returns.
@@ -1190,15 +1200,15 @@ export default function WorktreeJumpPalette(): React.JSX.Element | null {
       preserveCreateLookupOnCloseRef.current = true
       recordFeatureInteraction('cmd-j-create-workspace')
       closeModal()
-      void window.api.gh
-        .workItemByOwnerRepo({
-          repoPath: repoForLookup.path,
-          repoId: repoForLookup.id,
-          owner: slug.owner,
-          repo: slug.repo,
-          number,
-          type: ghLink.type
-        })
+      void lookupGitHubWorkItemByOwnerRepoForSource({
+        repoPath: repoForLookup.path,
+        repoId: repoForLookup.id,
+        sourceContext,
+        owner: slug.owner,
+        repo: slug.repo,
+        number,
+        type: ghLink.type
+      })
         .then((item) => {
           if (!createLookupGuard.isCurrent(lookupToken)) {
             return
@@ -1260,12 +1270,21 @@ export default function WorktreeJumpPalette(): React.JSX.Element | null {
       }
 
       prefetchCreateWorkspaceBaseForComposer(repoForLookup.id)
+      const sourceContext = buildTaskSourceContextFromRepo({
+        provider: 'github',
+        projectId: repoForLookup.id,
+        repo: repoForLookup
+      })
       const lookupToken = createLookupGuard.start()
       preserveCreateLookupOnCloseRef.current = true
       recordFeatureInteraction('cmd-j-create-workspace')
       closeModal()
-      void window.api.gh
-        .workItem({ repoPath: repoForLookup.path, repoId: repoForLookup.id, number: ghNumber })
+      void lookupGitHubWorkItemForSource({
+        repoPath: repoForLookup.path,
+        repoId: repoForLookup.id,
+        sourceContext,
+        number: ghNumber
+      })
         .then((item) => {
           if (!createLookupGuard.isCurrent(lookupToken)) {
             return

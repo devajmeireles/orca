@@ -37,6 +37,10 @@ import {
   parseGitHubIssueOrPRLink,
   type RepoSlug
 } from '@/lib/github-links'
+import {
+  lookupGitHubWorkItemByOwnerRepoForSource,
+  lookupGitHubWorkItemForSource
+} from '@/lib/github-work-item-source-lookup'
 import { lookupSmartGitHubSubmitItem } from '@/lib/smart-github-submit'
 import { parseGitLabIssueOrMRLink } from '@/lib/gitlab-links'
 import { getLocalPreflightContext, localPreflightContextKey } from '@/lib/local-preflight-context'
@@ -401,9 +405,8 @@ export default function SmartWorkspaceNameField({
                 number: directLink.number,
                 type: directLink.type
               },
-              workItem: (args) => window.api.gh.workItem(args) as Promise<GitHubWorkItem | null>,
-              workItemByOwnerRepo: (args) =>
-                window.api.gh.workItemByOwnerRepo(args) as Promise<GitHubWorkItem | null>
+              workItem: lookupGitHubWorkItemForSource,
+              workItemByOwnerRepo: lookupGitHubWorkItemByOwnerRepoForSource
             })
             if (!stale) {
               setGithubItems(item ? [item] : [])
@@ -447,9 +450,8 @@ export default function SmartWorkspaceNameField({
         repoId: selectedRepo.id,
         sourceContext: githubSourceContext,
         intent,
-        workItem: (args) => window.api.gh.workItem(args) as Promise<GitHubWorkItem | null>,
-        workItemByOwnerRepo: (args) =>
-          window.api.gh.workItemByOwnerRepo(args) as Promise<GitHubWorkItem | null>
+        workItem: lookupGitHubWorkItemForSource,
+        workItemByOwnerRepo: lookupGitHubWorkItemByOwnerRepoForSource
       })
       void request
         .then((item) => {
@@ -869,9 +871,15 @@ export default function SmartWorkspaceNameField({
       handledCrossRepoUrlRef.current = debouncedQuery.trim()
       setGithubLoading(true)
       try {
-        const item = await window.api.gh.workItemByOwnerRepo({
+        const sourceContext = buildTaskSourceContextFromRepo({
+          provider: 'github',
+          projectId: targetRepo.id,
+          repo: targetRepo
+        })
+        const item = await lookupGitHubWorkItemByOwnerRepoForSource({
           repoPath: targetRepo.path,
           repoId: targetRepo.id,
+          sourceContext,
           owner: crossRepoPrompt.link.slug.owner,
           repo: crossRepoPrompt.link.slug.repo,
           number: crossRepoPrompt.link.number,

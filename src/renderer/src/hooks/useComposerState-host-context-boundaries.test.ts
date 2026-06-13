@@ -80,4 +80,22 @@ describe('useComposerState host-context boundaries', () => {
     expect(section).toContain('hostId: initialRunSeed.hostId')
     expect(section).toContain('projectHostSetupId: initialRunSeed.projectHostSetupId')
   })
+
+  it('resolves typed GitHub issue/PR input through the selected repo source context', () => {
+    expect(HOOK_SOURCE).toContain('const selectedRepoGitHubSourceContext = useMemo')
+
+    const directLookup = sourceBetween(
+      HOOK_SOURCE,
+      'void window.api.gh',
+      'const applyLinkedWorkItem = useCallback'
+    )
+    expect(directLookup).toContain('sourceContext: selectedRepoGitHubSourceContext')
+
+    const submitLookup = sourceBetween(
+      HOOK_SOURCE,
+      'const resolvePendingSmartGitHubSubmit',
+      'const resolution = getSmartGitHubSubmitResolution(item)'
+    )
+    expect(submitLookup).toContain('sourceContext: selectedRepoGitHubSourceContext')
+  })
 })

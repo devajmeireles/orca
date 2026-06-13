@@ -83,6 +83,10 @@ import {
   getSmartGitHubSubmitResolution,
   type SmartGitHubSubmitResolution
 } from '@/lib/smart-github-submit'
+import {
+  lookupGitHubWorkItemByOwnerRepoForSource,
+  lookupGitHubWorkItemForSource
+} from '@/lib/github-work-item-source-lookup'
 import { isWorkItemLookupText } from '@/lib/work-item-lookup-text'
 import {
   canUseRepoBackedComposerSources,
@@ -566,6 +570,34 @@ export function useComposerState(options: UseComposerStateOptions): UseComposerS
     selectedRepo,
     selectedWorkspaceTarget
   ])
+  const selectedRepoGitHubSourceContext = useMemo(() => {
+    if (!selectedRepo || !selectedRepoIsGit) {
+      return null
+    }
+    if (taskSourceContext?.provider === 'github') {
+      return taskSourceContext
+    }
+    if (selectedWorkspaceTarget.status === 'ready') {
+      const selectedProject = projects.find(
+        (project) => project.id === selectedWorkspaceTarget.target.projectId
+      )
+      return buildTaskSourceContextFromRepo({
+        provider: 'github',
+        projectId: selectedWorkspaceTarget.target.projectId,
+        repo: selectedRepo,
+        projectHostSetupId: selectedWorkspaceTarget.target.projectHostSetupId,
+        providerIdentity:
+          selectedProject?.providerIdentity?.provider === 'github'
+            ? selectedProject.providerIdentity
+            : null
+      })
+    }
+    return buildTaskSourceContextFromRepo({
+      provider: 'github',
+      projectId: selectedRepo.id,
+      repo: selectedRepo
+    })
+  }, [projects, selectedRepo, selectedRepoIsGit, selectedWorkspaceTarget, taskSourceContext])
   const [linkedIssue, setLinkedIssue] = useState<string>(() => {
     if (persistDraft && newWorkspaceDraft?.linkedIssue) {
       return newWorkspaceDraft.linkedIssue
@@ -1326,12 +1358,12 @@ export function useComposerState(options: UseComposerStateOptions): UseComposerS
     // resolving direct lookups against the selected repo instead of requiring a
     // text match in the recent-items list.
     const lookupRepoId = selectedRepo.id
-    void window.api.gh
-      .workItem({
-        repoPath: selectedRepo.path,
-        repoId: selectedRepo.id,
-        number: normalizedLinkQuery.directNumber
-      })
+    void lookupGitHubWorkItemForSource({
+      repoPath: selectedRepo.path,
+      repoId: selectedRepo.id,
+      sourceContext: selectedRepoGitHubSourceContext,
+      number: normalizedLinkQuery.directNumber
+    })
       .then((item) => {
         if (!cancelled) {
           setLinkDirectItem(
@@ -1353,7 +1385,13 @@ export function useComposerState(options: UseComposerStateOptions): UseComposerS
     return () => {
       cancelled = true
     }
-  }, [linkPopoverOpen, normalizedLinkQuery.directNumber, selectedRepo, selectedRepoIsGit])
+  }, [
+    linkPopoverOpen,
+    normalizedLinkQuery.directNumber,
+    selectedRepo,
+    selectedRepoGitHubSourceContext,
+    selectedRepoIsGit
+  ])
 
   const applyLinkedWorkItem = useCallback(
     (item: GitHubWorkItem, options: { preserveBranchNameOverride?: boolean } = {}): void => {
@@ -1404,10 +1442,10 @@ export function useComposerState(options: UseComposerStateOptions): UseComposerS
       const item = await lookupSmartGitHubSubmitItem({
         repoPath: selectedRepo.path,
         repoId: selectedRepo.id,
+        sourceContext: selectedRepoGitHubSourceContext,
         intent,
-        workItem: (args) => window.api.gh.workItem(args) as Promise<GitHubWorkItem | null>,
-        workItemByOwnerRepo: (args) =>
-          window.api.gh.workItemByOwnerRepo(args) as Promise<GitHubWorkItem | null>
+        workItem: lookupGitHubWorkItemForSource,
+        workItemByOwnerRepo: lookupGitHubWorkItemByOwnerRepoForSource
       })
       if (!item) {
         throw new Error('Could not resolve the GitHub item before creating the workspace.')
@@ -1430,7 +1468,7 @@ export function useComposerState(options: UseComposerStateOptions): UseComposerS
       branchAutoNameRef.current = ''
       setStartFromResetHint(null)
       return resolution
-    }, [linkedWorkItem, name, selectedRepo, selectedRepoIsGit])
+    }, [linkedWorkItem, name, selectedRepo, selectedRepoGitHubSourceContext, selectedRepoIsGit])
 
   // Why: parallel of applyLinkedWorkItem for GitLab. Touches the GitLab
   // state slots only — the GitHub linkedIssue/linkedPR remain unchanged
