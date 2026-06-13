@@ -22,7 +22,7 @@ The target model is:
 - [x] Add a shared run-target type or selector for RunHostContext / WorkspaceRunContext so workspace creation, agent launch, automations, and remote execution use the same vocabulary.
 - [~] Audit user-facing copy so the product says **Host** for Local Mac, SSH hosts, remote servers, and future cloud VMs, while preserving technical labels only where useful.
 - [x] Document the invariant that task source context and run host are separate choices.
-- [~] Add compatibility adapters for existing repo-id/path-based callers so old data can be read while new code moves to explicit contexts.
+- [x] Add compatibility adapters for existing repo-id/path-based callers so old data can be read while new code moves to explicit contexts.
 - [x] Add schema migration notes for old automations, cached task selections, pending worktree requests, and any persisted task drawer state.
 
 Done means: a new agent can read the shared types and understand exactly where work item data comes from versus where execution happens.
@@ -256,3 +256,4 @@ Done means: reviewers and future agents can understand the vision, implementatio
 - [x] 2026-06-12: Marked task drawer source-context persistence complete based on UI slice coverage that records GitHub, GitLab, Linear, and Jira task-detail history entries with their exact `TaskSourceContext`, plus direct-open prefetch coverage for source-scoped GitHub and Linear reads.
 - [x] 2026-06-12: Marked PR/MR base resolution complete based on `useComposerState-host-context-boundaries.test.ts`, which asserts GitHub PR and GitLab MR base lookup uses the selected run repo instead of the provider item's source repo while preserving source item metadata separately.
 - [x] 2026-06-12: Extracted and tested external automation source availability copy so local missing tooling, disconnected SSH sources, connecting SSH sources, and connected SSH hosts with missing remote tooling get distinct states; verified with focused automation availability tests, targeted oxlint, and full `pnpm run typecheck`.
+- [x] 2026-06-12: Marked repo-id/path compatibility adapters complete after hardening the renderer project-host selector to merge repo-derived compatibility rows when hydrated project/setup arrays are empty or partial, alongside existing shared projection, persistence backfill/sync, automation context migration, and pending worktree context coverage. Verified with selector/projection tests, persistence tests, targeted oxlint, full `pnpm run typecheck`, and `git diff --check`.

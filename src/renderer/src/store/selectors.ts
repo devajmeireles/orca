@@ -40,6 +40,10 @@ const providedProjectHostSetupProjectionCache = new WeakMap<
   Project[],
   WeakMap<ProjectHostSetup[], ProjectHostSetupProjection>
 >()
+const mergedProjectHostSetupProjectionCache = new WeakMap<
+  AppState['repos'],
+  WeakMap<Project[], WeakMap<ProjectHostSetup[], ProjectHostSetupProjection>>
+>()
 let floatingVisibleTabCountCache: FloatingVisibleTabCountCache | null = null
 
 function getWorktreeSnapshot(worktreesByRepo: AppState['worktreesByRepo']): WorktreeSnapshot {
@@ -134,6 +138,54 @@ function getCachedProvidedProjectHostSetupProjection(
   return projection
 }
 
+function mergeById<T extends { id: string }>(base: readonly T[], overlay: readonly T[]): T[] {
+  const merged = [...base]
+  const indexById = new Map(merged.map((entry, index) => [entry.id, index]))
+  for (const entry of overlay) {
+    const index = indexById.get(entry.id)
+    if (index === undefined) {
+      indexById.set(entry.id, merged.length)
+      merged.push(entry)
+    } else {
+      merged[index] = entry
+    }
+  }
+  return merged
+}
+
+function mergeProjectHostSetupProjection(
+  repos: AppState['repos'],
+  projects: Project[],
+  setups: ProjectHostSetup[]
+): ProjectHostSetupProjection {
+  const cachedByProjects = mergedProjectHostSetupProjectionCache.get(repos)
+  const cachedBySetups = cachedByProjects?.get(projects)
+  const cachedProjection = cachedBySetups?.get(setups)
+  if (cachedProjection) {
+    return cachedProjection
+  }
+  const derived = getCachedProjectHostSetupProjection(repos)
+  // Why: older runtimes/profiles may hydrate empty or partial project/setup arrays
+  // beside legacy repos. Keep repo-backed compatibility rows visible in that case.
+  const projection = {
+    projects: mergeById(derived.projects, projects),
+    setups: mergeById(derived.setups, setups)
+  }
+  const nextCachedByProjects =
+    cachedByProjects ??
+    new WeakMap<Project[], WeakMap<ProjectHostSetup[], ProjectHostSetupProjection>>()
+  const nextCachedBySetups =
+    cachedBySetups ?? new WeakMap<ProjectHostSetup[], ProjectHostSetupProjection>()
+  nextCachedBySetups.set(setups, projection)
+  if (!cachedBySetups) {
+    nextCachedByProjects.set(projects, nextCachedBySetups)
+  }
+  if (!cachedByProjects) {
+    mergedProjectHostSetupProjectionCache.set(repos, nextCachedByProjects)
+  }
+  return projection
+}
+
 export function selectFloatingVisibleTabCount(state: FloatingVisibleTabCountState): number {
   const terminalTabs = state.tabsByWorktree[FLOATING_TERMINAL_WORKTREE_ID] ?? EMPTY_TABS
   const browserTabs =
@@ -213,6 +265,24 @@ export function getProjectHostSetupProjectionFromState(
   state: Pick<AppState, 'repos'> & Partial<Pick<AppState, 'projects' | 'projectHostSetups'>>
 ): ProjectHostSetupProjection {
   if (state.projects && state.projectHostSetups) {
+    const repoIds = new Set(state.repos.map((repo) => repo.id))
+    const coveredRepoIds = new Set<string>()
+    for (const setup of state.projectHostSetups) {
+      const repoId = typeof setup.repoId === 'string' ? setup.repoId : ''
+      if (repoIds.has(repoId)) {
+        coveredRepoIds.add(repoId)
+      }
+      if (repoIds.has(setup.id)) {
+        coveredRepoIds.add(setup.id)
+      }
+    }
+    if (state.repos.length > 0 && coveredRepoIds.size < repoIds.size) {
+      return mergeProjectHostSetupProjection(
+        state.repos,
+        state.projects as Project[],
+        state.projectHostSetups as ProjectHostSetup[]
+      )
+    }
     return getCachedProvidedProjectHostSetupProjection(
       state.projects as Project[],
       state.projectHostSetups as ProjectHostSetup[]
