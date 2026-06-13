@@ -127,15 +127,6 @@ import type {
   Project,
   Repo,
   ProjectGroup,
-  ProjectHostSetup,
-  ProjectHostSetupCreateArgs,
-  ProjectHostSetupCreateResult,
-  ProjectHostSetupDeleteArgs,
-  ProjectHostSetupDeleteResult,
-  ProjectHostSetupExistingFolderArgs,
-  ProjectHostSetupResult,
-  ProjectHostSetupUpdateArgs,
-  ProjectHostSetupUpdateResult,
   FolderWorkspace,
   ProjectGroupImportResult,
   ProjectGroupImportMode,
@@ -1655,6 +1646,8 @@ export type PreloadApi = {
     dismiss: () => Promise<void>
     complete: () => Promise<void>
     disable: () => Promise<void>
+    openWeb: () => Promise<void>
+    starOrca: () => Promise<boolean>
     forceShow: () => Promise<void>
   }
   /** Fire-and-forget track. Loose typing at the IPC boundary on purpose —
@@ -1748,9 +1741,9 @@ export type PreloadApi = {
     getInstallStatus: () => Promise<CliInstallStatus>
     install: () => Promise<CliInstallStatus>
     remove: () => Promise<CliInstallStatus>
-    getWslInstallStatus: () => Promise<CliInstallStatus>
-    installWsl: () => Promise<CliInstallStatus>
-    removeWsl: () => Promise<CliInstallStatus>
+    getWslInstallStatus: (args?: { distro?: string | null }) => Promise<CliInstallStatus>
+    installWsl: (args?: { distro?: string | null }) => Promise<CliInstallStatus>
+    removeWsl: (args?: { distro?: string | null }) => Promise<CliInstallStatus>
   }
   agentHooks: {
     claudeStatus: () => Promise<AgentHookInstallStatus>

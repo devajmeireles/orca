@@ -314,87 +314,6 @@ describe('Store', () => {
     expect(store.getRepos()).toEqual([])
   }, 15_000)
 
-  it('backfills project host setup compatibility records from legacy repos on load', async () => {
-    writeDataFile({
-      schemaVersion: 1,
-      repos: [
-        makeRepo({
-          id: 'local-repo',
-          path: '/Users/alice/orca',
-          displayName: 'Orca',
-          upstream: { owner: 'StablyAI', repo: 'Orca' }
-        }),
-        makeRepo({
-          id: 'remote-repo',
-          path: '/home/alice/orca',
-          displayName: 'orca',
-          connectionId: 'gpu-vm',
-          upstream: { owner: 'stablyai', repo: 'orca' }
-        })
-      ]
-    })
-
-    const store = await createStore()
-
-    expect(store.getProjects()).toEqual([
-      expect.objectContaining({
-        id: 'github:stablyai/orca',
-        sourceRepoIds: ['local-repo', 'remote-repo']
-      })
-    ])
-    expect(store.getProjectHostSetups()).toEqual([
-      expect.objectContaining({
-        id: 'local-repo',
-        projectId: 'github:stablyai/orca',
-        hostId: 'local',
-        path: '/Users/alice/orca'
-      }),
-      expect.objectContaining({
-        id: 'remote-repo',
-        projectId: 'github:stablyai/orca',
-        hostId: 'ssh:gpu-vm',
-        path: '/home/alice/orca'
-      })
-    ])
-
-    store.flush()
-    const persisted = readDataFile() as PersistedState
-    expect(persisted.projects).toEqual(store.getProjects())
-    expect(persisted.projectHostSetups).toEqual(store.getProjectHostSetups())
-  })
-
-  it('preserves independent project host setup records on load', async () => {
-    const independentProject = makeProject({
-      id: 'cloud-project',
-      displayName: 'Cloud Project'
-    })
-    const independentSetup = makeProjectHostSetup({
-      id: 'cloud-project::gpu-vm',
-      projectId: independentProject.id,
-      hostId: 'runtime:gpu-vm',
-      repoId: '',
-      path: '/srv/cloud-project',
-      displayName: 'GPU VM'
-    })
-    writeDataFile({
-      ...getDefaultPersistedState(testState.dir),
-      repos: [makeRepo({ id: 'r1', path: '/repo', displayName: 'Repo' })],
-      projects: [independentProject],
-      projectHostSetups: [independentSetup]
-    })
-
-    const store = await createStore()
-
-    expect(store.getProjects().map((project) => project.id)).toEqual(['repo:r1', 'cloud-project'])
-    expect(store.getProjectHostSetups().map((setup) => setup.id)).toEqual([
-      'r1',
-      'cloud-project::gpu-vm'
-    ])
-    store.flush()
-    const persisted = readDataFile() as PersistedState
-    expect(persisted.projectHostSetups).toContainEqual(independentSetup)
-  })
-
   it('returns default settings when no data file exists', async () => {
     const store = await createStore()
     const settings = store.getSettings()
@@ -777,6 +696,26 @@ describe('Store', () => {
 
     store.updateUI({ projectOrderBy: 'manual' })
     expect(store.getUI().projectOrderBy).toBe('manual')
+  })
+
+  it('shows the manual-default notice for upgraded profiles without projectOrderBy', async () => {
+    writeDataFile({
+      schemaVersion: 1,
+      repos: [{ id: 'repo-1', path: '/tmp/repo', displayName: 'Repo', badgeColor: '#000000' }],
+      ui: {}
+    })
+    const store = await createStore()
+    expect(store.getUI().projectOrderManualDefaultNoticeDismissed).toBe(false)
+  })
+
+  it('hides the manual-default notice for profiles that already chose recent', async () => {
+    writeDataFile({
+      schemaVersion: 1,
+      repos: [{ id: 'repo-1', path: '/tmp/repo', displayName: 'Repo', badgeColor: '#000000' }],
+      ui: { projectOrderBy: 'recent' }
+    })
+    const store = await createStore()
+    expect(store.getUI().projectOrderManualDefaultNoticeDismissed).toBe(true)
   })
 
   // ── 2. Load from existing valid file ─────────────────────────────────

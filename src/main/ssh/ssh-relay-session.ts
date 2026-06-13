@@ -655,7 +655,13 @@ export class SshRelaySession {
               )
             )
           : {}
-      return await runRemoteOrcaCli(this.runtime, { argv, cwd, env })
+      const stdin = typeof params.stdin === 'string' ? params.stdin : undefined
+      return await runRemoteOrcaCli(this.runtime, {
+        argv,
+        cwd,
+        env,
+        ...(stdin !== undefined ? { stdin } : {})
+      })
     })
   }
 

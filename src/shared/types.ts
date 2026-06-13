@@ -1526,8 +1526,12 @@ export type GitHubCreateIssueFields = {
   assignees?: string[]
 }
 
+export type GitHubIssueCloseReason = 'completed' | 'not_planned' | 'duplicate'
+
 export type GitHubIssueUpdate = {
   state?: 'open' | 'closed'
+  stateReason?: GitHubIssueCloseReason
+  duplicateOf?: number
   title?: string
   // Why: body writes use the REST issue endpoint instead of `gh issue edit`
   // because that command does not consistently cover every body-edit case the
@@ -2102,6 +2106,7 @@ export type TuiAgent =
   | 'openclaw' // OpenClaw
   | 'copilot' // GitHub Copilot CLI
   | 'grok' // xAI Grok CLI
+  | 'devin' // Devin CLI
 
 export type TaskViewPresetId = 'all' | 'issues' | 'review' | 'my-issues' | 'my-prs' | 'prs'
 
@@ -2182,6 +2187,8 @@ export type OpenInApplication = {
 
 export type SourceControlViewMode = 'list' | 'tree'
 
+export type LeftSidebarAppearanceMode = 'default' | 'match-terminal' | 'tinted'
+
 export type FloatingTerminalCwdRequest = {
   path?: string
   requireTrusted?: boolean
@@ -2221,6 +2228,10 @@ export type GlobalSettings = {
   branchPrefixCustom: string
   enableGitHubAttribution: boolean
   theme: 'system' | 'dark' | 'light'
+  /** Controls the left sidebar surface without changing terminal brightness. */
+  leftSidebarAppearanceMode: LeftSidebarAppearanceMode
+  leftSidebarTintColor?: string
+  leftSidebarTintOpacity?: number
   uiLanguage: UiLanguage
   appIcon: AppIconId
   appFontFamily: string
@@ -2340,6 +2351,9 @@ export type GlobalSettings = {
    *  The setting stays opt-in so existing workflows continue to use the system browser
    *  until the user explicitly wants worktree-scoped in-app browsing. */
   openLinksInApp: boolean
+  /** Why: terminal link routing asks once at first use instead of silently
+   *  changing where links open for new users. */
+  openLinksInAppPreferencePrompted: boolean
   /** Extra launcher rows for the worktree "Open in" submenu. VS Code is always shown first. */
   openInApplications?: OpenInApplication[]
   /** Deprecated: migration/backward-compat only. Use PersistedUIState.rightSidebarOpen. */
@@ -2927,6 +2941,9 @@ export type PersistedUIState = {
   /** User-dismissed browser import hint in the browser toolbar. Import remains
    *  available from Settings > Browser and the toolbar overflow menu. */
   browserImportHintHidden?: boolean
+  /** One-shot rollout notice for manual project ordering becoming the default.
+   *  Absent or true means the sidebar callout stays hidden. */
+  projectOrderManualDefaultNoticeDismissed?: boolean
   /** User-hidden empty-state usage CTA in the status bar. Permanently hides the
    *  "Connect AI accounts to see usage" prompt even if all providers are later
    *  disconnected — a dismissed teaching nudge stays dismissed. */

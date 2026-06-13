@@ -41,14 +41,8 @@ type AddRepoDialogStepContentProps = {
   nestedGroupName: string
   createName: string
   createParent: string
-  createKind: 'git' | 'folder'
   createError: string | null
   isCreating: boolean
-  hostSelector?: ReactNode
-  showRemoteAction?: boolean
-  canCreateProject?: boolean
-  manualCreateParentEntry?: boolean
-  browseHostKind?: 'local' | 'ssh'
   createDefaultParent: string
   createGitAvailability: GitAvailability
   createRuntimeParentStatus: 'idle' | 'checking' | 'failed'
@@ -75,7 +69,6 @@ type AddRepoDialogStepContentProps = {
   onImportNestedRepos: (mode: 'group' | 'separate') => void
   onCreateNameChange: (name: string) => void
   onCreateParentChange: (parent: string) => void
-  onCreateKindChange: (kind: 'git' | 'folder') => void
   onPickCreateParent: () => void
   onCreate: () => void
 }
@@ -111,14 +104,8 @@ export function AddRepoDialogStepContent({
   nestedGroupName,
   createName,
   createParent,
-  createKind,
   createError,
   isCreating,
-  hostSelector,
-  showRemoteAction = true,
-  canCreateProject = true,
-  manualCreateParentEntry = isRuntimeEnvironmentActive,
-  browseHostKind = 'local',
   createDefaultParent,
   createGitAvailability,
   createRuntimeParentStatus,
@@ -145,7 +132,6 @@ export function AddRepoDialogStepContent({
   onImportNestedRepos,
   onCreateNameChange,
   onCreateParentChange,
-  onCreateKindChange,
   onPickCreateParent,
   onCreate
 }: AddRepoDialogStepContentProps): React.JSX.Element | null {
@@ -250,19 +236,17 @@ export function AddRepoDialogStepContent({
       <CreateStep
         createName={createName}
         createParent={createParent}
-        createKind={createKind}
         createError={createError}
         isCreating={isCreating}
         defaultParent={createDefaultParent}
         gitAvailability={createGitAvailability}
         runtimeParentStatus={createRuntimeParentStatus}
         parentDefaultPending={createParentDefaultPending}
-        manualParentEntry={manualCreateParentEntry}
+        manualParentEntry={isRuntimeEnvironmentActive}
         runtimeEnvironmentId={activeRuntimeEnvironmentId}
         sshTargetId={selectedSshTargetId}
         onNameChange={onCreateNameChange}
         onParentChange={onCreateParentChange}
-        onKindChange={onCreateKindChange}
         onPickParent={onPickCreateParent}
         onCreate={onCreate}
       />

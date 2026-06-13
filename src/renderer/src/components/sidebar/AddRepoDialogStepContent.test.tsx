@@ -53,7 +53,6 @@ function renderStepContent(overrides: Partial<StepContentProps>): string {
     nestedGroupName: 'platform',
     createName: '',
     createParent: '',
-    createKind: 'git',
     createError: null,
     isCreating: false,
     createDefaultParent: '',
@@ -82,7 +81,6 @@ function renderStepContent(overrides: Partial<StepContentProps>): string {
     onImportNestedRepos: vi.fn(),
     onCreateNameChange: vi.fn(),
     onCreateParentChange: vi.fn(),
-    onCreateKindChange: vi.fn(),
     onPickCreateParent: vi.fn(),
     onCreate: vi.fn(),
     ...overrides
@@ -106,8 +104,8 @@ describe('AddRepoDialogStepContent nested imports', () => {
     const html = renderNestedStep(0)
 
     expect(html).toContain('Is this a monorepo?')
-    expect(html).toContain('aria-label="Monorepo name"')
-    expect(html).toContain('Yes, import as monorepo')
+    expect(html).toContain('aria-label="Group name"')
+    expect(html).toContain('Import as group')
     expect(html).toContain('No, import separately')
     expect(html).not.toContain('>Import</button>')
   })
@@ -116,8 +114,8 @@ describe('AddRepoDialogStepContent nested imports', () => {
     const html = renderNestedStep(1)
 
     expect(html).toContain('Is this a monorepo?')
-    expect(html).toContain('aria-label="Monorepo name"')
-    expect(html).toContain('Yes, import as monorepo')
+    expect(html).toContain('aria-label="Group name"')
+    expect(html).toContain('Import as group')
     expect(html).toContain('No, import separately')
     expect(html).not.toContain('>Import</button>')
   })
@@ -129,23 +127,9 @@ describe('AddRepoDialogStepContent nested imports', () => {
       activeRuntimeEnvironmentId: 'env-1'
     })
 
-    expect(html).toContain('Create a new project')
-    expect(html).toContain('server folder not selected')
-  })
-
-  it('uses manual path entry for SSH create project locations', () => {
-    const html = renderStepContent({
-      step: 'create',
-      manualCreateParentEntry: true,
-      selectedSshTargetId: 'openclaw-2',
-      activeRuntimeEnvironmentId: null
-    })
-
-    expect(html).toContain('Create a new project')
-    expect(html).toContain('placeholder="/home/user/projects"')
-    expect(html).toContain('aria-label="Browse server filesystem"')
-    expect(html).not.toMatch(/<button[^>]*disabled=""[^>]*aria-label="Browse server filesystem"/)
-    expect(html).not.toContain('Choose parent folder')
+    expect(html).toContain('Create project')
+    expect(html).toContain('Choose or enter a server parent folder before creating.')
+    expect(html).toContain('Browse')
   })
 
   it('offers server browsing for remote clone destinations', () => {

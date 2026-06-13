@@ -147,19 +147,7 @@ export function checkDaemonHealth(
         }
 
         if (message.id === 'health-1') {
-          if (!message.ok) {
-            settle('unhealthy')
-            return
-          }
-          // Why: protocol ping only proves the socket loop is alive. New
-          // terminals also depend on node-pty's native helper state inside
-          // the daemon process, which can go stale after dev rebuilds.
-          sock?.write(encodeNdjson({ id: 'health-2', type: 'ptySpawnHealth' }))
-          continue
-        }
-
-        if (message.id === 'health-2') {
-          settle(message.ok ? 'healthy' : 'pty-spawn-unhealthy')
+          settle(message.ok === true)
           return
         }
       }

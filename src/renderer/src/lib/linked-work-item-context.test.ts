@@ -74,7 +74,8 @@ describe('buildLinearLaunchContextBlock', () => {
     expect(block).toContain('https://linear.app/acme/issue/ENG-123/test')
     expect(block).toContain('Before planning or editing, fetch the full ticket with:')
     expect(block).toContain('orca linear issue --current --full --json')
-    expect(block).toContain('check `meta` for caps, `partial`, and `includeErrors`')
+    expect(block).toContain('check `meta.partial`, `meta.includeErrors`, and `meta.sections`')
+    expect(block).toContain('linear-tickets completion flow')
   })
 
   it('falls back to --current when the identifier is not a Linear key', () => {
@@ -96,6 +97,7 @@ describe('buildLinearLaunchContextBlock', () => {
     expect(block).toContain('Linked Linear issue: ENG-123')
     expect(block).not.toContain('Fix launch context handoff')
     expect(block).not.toContain('orca linear issue')
+    expect(block).not.toContain('linear-tickets completion flow')
     expect(block).toContain('enable it from Orca Settings')
   })
 

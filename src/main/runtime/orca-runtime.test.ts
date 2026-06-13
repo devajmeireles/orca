@@ -9444,6 +9444,151 @@ describe('OrcaRuntimeService', () => {
     expect(spawn.mock.calls[1]?.[0]).not.toHaveProperty('sessionId')
   })
 
+  it('keeps the activated headless tab active across PTY republishes (serve focus-jump regression)', async () => {
+    // Why: in `orca serve`, focusTerminal has no renderer to persist the remote
+    // client's tab choice before PTY republishes.
+    let nextPty = 0
+    const spawn = vi.fn().mockImplementation(async () => ({ id: `headless-pty-${++nextPty}` }))
+    const runtime = new OrcaRuntimeService(store)
+    runtime.setPtyController({
+      spawn,
+      write: () => true,
+      kill: () => true,
+      getForegroundProcess: async () => null
+    })
+
+    const FIRST_LEAF = '22222222-2222-4222-8222-222222222222'
+    const SECOND_LEAF = '33333333-3333-4333-8333-333333333333'
+    // The first-created headless terminal is the one the snapshot marks active.
+    await runtime.createTerminal(`id:${TEST_WORKTREE_ID}`, {
+      tabId: 'tab-first',
+      leafId: FIRST_LEAF
+    })
+    await runtime.createTerminal(`id:${TEST_WORKTREE_ID}`, {
+      tabId: 'tab-other',
+      leafId: SECOND_LEAF
+    })
+
+    const events: RuntimeMobileSessionTabsResult[] = []
+    runtime.onMobileSessionTabsChanged((snapshot) => events.push(snapshot))
+
+    // The remote client switches to the other (non-active) tab.
+    await runtime.activateMobileSessionTab(`id:${TEST_WORKTREE_ID}`, 'tab-other')
+
+    const afterActivate = events.at(-1)
+    expect(afterActivate?.activeTabId).toBe(`tab-other::${SECOND_LEAF}`)
+    expect(afterActivate?.activeTabType).toBe('terminal')
+    expect(afterActivate?.tabGroups?.[0]?.activeTabId).toBe('tab-other')
+    expect(
+      afterActivate?.tabs.find((tab) => tab.id === `tab-other::${SECOND_LEAF}`)?.isActive
+    ).toBe(true)
+    expect(afterActivate?.tabs.find((tab) => tab.id === `tab-first::${FIRST_LEAF}`)?.isActive).toBe(
+      false
+    )
+
+    // PTY title updates republish snapshots, so the client's chosen tab must
+    // survive after activation.
+    events.length = 0
+    runtime.onPtyData('headless-pty-2', '\x1b]0;tab-other running\x07', 200)
+
+    const afterPtyData = events.at(-1)
+    expect(afterPtyData?.activeTabId).toBe(`tab-other::${SECOND_LEAF}`)
+    expect(afterPtyData?.activeTabType).toBe('terminal')
+    expect(afterPtyData?.tabGroups?.[0]?.activeTabId).toBe('tab-other')
+  })
+
+  it('does not bump the snapshot version when re-activating the already-active headless tab', async () => {
+    // Why: redundant activations of the current tab must not force a remote re-render.
+    const spawn = vi.fn().mockResolvedValue({ id: 'headless-pty-solo' })
+    const runtime = new OrcaRuntimeService(store)
+    runtime.setPtyController({
+      spawn,
+      write: () => true,
+      kill: () => true,
+      getForegroundProcess: async () => null
+    })
+
+    const LEAF = '44444444-4444-4444-8444-444444444444'
+    await runtime.createTerminal(`id:${TEST_WORKTREE_ID}`, { tabId: 'tab-solo', leafId: LEAF })
+
+    const events: RuntimeMobileSessionTabsResult[] = []
+    runtime.onMobileSessionTabsChanged((snapshot) => events.push(snapshot))
+
+    await runtime.activateMobileSessionTab(`id:${TEST_WORKTREE_ID}`, 'tab-solo')
+
+    expect(events).toHaveLength(0)
+  })
+
+  it('does not persist active server-side when an authoritative renderer is attached', async () => {
+    // Why: when a renderer window is authoritative it re-syncs the snapshot itself,
+    // so the headless persist must NOT fire — the renderer stays the source of truth.
+    let nextPty = 0
+    const spawn = vi.fn().mockImplementation(async () => ({ id: `attached-pty-${++nextPty}` }))
+    const runtime = new OrcaRuntimeService(store)
+    runtime.setPtyController({
+      spawn,
+      write: () => true,
+      kill: () => true,
+      getForegroundProcess: async () => null
+    })
+
+    const LEAF_A = '55555555-5555-4555-8555-555555555555'
+    const LEAF_B = '66666666-6666-4666-8666-666666666666'
+    await runtime.createTerminal(`id:${TEST_WORKTREE_ID}`, { tabId: 'tab-a', leafId: LEAF_A })
+    await runtime.createTerminal(`id:${TEST_WORKTREE_ID}`, { tabId: 'tab-b', leafId: LEAF_B })
+
+    // Make an authoritative renderer window present.
+    runtime.attachWindow(1)
+    runtime.markGraphReady(1)
+    electronMocks.BrowserWindow.fromId.mockReturnValue({
+      isDestroyed: () => false,
+      webContents: { send: vi.fn() }
+    })
+
+    const events: RuntimeMobileSessionTabsResult[] = []
+    runtime.onMobileSessionTabsChanged((snapshot) => events.push(snapshot))
+
+    await runtime.activateMobileSessionTab(`id:${TEST_WORKTREE_ID}`, 'tab-b')
+
+    // The headless persist is gated off by the authoritative window — nothing emitted.
+    expect(events).toHaveLength(0)
+  })
+
+  it('does not persist active server-side for a `:headless-merge:` snapshot after renderer detach', async () => {
+    // Why: after renderer detach, merged snapshots have no authoritative window
+    // but still carry renderer-owned group state.
+    let nextPty = 0
+    const spawn = vi.fn().mockImplementation(async () => ({ id: `merge-pty-${++nextPty}` }))
+    const runtime = new OrcaRuntimeService(store)
+    runtime.setPtyController({
+      spawn,
+      write: () => true,
+      kill: () => true,
+      getForegroundProcess: async () => null
+    })
+
+    const LEAF_A = '77777777-7777-4777-8777-777777777777'
+    const LEAF_B = '88888888-8888-4888-8888-888888888888'
+    // tab-a (first-created) is the snapshot's active tab.
+    await runtime.createTerminal(`id:${TEST_WORKTREE_ID}`, { tabId: 'tab-a', leafId: LEAF_A })
+    await runtime.createTerminal(`id:${TEST_WORKTREE_ID}`, { tabId: 'tab-b', leafId: LEAF_B })
+
+    // Simulate a post-detach merged snapshot with no authoritative window.
+    const current = runtime['mobileSessionTabsByWorktree'].get(TEST_WORKTREE_ID)!
+    runtime['mobileSessionTabsByWorktree'].set(TEST_WORKTREE_ID, {
+      ...current,
+      publicationEpoch: `renderer:headless-merge:${current.publicationEpoch}`
+    })
+
+    const events: RuntimeMobileSessionTabsResult[] = []
+    runtime.onMobileSessionTabsChanged((snapshot) => events.push(snapshot))
+
+    // The merge exclusion must suppress server-side active rewrites.
+    await runtime.activateMobileSessionTab(`id:${TEST_WORKTREE_ID}`, 'tab-b')
+
+    expect(events).toHaveLength(0)
+  })
+
   it('spawns fresh SSH terminals when hydrated persistence has no relay identity', async () => {
     const { runtimeStore } = makeRuntimeStoreWithWorkspaceSession(
       makeWorkspaceSessionWithHeadlessTerminal({

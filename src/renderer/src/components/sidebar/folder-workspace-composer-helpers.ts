@@ -13,11 +13,9 @@ import type {
   GitLabWorkItem,
   LinearIssue,
   ProjectGroup,
-  Repo,
-  TuiAgent
+  Repo
 } from '../../../../shared/types'
 import type { SmartWorkspaceNameSelection } from '@/components/new-workspace/SmartWorkspaceNameField'
-import { translate } from '@/i18n/i18n'
 
 const EMPTY_REPOS: Repo[] = []
 
@@ -115,13 +113,4 @@ export function toGitLabLinkedWorkItem(item: GitLabWorkItem): LinkedWorkItemSumm
 
 export function toLinearLinkedWorkItem(issue: LinearIssue): LinkedWorkItemSummary {
   return buildLinearIssueLinkedWorkItem(issue)
-}
-
-export function getFolderWorkspacePrimaryActionLabel(quickAgent: TuiAgent | null): string {
-  return quickAgent
-    ? translate(
-        'auto.components.sidebar.FolderWorkspaceComposerDialog.createStart',
-        'Create & Start Agent'
-      )
-    : translate('auto.components.sidebar.FolderWorkspaceComposerDialog.create', 'Create Workspace')
 }

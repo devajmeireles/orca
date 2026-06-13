@@ -15,6 +15,16 @@ type WorktreeListComponent = React.ComponentType<{
 
 let WorktreeList: WorktreeListComponent
 
+function makeFolderWorkspacePathStatusMockState(): Record<string, unknown> {
+  return {
+    fetchFolderWorkspacePathStatus: vi.fn(),
+    folderWorkspaces: [],
+    folderWorkspacePathStatuses: {},
+    getFolderWorkspacePathStatusCacheKey: (request: unknown) => JSON.stringify(request),
+    getFreshFolderWorkspacePathStatus: () => null
+  }
+}
+
 vi.mock('@/store', () => {
   const useAppStore = ((selector: (state: Record<string, unknown>) => unknown) =>
     selector(mockStore.state)) as ((
@@ -255,6 +265,16 @@ function makeLineage(worktree: Worktree, parent: Worktree): WorktreeLineage {
   }
 }
 
+function makeFolderWorkspacePathStatusState(): Record<string, unknown> {
+  return {
+    fetchFolderWorkspacePathStatus: vi.fn(),
+    folderWorkspacePathStatuses: {},
+    folderWorkspaces: [],
+    getFolderWorkspacePathStatusCacheKey: (request: unknown) => JSON.stringify(request),
+    getFreshFolderWorkspacePathStatus: vi.fn(() => null)
+  }
+}
+
 function setLineageFixtureState(
   groupBy: 'none' | 'repo' = 'none',
   options: {
@@ -308,6 +328,7 @@ function setLineageFixtureState(
   grandchild.isUnread = unreadWorktreeIds.has(grandchild.id)
 
   mockStore.state = {
+    ...makeFolderWorkspacePathStatusMockState(),
     activeModal: '',
     activeView: 'terminal',
     activeWorktreeId: null,
@@ -323,6 +344,7 @@ function setLineageFixtureState(
       ])
     ),
     filterRepoIds: [],
+    ...makeFolderWorkspacePathStatusState(),
     groupBy,
     hideDefaultBranchWorkspace: false,
     issueCache: {},
@@ -390,6 +412,7 @@ function setProjectGroupWithoutWorktreeRowsState(filterRepoIds: string[] = []): 
   }
 
   mockStore.state = {
+    ...makeFolderWorkspacePathStatusMockState(),
     activeModal: '',
     activeView: 'terminal',
     activeWorktreeId: null,
@@ -400,6 +423,7 @@ function setProjectGroupWithoutWorktreeRowsState(filterRepoIds: string[] = []): 
     collapsedGroups: new Set<string>(),
     deleteStateByWorktreeId: {},
     filterRepoIds,
+    ...makeFolderWorkspacePathStatusState(),
     groupBy: 'repo',
     hideDefaultBranchWorkspace: false,
     issueCache: {},
@@ -449,6 +473,7 @@ function setEmptyUngroupedProjectState(filterRepoIds: string[] = []): void {
   }
 
   mockStore.state = {
+    ...makeFolderWorkspacePathStatusMockState(),
     activeModal: '',
     activeView: 'terminal',
     activeWorktreeId: null,
@@ -459,6 +484,7 @@ function setEmptyUngroupedProjectState(filterRepoIds: string[] = []): void {
     collapsedGroups: new Set<string>(),
     deleteStateByWorktreeId: {},
     filterRepoIds,
+    ...makeFolderWorkspacePathStatusState(),
     groupBy: 'repo',
     hideDefaultBranchWorkspace: false,
     issueCache: {},
@@ -673,7 +699,7 @@ describe('WorktreeList lineage child card renderer', () => {
     const markup = await renderWorktreeListMarkup()
 
     expect(getOptionOpeningTag(markup, 'child')).toContain('padding-left:14px')
-    expect(getCardOpeningTag(markup, 'child')).toContain('data-content-indent="20"')
+    expect(getCardOpeningTag(markup, 'child')).toContain('data-content-indent="6"')
     expect(getCardOpeningTag(markup, 'child')).toContain('data-flush-surface="true"')
   })
 
@@ -682,7 +708,7 @@ describe('WorktreeList lineage child card renderer', () => {
     const markup = await renderWorktreeListMarkup()
 
     expect(getOptionOpeningTag(markup, 'child')).toContain('padding-left:14px')
-    expect(getCardOpeningTag(markup, 'child')).toContain('data-content-indent="38"')
+    expect(getCardOpeningTag(markup, 'child')).toContain('data-content-indent="24"')
     expect(getCardOpeningTag(markup, 'child')).toContain('data-flush-surface="true"')
   })
 
@@ -692,8 +718,8 @@ describe('WorktreeList lineage child card renderer', () => {
 
     const parentRow = getOptionOpeningTag(markup, 'parent')
 
-    expect(parentRow).not.toContain('padding-left')
-    expect(getCardOpeningTag(markup, 'parent')).toContain('data-content-indent="38"')
+    expect(parentRow).toContain('padding-left:14px')
+    expect(getCardOpeningTag(markup, 'parent')).toContain('data-content-indent="24"')
     expect(getCardOpeningTag(markup, 'parent')).toContain('data-flush-surface="true"')
   })
 })

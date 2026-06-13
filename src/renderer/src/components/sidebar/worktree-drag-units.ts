@@ -30,7 +30,6 @@ export function getWorktreeDragUnitGroups(
       continue
     }
     if (
-      row.type === 'host-header' ||
       row.type === 'imported-worktrees-card' ||
       row.type === 'pending-creation' ||
       row.type === 'folder-workspace'

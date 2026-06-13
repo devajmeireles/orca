@@ -252,15 +252,6 @@ function migrateStatusBarItems(items: readonly string[] | undefined): StatusBarI
 const DEFAULT_ON_PORTS_STATUS_BAR_ITEM: StatusBarItem = 'ports'
 const DEFAULT_ON_KIMI_STATUS_BAR_ITEM: StatusBarItem = 'kimi'
 
-function normalizeHydratedVisibleWorkspaceHostIds(ui: PersistedUIState): VisibleWorkspaceHostIds {
-  const visibleHostIds = normalizeVisibleExecutionHostIds(ui.visibleWorkspaceHostIds)
-  if (visibleHostIds) {
-    return visibleHostIds
-  }
-  const legacyScope = normalizeExecutionHostScope(ui.workspaceHostScope)
-  return legacyScope === 'all' ? null : [legacyScope]
-}
-
 const MIN_SIDEBAR_WIDTH = 220
 const MAX_LEFT_SIDEBAR_WIDTH = 500
 // Why: the right sidebar drag-resize is window-relative (see right-sidebar
@@ -740,6 +731,8 @@ export type UISlice = {
   markSetupGuideBrowserMilestoneMigrated: (legacyComplete: boolean) => void
   browserImportHintHidden: boolean
   setBrowserImportHintHidden: (hidden: boolean) => void
+  projectOrderManualDefaultNoticeDismissed: boolean
+  dismissProjectOrderManualDefaultNotice: () => void
   usageEmptyStateDismissed: boolean
   dismissUsageEmptyState: () => void
   groupBy: 'none' | 'workspace-status' | 'repo' | 'pr-status'
@@ -1725,6 +1718,15 @@ export const createUISlice: StateCreator<AppState, [], [], UISlice> = (set, get)
       window.api.ui.set({ browserImportHintHidden: hidden }).catch(console.error)
       return { browserImportHintHidden: hidden }
     }),
+  projectOrderManualDefaultNoticeDismissed: true,
+  dismissProjectOrderManualDefaultNotice: () =>
+    set((s) => {
+      if (s.projectOrderManualDefaultNoticeDismissed) {
+        return s
+      }
+      window.api.ui.set({ projectOrderManualDefaultNoticeDismissed: true }).catch(console.error)
+      return { projectOrderManualDefaultNoticeDismissed: true }
+    }),
   usageEmptyStateDismissed: false,
   dismissUsageEmptyState: () =>
     set((s) => {
@@ -2156,6 +2158,8 @@ export const createUISlice: StateCreator<AppState, [], [], UISlice> = (set, get)
         setupGuideBrowserMilestoneLegacyComplete:
           ui.setupGuideBrowserMilestoneLegacyComplete === true,
         browserImportHintHidden: ui.browserImportHintHidden === true,
+        projectOrderManualDefaultNoticeDismissed:
+          ui.projectOrderManualDefaultNoticeDismissed === true,
         // Why: default false when undefined so existing users still see the CTA;
         // only an explicit dismissal persists true.
         usageEmptyStateDismissed: ui.usageEmptyStateDismissed === true,

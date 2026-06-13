@@ -115,6 +115,11 @@ import { normalizeTerminalShortcutPolicy } from '../shared/keybindings'
 import { normalizeAppIconId } from '../shared/app-icon'
 import { normalizeTerminalCustomThemes } from '../shared/terminal-custom-themes'
 import {
+  normalizeLeftSidebarAppearanceMode,
+  normalizeLeftSidebarTintColor,
+  normalizeLeftSidebarTintOpacity
+} from '../shared/left-sidebar-appearance'
+import {
   compareFeatureInteractionUsageBuckets,
   getFeatureInteractionCategory,
   getFeatureInteractionUsageBucket,
@@ -478,6 +483,11 @@ function normalizeProjectOrderBy(projectOrderBy: unknown): PersistedState['ui'][
   }
   return getDefaultUIState().projectOrderBy
 }
+
+import {
+  isExistingPersistedProfile,
+  resolveProjectOrderManualDefaultNoticeDismissed
+} from '../shared/project-order-manual-default-notice'
 
 function normalizeRightSidebarTab(tab: unknown): PersistedState['ui']['rightSidebarTab'] {
   if (
@@ -2361,6 +2371,14 @@ export class Store {
           parsed.settings?.disabledTuiAgents
         )
         const migratedAgentYoloDefaults = migrateAgentYoloDefaults(parsed.settings)
+        const openLinksInAppWasPersisted = Object.prototype.hasOwnProperty.call(
+          parsed.settings ?? {},
+          'openLinksInApp'
+        )
+        const migratedOpenLinksInAppPreferencePrompted =
+          typeof parsed.settings?.openLinksInAppPreferencePrompted === 'boolean'
+            ? parsed.settings.openLinksInAppPreferencePrompted
+            : openLinksInAppWasPersisted
         if (
           parsed.settings?.agentYoloDefaultsMigrated !== true ||
           hasUnsupportedTuiAgentArgs('opencode', parsed.settings?.agentDefaultArgs?.opencode) ||
@@ -2375,6 +2393,12 @@ export class Store {
           migratedDisabledTuiAgents.push('claude-agent-teams')
         }
         if (!autoRenameBranchFromWorkDefaultedOn) {
+          this.loadNeedsSave = true
+        }
+        if (
+          parsed.settings?.openLinksInAppPreferencePrompted !==
+          migratedOpenLinksInAppPreferencePrompted
+        ) {
           this.loadNeedsSave = true
         }
         const normalizedOnboarding = normalizeLoadedOnboardingState(
@@ -2440,6 +2464,15 @@ export class Store {
             terminalCustomThemes: normalizeTerminalCustomThemes(
               parsed.settings?.terminalCustomThemes
             ),
+            leftSidebarAppearanceMode: normalizeLeftSidebarAppearanceMode(
+              parsed.settings?.leftSidebarAppearanceMode
+            ),
+            leftSidebarTintColor: normalizeLeftSidebarTintColor(
+              parsed.settings?.leftSidebarTintColor
+            ),
+            leftSidebarTintOpacity: normalizeLeftSidebarTintOpacity(
+              parsed.settings?.leftSidebarTintOpacity
+            ),
             appIcon: normalizeAppIconId(parsed.settings?.appIcon),
             uiLanguage: normalizeUiLanguage(parsed.settings?.uiLanguage),
             defaultTaskSource: taskProviderSettings.defaultTaskSource,
@@ -2454,6 +2487,7 @@ export class Store {
             openInApplications: normalizeOpenInApplications(parsed.settings?.openInApplications, {
               seedDefaults: true
             }),
+            openLinksInAppPreferencePrompted: migratedOpenLinksInAppPreferencePrompted,
             notifications: normalizeNotificationSettings(parsed.settings?.notifications),
             sourceControlAi: migratedSourceControlAi,
             // Why: new builds read sourceControlAi, but rollback builds still
@@ -2594,9 +2628,25 @@ export class Store {
               parsed.ui?.setupGuideSidebarDismissed,
               normalizedOnboarding
             )
+            const projectOrderManualDefaultNoticeDismissed =
+              resolveProjectOrderManualDefaultNoticeDismissed({
+                rawDismissed: parsed.ui?.projectOrderManualDefaultNoticeDismissed,
+                rawProjectOrderBy: parsed.ui?.projectOrderBy,
+                isExistingProfile: isExistingPersistedProfile({
+                  repoCount: parsed.repos?.length ?? 0,
+                  onboardingClosedAt: normalizedOnboarding.closedAt,
+                  ui: parsed.ui
+                })
+              })
             if (
               parsed.ui?.setupGuideSidebarDismissed !== setupGuideSidebarDismissed &&
               (setupGuideSidebarDismissed || parsed.ui?.setupGuideSidebarDismissed !== undefined)
+            ) {
+              this.loadNeedsSave = true
+            }
+            if (
+              parsed.ui?.projectOrderManualDefaultNoticeDismissed !==
+              projectOrderManualDefaultNoticeDismissed
             ) {
               this.loadNeedsSave = true
             }
@@ -2608,6 +2658,7 @@ export class Store {
               rightSidebarOpen,
               rightSidebarTab: normalizeRightSidebarTab(parsed.ui?.rightSidebarTab),
               setupGuideSidebarDismissed,
+              projectOrderManualDefaultNoticeDismissed,
               setupGuideBrowserMilestoneMigrated:
                 typeof parsed.ui?.setupGuideBrowserMilestoneMigrated === 'boolean'
                   ? parsed.ui.setupGuideBrowserMilestoneMigrated
@@ -2716,11 +2767,15 @@ export class Store {
       this.loadNeedsSave = true
     }
 
-    const repos = clearMissingProjectGroupMemberships(result.repos, result.projectGroups ?? [])
-    const projectHostSetupCompatibility = mergeProjectHostSetupCompatibilityState(result, repos)
-    if (!projectHostSetupCompatibilityStateEqual(result, projectHostSetupCompatibility)) {
+    const folderScopeConnectionMigration = backfillFolderScopeConnectionIds({
+      ...result,
+      repos: clearMissingProjectGroupMemberships(result.repos, result.projectGroups ?? []),
+      workspaceSession: migratedScrollback.session
+    })
+    if (folderScopeConnectionMigration.changed) {
       this.loadNeedsSave = true
     }
+    result = folderScopeConnectionMigration.state
 
     const folderScopeConnectionMigration = backfillFolderScopeConnectionIds({
       ...result,
@@ -3953,6 +4008,21 @@ export class Store {
     if ('terminalCustomThemes' in updates) {
       sanitizedUpdates.terminalCustomThemes = normalizeTerminalCustomThemes(
         updates.terminalCustomThemes
+      )
+    }
+    if ('leftSidebarAppearanceMode' in updates) {
+      sanitizedUpdates.leftSidebarAppearanceMode = normalizeLeftSidebarAppearanceMode(
+        updates.leftSidebarAppearanceMode
+      )
+    }
+    if ('leftSidebarTintColor' in updates) {
+      sanitizedUpdates.leftSidebarTintColor = normalizeLeftSidebarTintColor(
+        updates.leftSidebarTintColor
+      )
+    }
+    if ('leftSidebarTintOpacity' in updates) {
+      sanitizedUpdates.leftSidebarTintOpacity = normalizeLeftSidebarTintOpacity(
+        updates.leftSidebarTintOpacity
       )
     }
     if ('visibleTaskProviders' in updates || 'defaultTaskSource' in updates) {

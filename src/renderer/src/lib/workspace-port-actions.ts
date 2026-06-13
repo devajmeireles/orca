@@ -43,7 +43,7 @@ function delay(ms: number): Promise<void> {
 export function shouldOpenWorkspacePortInOrcaBrowser(
   settings: { openLinksInApp?: boolean } | null | undefined
 ): boolean {
-  return settings?.openLinksInApp !== false
+  return settings?.openLinksInApp === true
 }
 
 export function workspacePortOwnerWorktreeId(port: WorkspacePort): string | null {

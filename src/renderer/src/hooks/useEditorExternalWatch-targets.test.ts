@@ -132,31 +132,6 @@ describe('getEditorExternalWatchTargets', () => {
     ])
   })
 
-  it('watches the active worktree through its runtime owner when focus differs', () => {
-    const repo = makeRepo('repo-runtime-visible', null, 'runtime:owner-runtime')
-    const worktree = makeWorktree(repo.id, 'wt-runtime-visible')
-
-    expect(
-      getEditorExternalWatchTargets(
-        makeState({
-          repo,
-          worktree,
-          activeWorktreeId: worktree.id,
-          runtimeEnvironmentId: 'focused-runtime',
-          rightSidebarOpen: true,
-          rightSidebarTab: 'explorer'
-        })
-      ).targets
-    ).toEqual([
-      {
-        worktreeId: 'wt-runtime-visible',
-        worktreePath: '/repo-runtime-visible/worktree',
-        connectionId: undefined,
-        runtimeEnvironmentId: 'owner-runtime'
-      }
-    ])
-  })
-
   it('does not watch the active worktree while Explorer search is visible', () => {
     const repo = makeRepo('repo-active-search')
     const worktree = makeWorktree(repo.id, 'wt-active-search')
@@ -173,31 +148,6 @@ describe('getEditorExternalWatchTargets', () => {
         })
       ).targets
     ).toEqual([])
-  })
-
-  it('keeps an explicitly local active worktree local when a runtime is focused', () => {
-    const repo = makeRepo('repo-local-visible', null, 'local')
-    const worktree = makeWorktree(repo.id, 'wt-local-visible')
-
-    expect(
-      getEditorExternalWatchTargets(
-        makeState({
-          repo,
-          worktree,
-          activeWorktreeId: worktree.id,
-          runtimeEnvironmentId: 'focused-runtime',
-          rightSidebarOpen: true,
-          rightSidebarTab: 'explorer'
-        })
-      ).targets
-    ).toEqual([
-      {
-        worktreeId: 'wt-local-visible',
-        worktreePath: '/repo-local-visible/worktree',
-        connectionId: undefined,
-        runtimeEnvironmentId: null
-      }
-    ])
   })
 
   it('does not watch the active worktree when a different right sidebar tab is visible', () => {

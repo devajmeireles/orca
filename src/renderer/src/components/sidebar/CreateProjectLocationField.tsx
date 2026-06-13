@@ -110,7 +110,7 @@ export function CreateProjectLocationField({
                 size="icon"
                 className="h-11 w-11 shrink-0"
                 onClick={onBrowseServer}
-                disabled={isCreating || (!runtimeEnvironmentId && !sshTargetId)}
+                disabled={isCreating || !runtimeEnvironmentId}
                 aria-label={translate(
                   'auto.components.sidebar.CreateProjectLocationField.f520f83a97',
                   'Browse server filesystem'
