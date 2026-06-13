@@ -420,7 +420,8 @@ describe('LinearAgentSkillSetupPrompt', () => {
       'Orca CLI and Linear skill are missing',
       expect.objectContaining({
         id: 'linear-agent-skill-setup-orca.linearTicketsSkill.setupDismissed.host',
-        description: 'Needed for linked Linear tasks.',
+        description:
+          'Install the Orca CLI and the Linear skill to enable your agents to read and edit Linear tasks.',
         action: {
           label: 'Set up',
           onClick: expect.any(Function)
@@ -446,7 +447,8 @@ describe('LinearAgentSkillSetupPrompt', () => {
       'Orca CLI and Linear skill are missing',
       expect.objectContaining({
         id: 'linear-agent-skill-setup-orca.linearTicketsSkill.setupDismissed.host',
-        description: 'Needed for linked Linear tasks.'
+        description:
+          'Install the Orca CLI and the Linear skill to enable your agents to read and edit Linear tasks.'
       })
     )
   })
@@ -461,7 +463,7 @@ describe('LinearAgentSkillSetupPrompt', () => {
     expect(toast.warning).toHaveBeenCalledWith(
       'Orca CLI is missing',
       expect.objectContaining({
-        description: 'Needed for linked Linear tasks.'
+        description: 'Install the Orca CLI to enable your agents to read and edit Linear tasks.'
       })
     )
   })
@@ -475,7 +477,8 @@ describe('LinearAgentSkillSetupPrompt', () => {
     expect(toast.warning).toHaveBeenCalledWith(
       'Orca CLI and Linear skill are missing',
       expect.objectContaining({
-        description: 'Needed for linked Linear tasks. Remote environments may need setup too.'
+        description:
+          'Install the Orca CLI and the Linear skill to enable your agents to read and edit Linear tasks. Remote agent environments may need their own setup.'
       })
     )
   })
@@ -507,7 +510,8 @@ describe('LinearAgentSkillSetupPrompt', () => {
     expect(toast.warning).toHaveBeenCalledWith(
       'Orca CLI and Linear skill are missing',
       expect.objectContaining({
-        description: 'Needed for linked Linear tasks. This setup runs in the selected WSL runtime.'
+        description:
+          'Install the Orca CLI and the Linear skill to enable your agents to read and edit Linear tasks. This setup runs in the selected WSL agent runtime.'
       })
     )
   })
@@ -641,7 +645,8 @@ describe('LinearAgentSkillSetupPrompt', () => {
       'Orca CLI and Linear skill are missing',
       expect.objectContaining({
         id: 'linear-agent-skill-setup-orca.linearTicketsSkill.setupDismissed.host',
-        description: 'Needed for linked Linear tasks.'
+        description:
+          'Install the Orca CLI and the Linear skill to enable your agents to read and edit Linear tasks.'
       })
     )
   })

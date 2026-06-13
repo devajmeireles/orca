@@ -46,31 +46,48 @@ export function getLinearAgentSkillSetupToastTitle(
 }
 
 export function getLinearAgentSkillSetupToastDescription(
+  cliAvailable: boolean,
+  skillInstalled: boolean,
   remote: boolean,
   agentRuntime: LocalAgentRuntime
 ): string {
-  const baseDescription = getLinearAgentSkillSetupToastBaseDescription()
+  const baseDescription = getLinearAgentSkillSetupToastBaseDescription(cliAvailable, skillInstalled)
   if (remote) {
     return translate(
       'auto.components.sidebar.LinearAgentSkillSetupPrompt.toastRemoteDescription',
-      '{{value0}} Remote environments may need setup too.',
+      '{{value0}} Remote agent environments may need their own setup.',
       { value0: baseDescription }
     )
   }
   if (agentRuntime.runtime === 'wsl') {
     return translate(
       'auto.components.sidebar.LinearAgentSkillSetupPrompt.toastWslDescription',
-      '{{value0}} This setup runs in the selected WSL runtime.',
+      '{{value0}} This setup runs in the selected WSL agent runtime.',
       { value0: baseDescription }
     )
   }
   return baseDescription
 }
 
-function getLinearAgentSkillSetupToastBaseDescription(): string {
+function getLinearAgentSkillSetupToastBaseDescription(
+  cliAvailable: boolean,
+  skillInstalled: boolean
+): string {
+  if (!cliAvailable && !skillInstalled) {
+    return translate(
+      'auto.components.sidebar.LinearAgentSkillSetupPrompt.toastInstallCliAndSkillDescription',
+      'Install the Orca CLI and the Linear skill to enable your agents to read and edit Linear tasks.'
+    )
+  }
+  if (!cliAvailable) {
+    return translate(
+      'auto.components.sidebar.LinearAgentSkillSetupPrompt.toastInstallCliDescription',
+      'Install the Orca CLI to enable your agents to read and edit Linear tasks.'
+    )
+  }
   return translate(
-    'auto.components.sidebar.LinearAgentSkillSetupPrompt.toastLinkedTaskDescription',
-    'Needed for linked Linear tasks.'
+    'auto.components.sidebar.LinearAgentSkillSetupPrompt.toastInstallSkillDescription',
+    'Install the Linear skill to enable your agents to read and edit Linear tasks through the Orca CLI.'
   )
 }
 
