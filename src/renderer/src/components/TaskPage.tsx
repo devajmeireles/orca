@@ -2882,6 +2882,15 @@ export default function TaskPage(): React.JSX.Element {
       ),
     [repos, settings, sshConnectionStates, sshTargetLabels, runtimeStatusByEnvironmentId]
   )
+  const getTaskPickerRepoHostLabel = useCallback(
+    (repo: Repo): string | null => {
+      const provider = taskSource === 'gitlab' ? 'gitlab' : 'github'
+      const context = getTaskPageRepoSourceContext(repo, provider)
+      const hostId = context?.hostId ?? repo.executionHostId ?? 'local'
+      return hostRegistryById.get(hostId)?.label ?? null
+    },
+    [hostRegistryById, taskSource]
+  )
   const taskSourceHostAvailability = useMemo<TaskSourceHostAvailability[]>(
     () =>
       taskSource === 'github' || taskSource === 'gitlab'
@@ -7508,6 +7517,7 @@ export default function TaskPage(): React.JSX.Element {
                           <RepoMultiCombobox
                             repos={eligibleRepos}
                             selected={repoSelection}
+                            getRepoHostLabel={getTaskPickerRepoHostLabel}
                             onChange={(next) => {
                               setRepoSelection(next)
                               void updateSettings({ defaultRepoSelection: [...next] }).catch(() => {
@@ -8215,6 +8225,7 @@ export default function TaskPage(): React.JSX.Element {
                         <RepoMultiCombobox
                           repos={eligibleRepos}
                           selected={repoSelection}
+                          getRepoHostLabel={getTaskPickerRepoHostLabel}
                           onChange={(next) => {
                             setRepoSelection(next)
                             void updateSettings({ defaultRepoSelection: [...next] }).catch(() => {
