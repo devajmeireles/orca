@@ -3956,6 +3956,12 @@
           "terminalTitle": "Linear agent 스킬 설치",
           "terminalAria": "Linear agent 스킬 설치 terminal",
           "install": "CLI 및 스킬 설치",
+          "successTitle": "Linear 티켓 접근이 준비되었습니다",
+          "successDescription": "이제 agents가 이 워크스페이스에서 연결된 Linear 티켓을 읽고 업데이트할 수 있습니다.",
+          "successDescriptionWsl": "이제 WSL agents가 이 워크스페이스에서 연결된 Linear 티켓을 사용할 수 있습니다.",
+          "successDescriptionRemote": "이제 호스트 agents가 연결된 Linear 티켓을 사용할 수 있습니다. 원격 agent 환경에는 자체 설정이 여전히 필요할 수 있습니다.",
+          "successStatus": "Linear 티켓 접근 준비됨",
+          "done": "완료",
           "wslCopy": "연결된 Linear 작업에서 WSL agent 인계를 위해 설치합니다.",
           "wslLabel": "WSL 기본값"
         },
