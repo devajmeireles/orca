@@ -89,6 +89,7 @@ import { AutomationRunPageFrame } from './AutomationRunPageFrame'
 import { AutomationRunHistory } from './AutomationRunHistory'
 import { getAutomationTemplates, type AutomationTemplate } from './automation-templates'
 import { getAutomationTargetAvailability } from './automation-target-availability'
+import { buildAutomationRunContextForRepo } from './automation-run-context'
 import {
   getExternalAutomationActionDisabledMessage,
   getExternalAutomationSourceAvailability,
@@ -262,6 +263,7 @@ async function waitForAutomationRerunPendingVisibility(pendingStartedAt: number)
 
 export default function AutomationsPage(): React.JSX.Element {
   const repos = useAppStore((s) => s.repos)
+  const projectHostSetups = useAppStore((s) => s.projectHostSetups)
   const worktreesByRepo = useAppStore((s) => s.worktreesByRepo)
   const unifiedTabsByWorktree = useAppStore((s) => s.unifiedTabsByWorktree)
   const activeWorktreeId = useAppStore((s) => s.activeWorktreeId)
@@ -1062,6 +1064,20 @@ export default function AutomationsPage(): React.JSX.Element {
         ? Math.max(0, rawMissedRunGraceMinutes)
         : 720
       const precheck = buildDraftPrecheck(draft)
+      const runContext = buildAutomationRunContextForRepo({
+        repoId: draft.projectId,
+        repos,
+        projectHostSetups
+      })
+      if (!runContext) {
+        toast.error(
+          translate(
+            'auto.components.automations.AutomationsPage.32534e7c9c',
+            'Choose an available workspace before saving.'
+          )
+        )
+        return
+      }
       let currentAutomation = editingAutomationId
         ? (automations.find((automation) => automation.id === editingAutomationId) ?? null)
         : null
@@ -1080,6 +1096,7 @@ export default function AutomationsPage(): React.JSX.Element {
         prompt: draft.prompt,
         precheck,
         agentId: draft.agentId,
+        runContext,
         projectId: draft.projectId,
         workspaceMode: draft.workspaceMode,
         workspaceId: draft.workspaceId,
@@ -1103,6 +1120,7 @@ export default function AutomationsPage(): React.JSX.Element {
             prompt: draft.prompt,
             precheck,
             agentId: draft.agentId,
+            runContext,
             projectId: draft.projectId,
             workspaceMode: draft.workspaceMode,
             workspaceId: draft.workspaceId,
