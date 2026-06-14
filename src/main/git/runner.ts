@@ -210,6 +210,14 @@ function resolveCommand(
 
 // ─── Git-specific runners ───────────────────────────────────────────
 
+// Why: Node's execFile only honors maxBuffer when it is a number — passing
+// `undefined` (which happens whenever a caller omits the option) disables the
+// cap entirely, so a command that prints more than V8's ~512MB max string
+// length crashes the main process uncatchably inside execFile's exit handler
+// (Array.join over the buffered chunks). Apply this floor so no git call can
+// ever buffer without a bound. Matches the relay's MAX_GIT_BUFFER.
+export const DEFAULT_GIT_MAX_BUFFER = 10 * 1024 * 1024
+
 type GitExecOptions = {
   cwd: string
   encoding?: BufferEncoding | 'buffer'
@@ -347,7 +355,7 @@ function execFileCapture(
         {
           cwd: options.cwd,
           encoding: options.encoding,
-          maxBuffer: options.maxBuffer,
+          maxBuffer: options.maxBuffer ?? DEFAULT_GIT_MAX_BUFFER,
           env: options.env,
           signal: options.signal
         },
@@ -596,6 +604,115 @@ export async function gitExecFileAsyncBuffer(
     maxBuffer: options.maxBuffer
   })) as { stdout: Buffer }
   return { stdout }
+}
+
+/** Result of a streamed git command. `stoppedEarly` is true when the caller's
+ * onStdout hook asked to stop and the child was killed before exiting. */
+export type GitStreamResult = { stoppedEarly: boolean }
+
+type GitStreamOptions = {
+  cwd: string
+  env?: NodeJS.ProcessEnv
+  /** Byte backstop; defaults to DEFAULT_GIT_MAX_BUFFER. */
+  maxBuffer?: number
+  /**
+   * Called for each decoded stdout chunk as it arrives. Return true to stop:
+   * the child is killed and the promise resolves with stoppedEarly=true. This
+   * lets a streaming parser bail out (e.g. once an entry limit is reached)
+   * without ever buffering the full output.
+   */
+  onStdout: (chunk: string) => boolean | void
+}
+
+/**
+ * Stream a git command's stdout incrementally instead of buffering it whole.
+ *
+ * Why: status on a repo with an enormous un-ignored folder can emit more output
+ * than fits in a single string, crashing the process when buffered. Streaming
+ * lets the parser count entries as they arrive and stop git the moment a limit
+ * is crossed, so memory stays bounded. Built on gitSpawn so WSL routing is
+ * preserved. stderr is bounded; a non-zero exit rejects (unless we stopped it).
+ */
+export async function gitStreamStdout(
+  args: string[],
+  options: GitStreamOptions
+): Promise<GitStreamResult> {
+  const maxBuffer = options.maxBuffer ?? DEFAULT_GIT_MAX_BUFFER
+  return withGitSpan({ args, cwd: options.cwd }, async () => {
+    return new Promise<GitStreamResult>((resolve, reject) => {
+      const child = gitSpawn(args, {
+        cwd: options.cwd,
+        env: nonInteractiveGitEnv(options.env),
+        stdio: ['ignore', 'pipe', 'pipe'],
+        windowsHide: true
+      })
+
+      let settled = false
+      let stoppedEarly = false
+      let stdoutBytes = 0
+      let stderr = ''
+      let stderrBytes = 0
+
+      const cleanup = (): void => {
+        child.stdout?.off('data', onStdoutData)
+        child.stderr?.off('data', onStderrData)
+        child.off('error', onError)
+        child.off('close', onClose)
+      }
+      const finish = (error: Error | null): void => {
+        if (settled) {
+          return
+        }
+        settled = true
+        cleanup()
+        if (error) {
+          reject(Object.assign(error, { stderr }))
+          return
+        }
+        resolve({ stoppedEarly })
+      }
+
+      function onStdoutData(chunk: Buffer): void {
+        stdoutBytes += chunk.byteLength
+        if (stdoutBytes > maxBuffer) {
+          killSpawnedCommandTree(child)
+          finish(new Error('git stdout exceeded maxBuffer.'))
+          return
+        }
+        if (options.onStdout(chunk.toString('utf-8')) === true) {
+          // Why: parser hit its limit. Kill git and resolve cleanly — the
+          // partial output we already parsed is the intended result.
+          stoppedEarly = true
+          killSpawnedCommandTree(child)
+          finish(null)
+        }
+      }
+      function onStderrData(chunk: Buffer): void {
+        stderrBytes += chunk.byteLength
+        if (stderrBytes > maxBuffer) {
+          killSpawnedCommandTree(child)
+          finish(new Error('git stderr exceeded maxBuffer.'))
+          return
+        }
+        stderr += chunk.toString('utf-8')
+      }
+      function onError(error: Error): void {
+        finish(error)
+      }
+      function onClose(code: number | null): void {
+        if (stoppedEarly || code === 0) {
+          finish(null)
+          return
+        }
+        finish(new Error(`git exited with ${code}: ${stderr}`))
+      }
+
+      child.stdout?.on('data', onStdoutData)
+      child.stderr?.on('data', onStderrData)
+      child.on('error', onError)
+      child.on('close', onClose)
+    })
+  })
 }
 
 /**
