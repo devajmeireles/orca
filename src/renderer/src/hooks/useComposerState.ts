@@ -25,7 +25,7 @@ import {
 import { tuiAgentToAgentKind } from '@/lib/telemetry'
 import { isGitRepoKind } from '../../../shared/repo-kind'
 import { callRuntimeRpc, getActiveRuntimeTarget } from '@/runtime/runtime-rpc-client'
-import { getRuntimeRepoBaseRefDefault } from '@/runtime/runtime-repo-client'
+import { resolveWorktreeCreateBaseDefault } from '@/runtime/worktree-create-base'
 import {
   buildTaskSourceContextFromRepo,
   type TaskSourceContext
@@ -2616,10 +2616,14 @@ export function useComposerState(options: UseComposerStateOptions): UseComposerS
           workspaceName,
           preserveWorkspaceNameEdits: branchNameOverridePreservesNameEdits
         })
+        // Why: honor the per-repo pinned base (repo.worktreeBaseRef) before the
+        // git primary. Backend precedence is args.baseBranch || worktreeBaseRef ||
+        // gitDefault; pre-resolving the git default here and sending it as
+        // args.baseBranch would override the pin and create worktrees from the
+        // wrong branch.
         const submitBaseBranch =
           selectedRepoIsGit && !baseBranch
-            ? ((await getRuntimeRepoBaseRefDefault(selectedRepoSettings, repoId).catch(() => null))
-                ?.defaultBaseRef ?? undefined)
+            ? await resolveWorktreeCreateBaseDefault(selectedRepo, selectedRepoSettings, repoId)
             : baseBranch
         const createDisplayName =
           smartGitHubResolution?.displayName ??
