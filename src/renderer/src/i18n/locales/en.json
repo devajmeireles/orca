@@ -8658,7 +8658,10 @@
             "hideEmptySessions": "Hide empty sessions",
             "workspaceScope": "Workspace",
             "worktreeScope": "Worktree",
-            "globalScope": "Global"
+            "globalScope": "Global",
+            "projectScope": "Project",
+            "currentProjectLower": "current project",
+            "project": "Project"
           },
           "AiVaultSessionDetails": {
             "updated": "Updated",

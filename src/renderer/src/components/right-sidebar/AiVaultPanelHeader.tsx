@@ -16,6 +16,7 @@ type AiVaultPanelHeaderProps = {
   sessionCount: number
   hasScanResult: boolean
   activeWorktreePath: string | null
+  activeProjectKey: string | null
   scope: AiVaultScope
   agents: readonly AiVaultAgent[]
   sort: AiVaultSort
@@ -39,6 +40,7 @@ export function AiVaultPanelHeader({
   sessionCount,
   hasScanResult,
   activeWorktreePath,
+  activeProjectKey,
   scope,
   agents,
   sort,
@@ -81,6 +83,7 @@ export function AiVaultPanelHeader({
           <VaultScopeSwitch
             scope={scope}
             workspaceAvailable={Boolean(activeWorktreePath)}
+            projectAvailable={Boolean(activeProjectKey)}
             onScopeChange={onScopeChange}
           />
           <VaultViewMenu
