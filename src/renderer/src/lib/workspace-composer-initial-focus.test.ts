@@ -25,6 +25,21 @@ describe('getWorkspaceComposerInitialFocusTarget', () => {
     )
   })
 
+  it('skips a disabled name input and falls through to the project combobox', () => {
+    // Why: an SSH repo that requires connection renders the name input
+    // disabled. focus() is a no-op on a disabled element, so the resolver
+    // must skip it and return a focusable fallback instead of dropping focus.
+    const root = document.createElement('div')
+    root.innerHTML = `
+      <button role="combobox" data-project-combobox-root="true"></button>
+      <input data-workspace-name-input="true" disabled />
+    `
+
+    expect(getWorkspaceComposerInitialFocusTarget(root)).toBe(
+      root.querySelector('[data-project-combobox-root="true"]')
+    )
+  })
+
   it('focuses the source pill when the name input is replaced by a selection', () => {
     const root = document.createElement('div')
     const pill = document.createElement('div')

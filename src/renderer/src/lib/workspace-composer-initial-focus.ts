@@ -1,4 +1,8 @@
-const WORKSPACE_NAME_INPUT_SELECTOR = '[data-workspace-name-input="true"]'
+// Why: exclude :disabled — HTMLElement.focus() is a no-op on a disabled
+// input (e.g. an SSH repo that requires connection), and the single focus()
+// call in onOpenAutoFocus has no retry, so a disabled match would drop focus
+// entirely instead of falling through to the source pill / project combobox.
+const WORKSPACE_NAME_INPUT_SELECTOR = '[data-workspace-name-input="true"]:not(:disabled)'
 const WORKSPACE_SOURCE_PILL_SELECTOR = '[data-workspace-source-pill="true"]'
 const PROJECT_COMBOBOX_TRIGGER_SELECTOR = '[data-project-combobox-root="true"][role="combobox"]'
 const LEGACY_REPO_COMBOBOX_TRIGGER_SELECTOR = '[data-repo-combobox-root="true"][role="combobox"]'
