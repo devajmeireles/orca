@@ -716,7 +716,7 @@ function CheckRunDetails({
             </div>
           )}
 
-          <div className="flex justify-end pt-1">
+          <div className="flex justify-start pt-1">
             {!state?.loading && (
               <Dialog>
                 <DialogTrigger asChild>
