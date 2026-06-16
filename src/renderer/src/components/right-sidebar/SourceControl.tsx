@@ -5449,6 +5449,10 @@ export function CommitArea({
   // tooltips.
   const showChevronSpinner =
     (isCommitting || isCreatingPr || isRemoteOperationActive) && !showSpinner
+  const secondaryCommitAction =
+    primaryAction.kind === 'create_pr_intent'
+      ? dropdownItems.find((entry) => entry.kind === 'commit')
+      : undefined
   const commitFailureSummary = useMemo(
     () => (commitError ? summarizeCommitFailure(commitError) : null),
     [commitError]
@@ -5628,7 +5632,32 @@ export function CommitArea({
           chevron exposes the full action surface (fetch, pull, sync,
           publish, compound commits) without forcing morphing labels to
           carry every possible intent. */}
-      <div className={cn(showComposer ? 'mt-1 flex items-stretch' : 'flex items-stretch')}>
+      <div
+        className={cn(showComposer ? 'mt-1 flex items-stretch gap-1' : 'flex items-stretch gap-1')}
+      >
+        {secondaryCommitAction && secondaryCommitAction.kind !== 'separator' ? (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <span className="inline-flex shrink-0">
+                <Button
+                  type="button"
+                  size="xs"
+                  variant="outline"
+                  disabled={secondaryCommitAction.disabled}
+                  onClick={() => onDropdownAction(secondaryCommitAction.kind)}
+                  className="px-2.5 text-[11px]"
+                  title={secondaryCommitAction.title}
+                >
+                  <Check className="size-3.5" aria-hidden="true" />
+                  {secondaryCommitAction.label}
+                </Button>
+              </span>
+            </TooltipTrigger>
+            <TooltipContent side="top" sideOffset={6} className="max-w-72">
+              {secondaryCommitAction.title}
+            </TooltipContent>
+          </Tooltip>
+        ) : null}
         {/* Why: match the hosted-review action buttons in Checks
             (size="xs", px-3 text-[11px]) so the sidebar has a consistent
             action-button shape across Source Control and Checks. The primary
