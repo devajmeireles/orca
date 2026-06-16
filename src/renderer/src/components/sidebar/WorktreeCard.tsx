@@ -46,6 +46,7 @@ import {
 import { WorktreeCardPortsDetails, WorktreeCardPortsTrigger } from './WorktreeCardPorts'
 import { writeWorkspaceDragData } from './workspace-status'
 import { getWorktreeCardPrDisplay } from './worktree-card-pr-display'
+import { getWorktreeCardTitleDisplay } from './worktree-card-title-display'
 import { useWorktreeCardDetailsHoverControl } from './worktree-card-details-hover-state'
 import { isEventTargetInsideCurrentTarget } from './worktree-card-dom-events'
 import { getWorkspacePortsByWorktreeId } from '@/lib/workspace-port-groups'
@@ -423,10 +424,18 @@ const WorktreeCard = React.memo(function WorktreeCard({
           url: linearIssueUrlFallback
         }
     : null
+  const cardTitleDisplay = getWorktreeCardTitleDisplay({
+    storedDisplayName: worktree.displayName,
+    branchName: branch,
+    path: worktree.path,
+    repositoryName: repo?.displayName,
+    linearIssueTitle: linearIssueDisplay?.title,
+    issueTitle: issueDisplay?.title,
+    reviewTitle: prDisplay?.title
+  })
   const isDeleting = deleteState?.isDeleting ?? false
   const deleteModifierPressed = useWorkspaceDeleteModifierPressed()
 
-  const showDetailedCardProperties = !compactCards
   const showIssue = cardProps.includes('issue')
   const showLinearIssue = cardProps.includes('linear-issue')
   const showPR = cardProps.includes('pr')
@@ -904,11 +913,8 @@ const WorktreeCard = React.memo(function WorktreeCard({
     : hasDetailedMetaRowContent
   const showHeaderActions = showTitleRowUnread || showTitleRowPrimary || showDeleteQuickAction
   const showBranchIdentityHover =
-    !isFolder &&
-    branch.length > 0 &&
-    !cardProps.includes('branch') &&
-    branch !== worktree.displayName
-  const showInlineAgentList = showDetailedCardProperties && cardProps.includes('inline-agents')
+    !isFolder && branch.length > 0 && !cardProps.includes('branch') && branch !== cardTitleDisplay
+  const showInlineAgentList = cardProps.includes('inline-agents')
   // Why: sidebar rows need a small surface inset, while their content remains
   // aligned with the pre-inset layout and the repo header hierarchy.
   const cardStyle = flushSurface
@@ -928,7 +934,7 @@ const WorktreeCard = React.memo(function WorktreeCard({
             review={metaReview}
             comment={metaComment}
             branchName={showBranchIdentityHover ? branch : undefined}
-            workspaceTitle={worktree.displayName}
+            workspaceTitle={cardTitleDisplay}
             detailsAfter={hasPorts ? <WorktreeCardPortsDetails ports={workspacePorts} /> : null}
             openDelay={100}
             hoverControl={detailsHoverControl}
@@ -1117,7 +1123,7 @@ const WorktreeCard = React.memo(function WorktreeCard({
                  at text-foreground in both states so the title keeps hierarchy
                  against nearby status chips. */}
             <WorktreeTitleInlineRename
-              displayName={worktree.displayName}
+              displayName={cardTitleDisplay}
               disabled={isDeleting || affiliateListMode}
               showUnreadEmphasis={showUnreadEmphasis}
               className="text-[12px]"

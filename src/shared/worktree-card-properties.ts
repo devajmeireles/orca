@@ -5,12 +5,11 @@ import type {
   WorktreeCardProperty
 } from './types'
 
-const FIXED_WORKTREE_CARD_PROPERTIES: WorktreeCardProperty[] = ['status', 'unread']
-
 export const TASK_WORKTREE_CARD_PROPERTIES: WorktreeCardProperty[] = ['issue', 'linear-issue']
 
 export const DEFAULT_WORKTREE_CARD_PROPERTIES: WorktreeCardProperty[] = [
-  ...FIXED_WORKTREE_CARD_PROPERTIES,
+  'status',
+  'unread',
   ...TASK_WORKTREE_CARD_PROPERTIES,
   'pr',
   'comment',
@@ -22,7 +21,8 @@ export const DEFAULT_WORKTREE_CARD_PROPERTIES: WorktreeCardProperty[] = [
 ]
 
 export const COMPACT_WORKTREE_CARD_PROPERTIES: WorktreeCardProperty[] = [
-  ...FIXED_WORKTREE_CARD_PROPERTIES,
+  'status',
+  'unread',
   ...TASK_WORKTREE_CARD_PROPERTIES,
   'pr',
   'comment',
@@ -44,7 +44,7 @@ const WORKTREE_CARD_PROPERTY_ORDER: WorktreeCardProperty[] = [
 export function normalizeWorktreeCardProperties(
   properties: readonly WorktreeCardProperty[] | null | undefined
 ): WorktreeCardProperty[] {
-  const normalized: WorktreeCardProperty[] = [...FIXED_WORKTREE_CARD_PROPERTIES]
+  const normalized: WorktreeCardProperty[] = []
   const source = properties ?? DEFAULT_WORKTREE_CARD_PROPERTIES
   for (const property of WORKTREE_CARD_PROPERTY_ORDER) {
     if (source.includes(property) && !normalized.includes(property)) {

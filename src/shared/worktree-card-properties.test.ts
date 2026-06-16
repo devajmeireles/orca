@@ -23,7 +23,7 @@ describe('worktree card properties', () => {
     expect(props).not.toContain('branch')
   })
 
-  it('keeps status and unread fixed in both modes', () => {
+  it('keeps status and unread enabled in both presets', () => {
     expect(getWorktreeCardModeProperties('Default')).toEqual(
       expect.arrayContaining(['status', 'unread'])
     )
@@ -41,13 +41,8 @@ describe('worktree card properties', () => {
     )
   })
 
-  it('normalizes legacy ci away while preserving branch', () => {
-    expect(normalizeWorktreeCardProperties(['ci', 'branch', 'pr'])).toEqual([
-      'status',
-      'unread',
-      'branch',
-      'pr'
-    ])
+  it('normalizes legacy ci away while preserving selected properties', () => {
+    expect(normalizeWorktreeCardProperties(['ci', 'branch', 'pr'])).toEqual(['branch', 'pr'])
   })
 
   it('returns combined mode update payloads', () => {
