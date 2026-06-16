@@ -4125,6 +4125,16 @@ export class OrcaRuntimeService {
     return this.ptyController?.getSize?.(ptyId) ?? null
   }
 
+  private getHeadlessTerminalInitialSize(ptyId: string): { cols: number; rows: number } {
+    const ptySize = this.getTerminalSize(ptyId)
+    if (this.getDriver(ptyId).kind === 'mobile' || this.terminalFitOverrides.has(ptyId)) {
+      return ptySize ?? { cols: 80, rows: 24 }
+    }
+    // Why: visible desktop geometry can arrive before the main-owned mirror is
+    // created; hidden restores should not fall back to stale spawn dimensions.
+    return this.lastRendererSizes.get(ptyId) ?? ptySize ?? { cols: 80, rows: 24 }
+  }
+
   // Why: daemon-backed PTYs that the runtime adopted after an Orca relaunch
   // start with a fresh headless emulator that has zero scrollback, even though
   // the daemon's on-disk checkpoint and the desktop xterm both contain the
@@ -4148,7 +4158,7 @@ export class OrcaRuntimeService {
       // every byte. The seed is only valid when the emulator is fresh.
       return
     }
-    const dims = size ?? this.getTerminalSize(ptyId) ?? { cols: 80, rows: 24 }
+    const dims = size ?? this.getHeadlessTerminalInitialSize(ptyId)
     const state: RuntimeHeadlessTerminal = {
       emulator: new HeadlessEmulator({ cols: dims.cols, rows: dims.rows }),
       outputSequence: 0,
@@ -4199,7 +4209,7 @@ export class OrcaRuntimeService {
     }
 
     this.headlessHydrationState.set(ptyId, 'pending')
-    const dims = this.getTerminalSize(ptyId) ?? { cols: 80, rows: 24 }
+    const dims = this.getHeadlessTerminalInitialSize(ptyId)
     const state: RuntimeHeadlessTerminal = {
       emulator: new HeadlessEmulator({ cols: dims.cols, rows: dims.rows }),
       outputSequence: 0,
@@ -4233,8 +4243,8 @@ export class OrcaRuntimeService {
           state.emulator.resize(rendered.cols, rendered.rows)
         }
         await state.emulator.write(rendered.data)
-        const ptyDims = this.getTerminalSize(ptyId)
-        if (ptyDims && (ptyDims.cols !== rendered.cols || ptyDims.rows !== rendered.rows)) {
+        const ptyDims = this.getHeadlessTerminalInitialSize(ptyId)
+        if (ptyDims.cols !== rendered.cols || ptyDims.rows !== rendered.rows) {
           state.emulator.resize(ptyDims.cols, ptyDims.rows)
         }
         if (rendered.lastTitle) {
@@ -4522,7 +4532,7 @@ export class OrcaRuntimeService {
     if (existing) {
       return existing
     }
-    const size = this.getTerminalSize(ptyId) ?? { cols: 80, rows: 24 }
+    const size = this.getHeadlessTerminalInitialSize(ptyId)
     const state: RuntimeHeadlessTerminal = {
       emulator: new HeadlessEmulator({ cols: size.cols, rows: size.rows }),
       outputSequence: 0,
@@ -6758,8 +6768,10 @@ export class OrcaRuntimeService {
           : targetWorktreeId
             ? []
             : [...worktreesById.values()]
-    const refreshedPtyLiveness =
-      await this.refreshPtyWorktreeRecordsFromController(resolvedWorktrees, targetWorktreeId)
+    const refreshedPtyLiveness = await this.refreshPtyWorktreeRecordsFromController(
+      resolvedWorktrees,
+      targetWorktreeId
+    )
     if (opts.requireFreshPtyLiveness && !refreshedPtyLiveness) {
       throw new Error('terminal_liveness_unavailable')
     }

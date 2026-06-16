@@ -550,6 +550,33 @@ describe('mobile subscribe integration', () => {
   })
 
   describe('onExternalPtyResize', () => {
+    it('seeds a late-created hidden headless mirror from the last desktop renderer size', async () => {
+      const { runtime } = createRuntime()
+
+      runtime.onExternalPtyResize('pty-1', 180, 50)
+      runtime.setPtyHeadlessTerminalVisible('pty-1', false)
+      runtime.onPtyData('pty-1', 'hidden output\r\n', Date.now())
+
+      const snapshot = await runtime.serializeMainTerminalBuffer('pty-1')
+      expect(snapshot?.source).toBe('headless')
+      expect(snapshot?.cols).toBe(180)
+      expect(snapshot?.rows).toBe(50)
+    })
+
+    it('does not seed a mobile-fit hidden headless mirror from desktop renderer geometry', async () => {
+      const { runtime } = createRuntime()
+
+      await runtime.handleMobileSubscribe('pty-1', 'client-a', { cols: 45, rows: 20 })
+      runtime.recordRendererGeometry('pty-1', 180, 50)
+      runtime.setPtyHeadlessTerminalVisible('pty-1', false)
+      runtime.onPtyData('pty-1', 'hidden phone-sized output\r\n', Date.now())
+
+      const snapshot = await runtime.serializeMainTerminalBuffer('pty-1')
+      expect(snapshot?.source).toBe('headless')
+      expect(snapshot?.cols).toBe(45)
+      expect(snapshot?.rows).toBe(20)
+    })
+
     it('keeps the headless mirror at the desktop renderer size for hidden snapshots', async () => {
       const { runtime } = createRuntime()
 
