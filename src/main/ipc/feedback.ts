@@ -6,8 +6,8 @@ import { app, ipcMain, net } from 'electron'
 // endpoint rejects. Electron's net module runs in the main process and is not
 // subject to CORS, so we proxy the submission through IPC. This mirrors the
 // same pattern used by updater-changelog.ts and updater-nudge.ts.
-const FEEDBACK_API_URL = 'https://api.onorca.dev/v1/feedback'
-const FEEDBACK_API_FALLBACK_URL = 'https://www.onorca.dev/v1/feedback'
+const FEEDBACK_API_URL = 'https://www.onorca.dev/v1/feedback'
+const FEEDBACK_API_FALLBACK_URL = 'https://api.onorca.dev/v1/feedback'
 const FEEDBACK_REQUEST_TIMEOUT_MS = 10_000
 
 export type FeedbackSubmissionType = 'feedback' | 'crash'
@@ -114,9 +114,8 @@ export async function submitFeedback(
     if (res.ok) {
       return { ok: true }
     }
-    // Why: DNS for api.onorca.dev can lag behind a deploy. Only fall back on
-    // 404/5xx-style results and network errors — don't mask real 4xx responses
-    // from a healthy host.
+    // Why: keep api.onorca.dev as a compatibility fallback, but prefer the
+    // website API because it owns the Slack file/snippet crash delivery path.
     if (res.status === 404 || res.status >= 500) {
       return submitFallbackFeedback(body)
     }

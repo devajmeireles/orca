@@ -102,7 +102,7 @@ describe('submitFeedback', () => {
   it('falls back when the primary feedback request stalls', async () => {
     vi.useFakeTimers()
     fetchMock.mockImplementation((url: string, init?: RequestInit) => {
-      if (url.includes('api.onorca.dev')) {
+      if (url.includes('www.onorca.dev')) {
         return new Promise((_resolve, reject) => {
           init?.signal?.addEventListener('abort', () => reject(new Error('request aborted')))
         })
@@ -125,7 +125,7 @@ describe('submitFeedback', () => {
   it('does not retry the fallback when the fallback fails after a primary server error', async () => {
     vi.useFakeTimers()
     fetchMock.mockImplementation((url: string, init?: RequestInit) => {
-      if (url.includes('api.onorca.dev')) {
+      if (url.includes('www.onorca.dev')) {
         return Promise.resolve({ ok: false, status: 500 } as Response)
       }
       return new Promise((_resolve, reject) => {
@@ -147,6 +147,18 @@ describe('submitFeedback', () => {
       error: 'fallback aborted'
     })
     expect(fetchMock).toHaveBeenCalledTimes(2)
+  })
+
+  it('posts to the website API first so crash reports use the snippet-capable route', async () => {
+    await submitFeedback({
+      feedback: '[Crash Report]',
+      submissionType: 'crash',
+      submitAnonymously: true,
+      githubLogin: null,
+      githubEmail: null
+    } as Parameters<typeof submitFeedback>[0])
+
+    expect(fetchMock.mock.calls[0]?.[0]).toBe('https://www.onorca.dev/v1/feedback')
   })
 
   it('forces renderer IPC submissions onto the feedback lane', async () => {

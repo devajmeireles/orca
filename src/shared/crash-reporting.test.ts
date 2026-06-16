@@ -117,6 +117,7 @@ describe('crash-reporting shared helpers', () => {
     expect(text).toContain('agent_state_changed')
     expect(text).toContain('Diagnostic log:')
     expect(text).toContain('ticketabcdefghijklmnop')
+    expect(text.indexOf('Diagnostic log:')).toBeLessThan(text.indexOf('Details:'))
     expect(text).toContain('User notes:')
     expect(text).toContain('[redacted-path]')
     expect(text).not.toContain('Route:')

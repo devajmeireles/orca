@@ -235,6 +235,8 @@ export function formatCrashReportText(
     `Chrome: ${report.chromeVersion}`
   ]
 
+  appendDiagnosticBundleLines(lines, diagnosticBundle, sanitizeCrashReportString)
+
   const details = Object.entries(report.details)
   if (details.length > 0) {
     lines.push('', 'Details:')
@@ -254,8 +256,6 @@ export function formatCrashReportText(
       lines.push(`- ${breadcrumb.createdAt}: ${breadcrumb.name}${suffix}`)
     }
   }
-
-  appendDiagnosticBundleLines(lines, diagnosticBundle, sanitizeCrashReportString)
 
   const trimmedNotes = notes?.trim()
   if (trimmedNotes) {
