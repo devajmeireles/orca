@@ -106,9 +106,9 @@ export function GeneralPane({
               'auto.components.settings.GeneralPane.36b2a5dc6d',
               'Show a confirmation dialog before a pinned tab is closed.'
             )}
-            checked={settings.confirmClosePinnedTab}
+            checked={settings.confirmClosePinnedTab ?? true}
             onChange={() =>
-              updateSettings({ confirmClosePinnedTab: !settings.confirmClosePinnedTab })
+              updateSettings({ confirmClosePinnedTab: !(settings.confirmClosePinnedTab ?? true) })
             }
           />
         </SearchableSetting>
