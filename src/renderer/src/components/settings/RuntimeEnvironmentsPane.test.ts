@@ -13,6 +13,7 @@ import {
   getHostDetailsSummary,
   getHostModelCapabilitySummary,
   getRuntimeCapabilitiesSummary,
+  getRuntimeServerConnectionState,
   type RuntimeHostDetails
 } from './RuntimeEnvironmentsPane'
 
@@ -172,6 +173,35 @@ describe('RuntimeEnvironmentsPane host details', () => {
         capabilities: [PROJECT_HOST_SETUP_RUNTIME_CAPABILITY]
       })
     ).toBe('Host model support: update server for task source context, workspace run context')
+  })
+
+  it('only reports a reachable host as Connected when it is the active server', () => {
+    // Why: row Connect probes reachability only; the status bar reserves
+    // "connected" for the active runtime. A reachable-but-not-active host must
+    // read 'available' here so the two surfaces agree (regression: it showed
+    // "Connected" while the status bar showed the host as not connected).
+    expect(getRuntimeServerConnectionState(details({ status: 'ready' }), false)).toBe('available')
+    expect(getRuntimeServerConnectionState(details({ status: 'ready' }), true)).toBe('connected')
+    expect(getRuntimeServerConnectionState(undefined, true)).toBe('checking')
+    expect(getRuntimeServerConnectionState(details({ status: 'loading' }), true)).toBe('checking')
+    expect(
+      getRuntimeServerConnectionState(details({ status: 'error', error: 'offline' }), true)
+    ).toBe('disconnected')
+    expect(
+      getRuntimeServerConnectionState(
+        details({
+          status: 'ready',
+          compatibility: {
+            kind: 'blocked',
+            reason: 'server-too-old',
+            clientProtocolVersion: RUNTIME_PROTOCOL_VERSION,
+            serverProtocolVersion: MIN_COMPATIBLE_RUNTIME_SERVER_VERSION - 1,
+            requiredServerProtocolVersion: MIN_COMPATIBLE_RUNTIME_SERVER_VERSION
+          }
+        }),
+        true
+      )
+    ).toBe('disconnected')
   })
 
   it('explains that selecting a saved server is the explicit default Host mode', () => {

@@ -190,11 +190,11 @@ export function getActiveServerModeDescription(allowLocalRuntime: boolean): stri
       )
 }
 
-type RuntimeServerConnectionState = 'connected' | 'checking' | 'disconnected'
+type RuntimeServerConnectionState = 'connected' | 'available' | 'checking' | 'disconnected'
 
-function getRuntimeServerConnectionState(
+export function getRuntimeServerConnectionState(
   details: RuntimeHostDetails | undefined,
-  _active: boolean
+  active: boolean
 ): RuntimeServerConnectionState {
   if (!details || details.status === 'loading') {
     return 'checking'
@@ -202,7 +202,10 @@ function getRuntimeServerConnectionState(
   if (details.status !== 'ready' || details.compatibility?.kind === 'blocked') {
     return 'disconnected'
   }
-  return 'connected'
+  // Why: row Connect only probes reachability; the persistent control connection
+  // is established by the Active Server selector. Only the active host is truly
+  // "Connected" (matching the status bar) — reachable-but-not-active is "Available".
+  return active ? 'connected' : 'available'
 }
 
 function getRuntimeServerConnectionLabel(state: RuntimeServerConnectionState): string {
@@ -211,6 +214,11 @@ function getRuntimeServerConnectionLabel(state: RuntimeServerConnectionState): s
       return translate(
         'auto.components.settings.RuntimeEnvironmentsPane.serverConnected',
         'Connected'
+      )
+    case 'available':
+      return translate(
+        'auto.components.settings.RuntimeEnvironmentsPane.serverAvailable',
+        'Available'
       )
     case 'checking':
       return translate(
@@ -231,6 +239,7 @@ function getRuntimeServerDotClass(state: RuntimeServerConnectionState): string {
       return 'bg-emerald-500'
     case 'checking':
       return 'bg-yellow-500'
+    case 'available':
     case 'disconnected':
       return 'bg-muted-foreground/40'
   }
@@ -865,7 +874,10 @@ export function RuntimeEnvironmentsPane({
                     const detailsDescription = getHostDetailsDescription(details)
                     const isActive = settings.activeRuntimeEnvironmentId === environment.id
                     const connectionState = getRuntimeServerConnectionState(details, isActive)
-                    const isReachable = connectionState === 'connected'
+                    // Reachable covers both the active host ('connected') and a
+                    // probed-but-not-active host ('available'); both expose Disconnect.
+                    const isReachable =
+                      connectionState === 'connected' || connectionState === 'available'
                     const actionBusy =
                       connectingId === environment.id ||
                       switchingValue === environment.id ||
