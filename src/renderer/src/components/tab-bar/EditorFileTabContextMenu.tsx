@@ -4,10 +4,12 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuSeparator,
+  DropdownMenuShortcut,
   DropdownMenuTrigger
 } from '@/components/ui/dropdown-menu'
 import { useAppStore } from '@/store'
 import { showLocalPathOpenBlockedToast } from '@/lib/local-path-open-guard'
+import { useShortcutLabel } from '@/hooks/useShortcutLabel'
 import type { OpenFile } from '../../store/slices/editor'
 import { shouldBlockEditorTabLocalOpen } from './editor-tab-local-open-guard'
 import { translate } from '@/i18n/i18n'
@@ -77,6 +79,7 @@ export function EditorFileTabContextMenu({
   onOpenMarkdownPreview
 }: EditorFileTabContextMenuProps): React.JSX.Element {
   const sourceVisibleTabId = file.tabId ?? file.id
+  const closeAllShortcut = useShortcutLabel('tab.closeAll')
 
   return (
     <DropdownMenu open={open} onOpenChange={onOpenChange} modal={false}>
@@ -144,6 +147,9 @@ export function EditorFileTabContextMenu({
             'auto.components.tab.bar.EditorFileTabContextMenu.ba1369dd24',
             'Close All Editor Tabs'
           )}
+          {closeAllShortcut ? (
+            <DropdownMenuShortcut>{closeAllShortcut}</DropdownMenuShortcut>
+          ) : null}
         </DropdownMenuItem>
         <DropdownMenuItem onSelect={onCloseToRight} disabled={!hasTabsToRight}>
           {translate(

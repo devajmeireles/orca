@@ -1454,6 +1454,17 @@ function Terminal(): React.JSX.Element | null {
         return
       }
 
+      // Cmd/Ctrl+Alt+W - close every editor file tab in the active worktree.
+      // Reuses handleCloseAllFiles, which skips pinned tabs and routes dirty
+      // files through the save/discard dialog. Workspace-level: fires regardless
+      // of focus (even from a terminal) and is a no-op when nothing is open.
+      if (!e.repeat && matchShortcut('tab.closeAll')) {
+        e.preventDefault()
+        notifyTerminalCapture('tab.closeAll')
+        handleCloseAllFiles()
+        return
+      }
+
       // Ctrl+Tab - quick-toggle to the previously focused tab in this group.
       if (
         matchesRecentTabSwitcherChord(e, shortcutPlatform, keybindings, {
@@ -1567,6 +1578,7 @@ function Terminal(): React.JSX.Element | null {
     handleCloseBrowserTab,
     closeBrowserTab,
     handleCloseFile,
+    handleCloseAllFiles,
     keybindings,
     mobileEmulatorEnabled,
     terminalShortcutPolicy
