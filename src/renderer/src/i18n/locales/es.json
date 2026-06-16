@@ -2334,6 +2334,12 @@
                 }
               }
             }
+          },
+          "PinnedTabCloseDialog": {
+            "6c190f295a": "Close pinned tab?",
+            "0d1963f4a6": "This tab is pinned. Are you sure you want to close it?",
+            "0b38ee2f86": "Cancel",
+            "c337c9d75c": "Close"
           }
         }
       },
@@ -4725,7 +4731,9 @@
           "c46cdbbd4e": "Red"
         },
         "GeneralPane": {
-          "d58fccfd84": "Navegación"
+          "d58fccfd84": "Navegación",
+          "5cb5475664": "Confirm before closing pinned tabs",
+          "36b2a5dc6d": "Show a confirmation dialog before a pinned tab is closed."
         },
         "GeneralSupportSection": {
           "af7d9f4396": "¡Gracias por el apoyo!",
@@ -6883,7 +6891,9 @@
             "7887a2c262": "carpeta",
             "7baf524b04": "espacio de trabajo",
             "d0bc793689": "Directorio raíz donde se crean las carpetas del espacio de trabajo.",
-            "4c95d08fa2": "Directorio de espacio de trabajo"
+            "4c95d08fa2": "Directorio de espacio de trabajo",
+            "161a86a9da": "Confirm before closing pinned tabs",
+            "8e593f04fc": "Show a confirmation dialog before a pinned tab is closed."
           }
         },
         "git": {

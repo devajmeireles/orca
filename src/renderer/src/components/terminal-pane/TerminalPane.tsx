@@ -5,6 +5,7 @@ import type { CSSProperties } from 'react'
 import type { IDisposable } from '@xterm/xterm'
 import { X } from 'lucide-react'
 import { useAppStore } from '../../store'
+import { isUnifiedTabPinned } from '@/store/pinned-tab-close-guard'
 import { Button } from '@/components/ui/button'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { useLinkRoutingPreferenceDialog } from '@/components/link-routing-preference-dialog'
@@ -784,6 +785,19 @@ export default function TerminalPane({
   // (explicit EOF) bypasses this by design.
   const handleRequestClosePane = useCallback(
     (paneId: number) => {
+      // Why: when closing the last pane of a pinned tab, the pin confirmation
+      // takes precedence over the running-process prompt — let executeClosePane
+      // fall through to closeTerminalTab, which raises the single pin dialog
+      // (confirming it kills the process). Non-pinned tabs keep the process prompt.
+      const isLastPane = (managerRef.current?.getPanes().length ?? 0) <= 1
+      if (isLastPane) {
+        const state = useAppStore.getState()
+        const confirmPinned = state.settings?.confirmClosePinnedTab ?? true
+        if (confirmPinned && isUnifiedTabPinned(state, worktreeId, tabId)) {
+          executeClosePane(paneId)
+          return
+        }
+      }
       const transport = paneTransportsRef.current.get(paneId)
       const ptyId = transport?.getPtyId()
       if (!ptyId) {
@@ -805,7 +819,7 @@ export default function TerminalPane({
         // had a child process. Matches the semantics of the !ptyId branch above.
         .catch(() => executeClosePane(paneId))
     },
-    [executeClosePane]
+    [executeClosePane, tabId, worktreeId]
   )
 
   const handleSearchSelectedText = useCallback((selectedText: string): void => {

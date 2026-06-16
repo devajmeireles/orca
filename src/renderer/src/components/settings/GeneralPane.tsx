@@ -22,7 +22,8 @@ import {
 } from './general-search'
 import { RecentTabOrderControl } from './RecentTabOrderControl'
 import { matchesSettingsSearch } from './settings-search'
-import { SettingsSubsectionHeader } from './SettingsFormControls'
+import { SearchableSetting } from './SearchableSetting'
+import { SettingsSubsectionHeader, SettingsSwitchRow } from './SettingsFormControls'
 import { translate } from '@/i18n/i18n'
 
 export {
@@ -85,6 +86,32 @@ export function GeneralPane({
           ])}
           updateSettings={updateSettings}
         />
+        <SearchableSetting
+          title={translate(
+            'auto.components.settings.GeneralPane.5cb5475664',
+            'Confirm before closing pinned tabs'
+          )}
+          description={translate(
+            'auto.components.settings.GeneralPane.36b2a5dc6d',
+            'Show a confirmation dialog before a pinned tab is closed.'
+          )}
+          keywords={['pinned', 'tab', 'confirm', 'close']}
+        >
+          <SettingsSwitchRow
+            label={translate(
+              'auto.components.settings.GeneralPane.5cb5475664',
+              'Confirm before closing pinned tabs'
+            )}
+            description={translate(
+              'auto.components.settings.GeneralPane.36b2a5dc6d',
+              'Show a confirmation dialog before a pinned tab is closed.'
+            )}
+            checked={settings.confirmClosePinnedTab}
+            onChange={() =>
+              updateSettings({ confirmClosePinnedTab: !settings.confirmClosePinnedTab })
+            }
+          />
+        </SearchableSetting>
       </section>
     ) : null,
     matchesSettingsSearch(searchQuery, getGeneralWorkspaceSearchEntries()) ? (

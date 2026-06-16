@@ -2334,6 +2334,12 @@
                 }
               }
             }
+          },
+          "PinnedTabCloseDialog": {
+            "6c190f295a": "Close pinned tab?",
+            "0d1963f4a6": "This tab is pinned. Are you sure you want to close it?",
+            "0b38ee2f86": "Cancel",
+            "c337c9d75c": "Close"
           }
         }
       },
@@ -4710,7 +4716,9 @@
           "c46cdbbd4e": "ネットワーク"
         },
         "GeneralPane": {
-          "d58fccfd84": "ナビゲーション"
+          "d58fccfd84": "ナビゲーション",
+          "5cb5475664": "Confirm before closing pinned tabs",
+          "36b2a5dc6d": "Show a confirmation dialog before a pinned tab is closed."
         },
         "GeneralSupportSection": {
           "af7d9f4396": "サポートありがとうございます!",
@@ -6905,7 +6913,9 @@
             "7887a2c262": "フォルダ",
             "7baf524b04": "ワークスペース",
             "d0bc793689": "ワークスペースフォルダーが作成されるルートディレクトリ。",
-            "4c95d08fa2": "ワークスペースディレクトリ"
+            "4c95d08fa2": "ワークスペースディレクトリ",
+            "161a86a9da": "Confirm before closing pinned tabs",
+            "8e593f04fc": "Show a confirmation dialog before a pinned tab is closed."
           }
         },
         "git": {

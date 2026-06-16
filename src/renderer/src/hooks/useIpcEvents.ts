@@ -87,6 +87,7 @@ import { buildWorkspaceSessionPayload } from '@/lib/workspace-session'
 import { getLinearIssueWorkspaceName } from '../../../shared/workspace-name'
 import type { RuntimeClientEvent } from '../../../shared/runtime-client-events'
 import type { AppState } from '../store/types'
+import { guardPinnedTabClose, resolvePinnedTabLabel } from '../store/pinned-tab-close-guard'
 import {
   closeWebRuntimeSessionTab,
   createWebRuntimeSessionBrowserTab,
@@ -1591,16 +1592,18 @@ export function useIpcEvents(): void {
         const store = useAppStore.getState()
         const browserTarget = resolveBrowserSessionTabTarget(store, worktreeId, tabId)
         if (browserTarget) {
-          if (isPinnedSessionTab(store, worktreeId, browserTarget.workspaceId)) {
-            return
-          }
-          store.closeBrowserTab(browserTarget.workspaceId)
+          guardPinnedTabClose({
+            isPinned: isPinnedSessionTab(store, worktreeId, browserTarget.workspaceId),
+            tabLabel: resolvePinnedTabLabel(store, worktreeId, browserTarget.workspaceId),
+            onClose: () => useAppStore.getState().closeBrowserTab(browserTarget.workspaceId)
+          })
           return
         }
-        if (isPinnedSessionTab(store, worktreeId, tabId)) {
-          return
-        }
-        store.closeUnifiedTab(tabId)
+        guardPinnedTabClose({
+          isPinned: isPinnedSessionTab(store, worktreeId, tabId),
+          tabLabel: resolvePinnedTabLabel(store, worktreeId, tabId),
+          onClose: () => useAppStore.getState().closeUnifiedTab(tabId)
+        })
       })
     )
 
@@ -1679,10 +1682,11 @@ export function useIpcEvents(): void {
             Object.entries(store.tabsByWorktree).find(([, tabs]) =>
               tabs.some((tab) => tab.id === tabId)
             )?.[0] ?? null
-          if (worktreeId && isPinnedSessionTab(store, worktreeId, tabId)) {
-            return
-          }
-          store.closeTab(tabId)
+          guardPinnedTabClose({
+            isPinned: worktreeId !== null && isPinnedSessionTab(store, worktreeId, tabId),
+            tabLabel: worktreeId !== null ? resolvePinnedTabLabel(store, worktreeId, tabId) : '',
+            onClose: () => useAppStore.getState().closeTab(tabId)
+          })
         }
       })
     )
