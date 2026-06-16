@@ -2,6 +2,7 @@
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
+import { getLocalExecutionHostLabel } from '../../../../shared/execution-host'
 import {
   ALL_GROUP_META,
   buildRows,
@@ -22,6 +23,10 @@ import type {
   Worktree,
   WorktreeLineage
 } from '../../../../shared/types'
+
+// Why: the local host label is platform-derived (Mac/Linux/Windows), so match it
+// to the source helper instead of a literal that only holds on macOS CI.
+const LOCAL_HOST_LABEL = getLocalExecutionHostLabel()
 
 const repo: Repo = {
   id: 'repo-1',
@@ -346,7 +351,7 @@ describe('buildRows with pinned worktrees', () => {
 
     expect(rows).toMatchObject([
       { type: 'header', key: 'project:github:stablyai/orca', label: 'Orca', count: 2 },
-      { type: 'item', worktree: { id: worktree.id }, hostContextLabel: 'Local Mac' },
+      { type: 'item', worktree: { id: worktree.id }, hostContextLabel: LOCAL_HOST_LABEL },
       { type: 'item', worktree: { id: remoteWorktree.id }, hostContextLabel: 'gpu-vm' }
     ])
   })
@@ -461,14 +466,14 @@ describe('buildRows with pinned worktrees', () => {
       { projects: [project], projectHostSetups: [projectHostSetups[0]!, runtimeSetup] },
       [],
       new Map([
-        ['local', 'Local Mac'],
+        ['local', LOCAL_HOST_LABEL],
         ['runtime:03ef704c-b180-4b10-998d-e28fbd5de9a3', 'dev box']
       ])
     )
 
     expect(rows).toMatchObject([
       { type: 'header', key: 'project:github:stablyai/orca', label: 'Orca', count: 2 },
-      { type: 'item', worktree: { id: worktree.id }, hostContextLabel: 'Local Mac' },
+      { type: 'item', worktree: { id: worktree.id }, hostContextLabel: LOCAL_HOST_LABEL },
       { type: 'item', worktree: { id: runtimeWorktree.id }, hostContextLabel: 'dev box' }
     ])
   })

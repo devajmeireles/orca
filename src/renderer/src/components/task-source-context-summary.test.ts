@@ -1,8 +1,13 @@
 import { describe, expect, it } from 'vitest'
+import { getLocalExecutionHostLabel } from '../../../shared/execution-host'
 import {
   getTaskSourceAvailabilityNotice,
   getTaskSourceContextSummary
 } from './task-source-context-summary'
+
+// Why: the local host label is platform-derived (Mac/Linux/Windows), so match it
+// to the source helper instead of a literal that only holds on macOS CI.
+const LOCAL_HOST_LABEL = getLocalExecutionHostLabel()
 
 describe('task source context summary', () => {
   it('shows provider, host, and provider identity for a single repo-backed source', () => {
@@ -56,9 +61,9 @@ describe('task source context summary', () => {
       ]
     })
 
-    expect(summary.label).toBe('GitHub · Local Mac, builder · personal-gh, work-gh')
+    expect(summary.label).toBe(`GitHub · ${LOCAL_HOST_LABEL}, builder · personal-gh, work-gh`)
     expect(summary.title).toBe(
-      'GitHub · Host: Local Mac, builder · Account: personal-gh, work-gh · Source: stablyai/orca · 2 selected projects'
+      `GitHub · Host: ${LOCAL_HOST_LABEL}, builder · Account: personal-gh, work-gh · Source: stablyai/orca · 2 selected projects`
     )
   })
 
@@ -149,8 +154,10 @@ describe('task source context summary', () => {
       ]
     })
 
-    expect(summary.label).toBe('GitLab · Local Mac +2 · 3 projects')
-    expect(summary.title).toBe('GitLab · Host: Local Mac, build, linux · 3 selected projects')
+    expect(summary.label).toBe(`GitLab · ${LOCAL_HOST_LABEL} +2 · 3 projects`)
+    expect(summary.title).toBe(
+      `GitLab · Host: ${LOCAL_HOST_LABEL}, build, linux · 3 selected projects`
+    )
   })
 
   it('shows blocked remote-server source-host availability', () => {
@@ -275,7 +282,7 @@ describe('task source context summary', () => {
         accountHostId: 'local',
         linearWorkspaceName: 'Stably'
       }).label
-    ).toBe('Linear · Local Mac · Stably')
+    ).toBe(`Linear · ${LOCAL_HOST_LABEL} · Stably`)
 
     expect(
       getTaskSourceContextSummary({

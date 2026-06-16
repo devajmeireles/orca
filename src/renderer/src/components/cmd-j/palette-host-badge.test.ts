@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest'
+import { getLocalExecutionHostLabel } from '../../../../shared/execution-host'
 import { getPaletteHostBadge } from './palette-host-badge'
 import { buildSidebarHostOptions } from '../sidebar/sidebar-host-options'
+
+// Why: the local host label is platform-derived (Mac/Linux/Windows), so match it
+// to the source helper instead of a literal that only holds on macOS CI.
+const LOCAL_HOST_LABEL = getLocalExecutionHostLabel()
 
 // Why: a connected SSH state makes the target a live remote, which is what the
 // palette badge now requires before disambiguating rows with a host label.
@@ -42,7 +47,7 @@ describe('getPaletteHostBadge', () => {
 
     expect(getPaletteHostBadge({ connectionId: null }, hosts)).toEqual({
       hostId: 'local',
-      label: 'Local Mac'
+      label: LOCAL_HOST_LABEL
     })
   })
 
@@ -112,7 +117,7 @@ describe('getPaletteHostBadge', () => {
 
     expect(getPaletteHostBadge({}, hosts)).toEqual({
       hostId: 'local',
-      label: 'Local Mac'
+      label: LOCAL_HOST_LABEL
     })
   })
 

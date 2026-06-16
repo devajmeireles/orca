@@ -3,7 +3,7 @@
 import React, { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { toSshExecutionHostId } from '../../../../shared/execution-host'
+import { getLocalExecutionHostLabel, toSshExecutionHostId } from '../../../../shared/execution-host'
 import {
   PROJECT_HOST_SETUP_RUNTIME_CAPABILITY,
   RUNTIME_PROTOCOL_VERSION,
@@ -142,7 +142,9 @@ describe('RepositoryHostSetupsSection', () => {
     renderSection(localRepo)
 
     expect(container.textContent).toContain('Viewing host')
-    expect(container.textContent).toContain('Local Mac')
+    // Why: local host label is platform-derived; match the runtime helper so this
+    // holds on Linux/Windows CI runners, not just macOS.
+    expect(container.textContent).toContain(getLocalExecutionHostLabel())
   })
 
   it('opens the selected host setup settings pane through the setup repo id', () => {
