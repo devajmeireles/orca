@@ -80,6 +80,7 @@ export function EditorFileTabContextMenu({
 }: EditorFileTabContextMenuProps): React.JSX.Element {
   const sourceVisibleTabId = file.tabId ?? file.id
   const closeAllShortcut = useShortcutLabel('tab.closeAll')
+  const showCloseAllShortcut = closeAllShortcut !== 'Unassigned'
 
   return (
     <DropdownMenu open={open} onOpenChange={onOpenChange} modal={false}>
@@ -147,7 +148,7 @@ export function EditorFileTabContextMenu({
             'auto.components.tab.bar.EditorFileTabContextMenu.ba1369dd24',
             'Close All Editor Tabs'
           )}
-          {closeAllShortcut ? (
+          {showCloseAllShortcut ? (
             <DropdownMenuShortcut>{closeAllShortcut}</DropdownMenuShortcut>
           ) : null}
         </DropdownMenuItem>

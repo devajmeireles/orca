@@ -256,13 +256,29 @@ describe('keybindings', () => {
       shift: false
     }
     expect(keybindingMatchesAction('tab.closeAll', macComposedCloseAll, 'darwin')).toBe(true)
+    const linuxCloseAll = {
+      key: 'w',
+      code: 'KeyW',
+      meta: false,
+      control: true,
+      alt: true,
+      shift: false
+    }
+    expect(keybindingMatchesAction('tab.closeAll', linuxCloseAll, 'linux')).toBe(true)
     expect(
-      keybindingMatchesAction(
-        'tab.closeAll',
-        { key: 'w', code: 'KeyW', meta: false, control: true, alt: true, shift: false },
-        'linux'
-      )
+      keybindingMatchesAction('tab.closeAll', linuxCloseAll, 'linux', undefined, {
+        context: 'terminal',
+        terminalShortcutPolicy: 'orca-first'
+      })
     ).toBe(true)
+    // Why: close-all is a workspace tab command, so terminal-first mode should
+    // keep passing the chord through to shells and TUIs.
+    expect(
+      keybindingMatchesAction('tab.closeAll', linuxCloseAll, 'linux', undefined, {
+        context: 'terminal',
+        terminalShortcutPolicy: 'terminal-first'
+      })
+    ).toBe(false)
 
     // Why: Mod+Alt+W and Mod+W are neighbors; the extra Alt must keep the two
     // actions from firing on each other's chord.
