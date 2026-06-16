@@ -88,8 +88,8 @@ function ComposerModalBody({
         onOpenAutoFocus={(event) => {
           // Why: Radix's FocusScope fires this once the dialog has mounted.
           // preventDefault stops it from focusing whatever first-tabbable it
-          // picks (close button), and we instead focus the repo picker so the
-          // keyboard flow starts at the top of the unified create form.
+          // picks (close button), and we instead focus the name/source field
+          // so users can start typing immediately.
           event.preventDefault()
           const content = event.currentTarget as HTMLElement
           getWorkspaceComposerInitialFocusTarget(content)?.focus({ preventScroll: true })
