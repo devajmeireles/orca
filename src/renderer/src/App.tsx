@@ -25,6 +25,7 @@ import { syncZoomCSSVar } from '@/lib/ui-zoom'
 import { resolveLeftSidebarStyleVariables } from '@/lib/left-sidebar-appearance'
 import { canShowRightSidebarForView } from '@/lib/right-sidebar-visibility'
 import { resolveLeftTitlebarChromeLayout } from '@/lib/titlebar-left-chrome'
+import { shouldShowWorktreeCreationSurface } from '@/lib/worktree-creation-surface'
 import { buildAppFontFamily } from '@/lib/app-font-family'
 import { toast } from 'sonner'
 import { Toaster } from '@/components/ui/sonner'
@@ -385,14 +386,12 @@ function App(): React.JSX.Element {
   const contextualToursAutoEligible = useAppStore((s) => s.contextualToursAutoEligible)
   const activeWorktreeId = useAppStore((s) => s.activeWorktreeId)
   const activePendingCreationId = useAppStore((s) => s.activePendingCreationId)
-  // Why: the creation loader is debounced — a fast create resolves before its
-  // entry's loaderVisible flips, so the content area keeps showing the prior
-  // workspace (or Landing) and never flashes a loader. Only a create still
-  // pending past the debounce gates the loader and hides the terminal.
-  const activeCreationLoaderVisible = useAppStore(
+  // Why: the creation surface owns the tab strip from the first pending frame.
+  // Gating it on the delayed loader flag made the tab bar swap in mid-create.
+  const activePendingCreationExists = useAppStore(
     (s) =>
-      s.activePendingCreationId != null &&
-      s.pendingWorktreeCreations[s.activePendingCreationId]?.loaderVisible === true
+      s.activePendingCreationId !== null &&
+      s.pendingWorktreeCreations[s.activePendingCreationId] !== undefined
   )
   // Why: App swaps the sidebar between workspace and landing layouts when the
   // active workspace is slept/deleted. Keep virtualized scroll memory above
@@ -429,9 +428,14 @@ function App(): React.JSX.Element {
   // and shutdown transitions where activeWorktreeId can briefly become null.
   const shouldMountTerminalWorkbench =
     activeWorktreeId !== null || hasMountedTerminalWorkbenchRef.current
-  // Why: visible worktree creation owns its faux tab strip; the previous
-  // workspace must stay mounted for retention without rendering real chrome.
-  const creationLayoutActive = activeView === 'terminal' && activeCreationLoaderVisible
+  // Why: visible worktree creation owns its faux tab strip from start to finish;
+  // the previous workspace must stay mounted for retention without rendering
+  // real chrome.
+  const creationLayoutActive = shouldShowWorktreeCreationSurface({
+    activeView,
+    activePendingCreationId,
+    hasActivePendingCreation: activePendingCreationExists
+  })
   const workspaceChromeActive =
     activeView === 'terminal' && activeWorktreeId !== null && !creationLayoutActive
   const terminalWorkbenchVisible =
@@ -2033,7 +2037,7 @@ function App(): React.JSX.Element {
                               {activeView === 'space' ? <WorkspaceSpacePage /> : null}
                               {activeView === 'mobile' ? <MobilePage /> : null}
                               {activeView === 'terminal' &&
-                              activeCreationLoaderVisible &&
+                              creationLayoutActive &&
                               activePendingCreationId ? (
                                 <WorktreeCreationPanel
                                   creationId={activePendingCreationId}
@@ -2044,7 +2048,7 @@ function App(): React.JSX.Element {
                               ) : null}
                               {activeView === 'terminal' &&
                               !activeWorktreeId &&
-                              !activeCreationLoaderVisible ? (
+                              !creationLayoutActive ? (
                                 <Landing />
                               ) : null}
                             </RecoverableRenderErrorBoundary>
