@@ -4,10 +4,6 @@ import { GitHubRateLimitPanel } from '@/components/github/github-rate-limit-disp
 import { GitLabRateLimitPanel } from '@/components/gitlab/gitlab-rate-limit-display'
 import { getLocalExecutionHostLabel } from '../../../../shared/execution-host'
 
-// Why: the local host label is platform-derived (Mac/Linux/Windows), so match it
-// to the source helper instead of a literal that only holds on macOS CI.
-const LOCAL_HOST_LABEL = getLocalExecutionHostLabel()
-
 type StoreState = {
   settings: { activeRuntimeEnvironmentId: string | null }
   openSettingsPage: () => void
@@ -23,6 +19,7 @@ const mocks = vi.hoisted(() => ({
     } as StoreState
   }
 }))
+const localHostLabel = getLocalExecutionHostLabel()
 
 vi.mock('@/store', () => ({
   useAppStore: (selector: (state: StoreState) => unknown) => selector(mocks.store.current)
@@ -38,7 +35,7 @@ describe('provider rate-limit panels account scope', () => {
 
     const markup = renderToStaticMarkup(<GitHubRateLimitPanel />)
 
-    expect(markup).toContain(`Budget scope: ${LOCAL_HOST_LABEL}`)
+    expect(markup).toContain(`Budget scope: ${localHostLabel}`)
     expect(markup).toContain(
       'GitHub API budget is fetched from the CLI on this desktop client. Use Settings &gt; Remote Orca Servers &gt; Advanced to view server-owned budgets.'
     )

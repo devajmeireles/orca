@@ -9,10 +9,6 @@ import {
   GitLabIntegrationCard
 } from './cli-source-control-integration-cards'
 
-// Why: the local host label is platform-derived (Mac/Linux/Windows), so match it
-// to the source helper instead of a literal that only holds on macOS CI.
-const LOCAL_HOST_LABEL = getLocalExecutionHostLabel()
-
 type StoreState = {
   settings: { activeRuntimeEnvironmentId: string | null }
   openSettingsPage: () => void
@@ -52,6 +48,7 @@ vi.mock('./source-control-preflight-card-status', () => ({
 
 let root: Root | null = null
 let container: HTMLDivElement | null = null
+const localHostLabel = getLocalExecutionHostLabel()
 
 async function renderCard(card: React.ReactNode): Promise<HTMLDivElement> {
   container = document.createElement('div')
@@ -93,7 +90,7 @@ describe('CLI source-control integration card account scope', () => {
 
     expect(rendered.textContent).toContain('GitHub')
     expect(rendered.textContent).toContain('Connected')
-    expect(rendered.textContent).toContain(`Account scope: ${LOCAL_HOST_LABEL}`)
+    expect(rendered.textContent).toContain(`Account scope: ${localHostLabel}`)
     expect(rendered.textContent).toContain(
       'Credentials and account checks for this provider are owned by this desktop client. Use Settings > Remote Orca Servers > Advanced to edit server-owned credentials.'
     )

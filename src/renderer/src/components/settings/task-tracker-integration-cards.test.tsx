@@ -3,13 +3,9 @@
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { getProviderRuntimeContextKey } from '@/lib/provider-runtime-context'
 import { getLocalExecutionHostLabel } from '../../../../shared/execution-host'
+import { getProviderRuntimeContextKey } from '@/lib/provider-runtime-context'
 import { LinearIntegrationCard } from './task-tracker-integration-cards'
-
-// Why: the local host label is platform-derived (Mac/Linux/Windows), so match it
-// to the source helper instead of a literal that only holds on macOS CI.
-const LOCAL_HOST_LABEL = getLocalExecutionHostLabel()
 
 type StoreState = {
   linearStatus: {
@@ -50,6 +46,7 @@ vi.mock('@/components/linear-api-key-dialog', () => ({
 
 let root: Root | null = null
 let container: HTMLDivElement | null = null
+const localHostLabel = getLocalExecutionHostLabel()
 
 function installStore(
   connected: boolean,
@@ -111,7 +108,7 @@ describe('LinearIntegrationCard account scope', () => {
 
     const rendered = await renderCard()
 
-    expect(rendered.textContent).toContain(`Account scope: ${LOCAL_HOST_LABEL}`)
+    expect(rendered.textContent).toContain(`Account scope: ${localHostLabel}`)
     expect(rendered.textContent).toContain(
       'Credentials and account checks for this provider are owned by this desktop client. Use Settings > Remote Orca Servers > Advanced to edit server-owned credentials.'
     )

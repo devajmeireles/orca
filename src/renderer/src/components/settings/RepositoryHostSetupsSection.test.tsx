@@ -15,6 +15,7 @@ import { RepositoryHostSetupsSection } from './RepositoryHostSetupsSection'
 
 let container: HTMLDivElement
 let root: Root
+const localHostLabel = getLocalExecutionHostLabel()
 
 function makeRepo(overrides: Partial<Repo> & Pick<Repo, 'id' | 'displayName' | 'path'>): Repo {
   return {
@@ -142,9 +143,7 @@ describe('RepositoryHostSetupsSection', () => {
     renderSection(localRepo)
 
     expect(container.textContent).toContain('Viewing host')
-    // Why: local host label is platform-derived; match the runtime helper so this
-    // holds on Linux/Windows CI runners, not just macOS.
-    expect(container.textContent).toContain(getLocalExecutionHostLabel())
+    expect(container.textContent).toContain(localHostLabel)
   })
 
   it('opens the selected host setup settings pane through the setup repo id', () => {
