@@ -6,6 +6,7 @@ const {
   handlers,
   listeners,
   clipboardWriteTextMock,
+  dialogShowMessageBoxMock,
   collectDiagnosticBundleMock,
   deleteDiagnosticBundleMock,
   getDiagnosticsStatusMock,
@@ -18,6 +19,7 @@ const {
   handlers: new Map<string, (_event: unknown, args?: unknown) => unknown>(),
   listeners: new Map<string, (_event: unknown, args?: unknown) => void>(),
   clipboardWriteTextMock: vi.fn(),
+  dialogShowMessageBoxMock: vi.fn(),
   collectDiagnosticBundleMock: vi.fn(),
   deleteDiagnosticBundleMock: vi.fn(),
   getDiagnosticsStatusMock: vi.fn(),
@@ -31,6 +33,7 @@ const {
 vi.mock('electron', () => ({
   app: { getVersion: () => '1.2.3-test' },
   clipboard: { writeText: clipboardWriteTextMock },
+  dialog: { showMessageBox: dialogShowMessageBoxMock },
   ipcMain: {
     removeHandler: vi.fn((channel: string) => handlers.delete(channel)),
     handle: vi.fn((channel: string, handler: (_event: unknown, args?: unknown) => unknown) => {
@@ -106,6 +109,8 @@ describe('registerCrashReportingHandlers', () => {
     handlers.clear()
     listeners.clear()
     clipboardWriteTextMock.mockReset()
+    dialogShowMessageBoxMock.mockReset()
+    dialogShowMessageBoxMock.mockResolvedValue({ response: 0 })
     collectDiagnosticBundleMock.mockReset()
     collectDiagnosticBundleMock.mockReturnValue(diagnosticBundle())
     deleteDiagnosticBundleMock.mockReset()
@@ -233,6 +238,12 @@ describe('registerCrashReportingHandlers', () => {
       payload: diagnosticBundle().payload,
       bundleSubmissionId: diagnosticBundle().bundleSubmissionId
     })
+    expect(dialogShowMessageBoxMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        buttons: ['Attach Logs', 'Send Without Logs'],
+        message: 'Attach recent redacted diagnostic logs to this crash report?'
+      })
+    )
     expect(markSent).toHaveBeenCalledWith(pending.id)
   })
 
@@ -288,7 +299,7 @@ describe('registerCrashReportingHandlers', () => {
     expect(listRecent).not.toHaveBeenCalled()
   })
 
-  it('uploads crash logs after Send Report without a second native confirmation', async () => {
+  it('requires main-process confirmation before uploading crash logs after Send Report', async () => {
     registerCrashReportingHandlers({
       getById: vi.fn(async () => null),
       dismiss: vi.fn(),
@@ -322,9 +333,51 @@ describe('registerCrashReportingHandlers', () => {
       payload: diagnosticBundle().payload,
       bundleSubmissionId: diagnosticBundle().bundleSubmissionId
     })
+    expect(dialogShowMessageBoxMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        buttons: ['Attach Logs', 'Send Without Logs'],
+        cancelId: 1
+      })
+    )
     expect(submitFeedbackMock).toHaveBeenCalledWith(
       expect.objectContaining({
         feedback: expect.stringContaining('ticketabcdefghijklmnop')
+      })
+    )
+  })
+
+  it('submits the crash report without logs when main-process log confirmation is declined', async () => {
+    dialogShowMessageBoxMock.mockResolvedValue({ response: 1 })
+    registerCrashReportingHandlers({
+      getById: vi.fn(async () => null),
+      dismiss: vi.fn(),
+      markSent: vi.fn(),
+      markDismissedSent: vi.fn(),
+      listRecent: vi.fn(async () => []),
+      record: vi.fn(),
+      formatDiagnosticText: vi.fn()
+    } as never)
+
+    const result = await handlers.get('crashReports:submit')?.(null, {
+      notes: 'manual report',
+      submitAnonymously: true,
+      githubLogin: null,
+      githubEmail: null
+    })
+
+    expect(result).toEqual({
+      ok: true,
+      report: null,
+      diagnosticBundle: {
+        status: 'not_uploaded',
+        reason: 'diagnostic log upload skipped by user'
+      }
+    })
+    expect(collectDiagnosticBundleMock).not.toHaveBeenCalled()
+    expect(uploadDiagnosticBundleMock).not.toHaveBeenCalled()
+    expect(submitFeedbackMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        feedback: expect.stringContaining('diagnostic log upload skipped by user')
       })
     )
   })
