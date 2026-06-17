@@ -61,6 +61,26 @@ describe('guardPinnedTabClose', () => {
     })
   })
 
+  it('passes cancel callbacks to confirmation requests', () => {
+    const onClose = vi.fn()
+    const onCancel = vi.fn()
+    const requestPinnedTabCloseConfirm = vi.fn()
+    getStateMock.mockReturnValue(
+      makeState({
+        settings: { confirmClosePinnedTab: true } as AppState['settings'],
+        requestPinnedTabCloseConfirm
+      })
+    )
+
+    guardPinnedTabClose({ isPinned: true, tabLabel: 'Docs', onClose, onCancel })
+
+    expect(requestPinnedTabCloseConfirm).toHaveBeenCalledWith({
+      tabLabel: 'Docs',
+      onConfirm: onClose,
+      onCancel
+    })
+  })
+
   it('closes a pinned tab immediately when the setting is off', () => {
     const onClose = vi.fn()
     const requestPinnedTabCloseConfirm = vi.fn()
@@ -90,20 +110,77 @@ describe('guardPinnedTabClose', () => {
 })
 
 describe('resolvePinnedTabLabel', () => {
-  it('prefers customLabel, then generatedLabel, then label', () => {
+  it('uses the same label priority as the tab strip', () => {
     const state = makeState({
+      settings: {
+        confirmClosePinnedTab: true,
+        tabAutoGenerateTitle: true
+      } as AppState['settings'],
       unifiedTabsByWorktree: {
         'wt-1': [
-          { id: 'a', entityId: 'ea', customLabel: 'Custom', generatedLabel: 'Gen', label: 'Plain' },
-          { id: 'b', entityId: 'eb', customLabel: null, generatedLabel: 'Gen', label: 'Plain' },
-          { id: 'c', entityId: 'ec', customLabel: null, generatedLabel: null, label: 'Plain' }
+          {
+            id: 'a',
+            entityId: 'ea',
+            customLabel: ' Custom ',
+            quickCommandLabel: 'Run tests',
+            generatedLabel: 'Gen',
+            label: 'Plain'
+          },
+          {
+            id: 'b',
+            entityId: 'eb',
+            customLabel: '   ',
+            quickCommandLabel: ' Run tests ',
+            generatedLabel: 'Gen',
+            label: 'Plain'
+          },
+          {
+            id: 'c',
+            entityId: 'ec',
+            customLabel: null,
+            quickCommandLabel: null,
+            generatedLabel: ' Gen ',
+            label: 'Plain'
+          },
+          {
+            id: 'd',
+            entityId: 'ed',
+            customLabel: null,
+            quickCommandLabel: null,
+            generatedLabel: null,
+            label: ' Plain '
+          }
         ]
       } as unknown as AppState['unifiedTabsByWorktree']
     })
 
     expect(resolvePinnedTabLabel(state, 'wt-1', 'a')).toBe('Custom')
-    expect(resolvePinnedTabLabel(state, 'wt-1', 'b')).toBe('Gen')
-    expect(resolvePinnedTabLabel(state, 'wt-1', 'ec')).toBe('Plain')
+    expect(resolvePinnedTabLabel(state, 'wt-1', 'b')).toBe('Run tests')
+    expect(resolvePinnedTabLabel(state, 'wt-1', 'ec')).toBe('Gen')
+    expect(resolvePinnedTabLabel(state, 'wt-1', 'ed')).toBe('Plain')
+  })
+
+  it('falls back to the live label when generated tab titles are disabled', () => {
+    const state = makeState({
+      settings: {
+        confirmClosePinnedTab: true,
+        tabAutoGenerateTitle: false
+      } as AppState['settings'],
+      unifiedTabsByWorktree: {
+        'wt-1': [
+          {
+            id: 'a',
+            entityId: 'ea',
+            customLabel: null,
+            quickCommandLabel: null,
+            generatedLabel: 'Gen',
+            label: 'Plain'
+          }
+        ]
+      } as unknown as AppState['unifiedTabsByWorktree']
+    })
+
+    expect(resolvePinnedTabLabel(state, 'wt-1', 'a')).toBe('Plain')
   })
 
   it('returns an empty string when the tab is not found', () => {

@@ -521,6 +521,7 @@
       },
       "useIpcEvents": {
         "0e3cf53060": "Pestaña del navegador {{value0}} no encontrada",
+        "2f6637fe6c": "La pestaña del navegador {{value0}} está fijada",
         "a8d2bf8e9e": "No hay ninguna pestaña activa del navegador para cerrar",
         "291c8ed902": "Las pestañas del navegador no están disponibles mientras un tiempo de ejecución remoto está activo",
         "f45fa2b03c": "Los perfiles del navegador no están disponibles mientras un tiempo de ejecución remoto está activo",
@@ -2349,10 +2350,10 @@
             }
           },
           "PinnedTabCloseDialog": {
-            "6c190f295a": "Close pinned tab?",
-            "0d1963f4a6": "This tab is pinned. Are you sure you want to close it?",
-            "0b38ee2f86": "Cancel",
-            "c337c9d75c": "Close"
+            "6c190f295a": "¿Cerrar pestaña fijada?",
+            "0d1963f4a6": "Esta pestaña está fijada. ¿Seguro que quieres cerrarla?",
+            "0b38ee2f86": "Cancelar",
+            "c337c9d75c": "Cerrar"
           }
         }
       },
@@ -4745,8 +4746,8 @@
         },
         "GeneralPane": {
           "d58fccfd84": "Navegación",
-          "5cb5475664": "Confirm before closing pinned tabs",
-          "36b2a5dc6d": "Show a confirmation dialog before a pinned tab is closed."
+          "5cb5475664": "Confirmar antes de cerrar pestañas fijadas",
+          "36b2a5dc6d": "Muestra un diálogo de confirmación antes de cerrar una pestaña fijada."
         },
         "GeneralSupportSection": {
           "af7d9f4396": "¡Gracias por el apoyo!",
@@ -6901,8 +6902,8 @@
             "7baf524b04": "espacio de trabajo",
             "d0bc793689": "Directorio raíz donde se crean las carpetas del espacio de trabajo.",
             "4c95d08fa2": "Directorio de espacio de trabajo",
-            "161a86a9da": "Confirm before closing pinned tabs",
-            "8e593f04fc": "Show a confirmation dialog before a pinned tab is closed."
+            "161a86a9da": "Confirmar antes de cerrar pestañas fijadas",
+            "8e593f04fc": "Muestra un diálogo de confirmación antes de cerrar una pestaña fijada."
           }
         },
         "git": {

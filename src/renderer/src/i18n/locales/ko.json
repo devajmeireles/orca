@@ -521,6 +521,7 @@
       },
       "useIpcEvents": {
         "0e3cf53060": "브라우저 탭 {{value0}}을(를) 찾을 수 없습니다",
+        "2f6637fe6c": "브라우저 탭 {{value0}}이(가) 고정되어 있습니다",
         "a8d2bf8e9e": "닫을 활성 브라우저 탭이 없습니다.",
         "291c8ed902": "원격 런타임이 활성화된 동안에는 브라우저 탭을 사용할 수 없습니다.",
         "f45fa2b03c": "원격 런타임이 활성화된 동안에는 브라우저 프로필을 사용할 수 없습니다.",
@@ -2349,10 +2350,10 @@
             }
           },
           "PinnedTabCloseDialog": {
-            "6c190f295a": "Close pinned tab?",
-            "0d1963f4a6": "This tab is pinned. Are you sure you want to close it?",
-            "0b38ee2f86": "Cancel",
-            "c337c9d75c": "Close"
+            "6c190f295a": "고정된 탭을 닫을까요?",
+            "0d1963f4a6": "이 탭은 고정되어 있습니다. 정말 닫으시겠어요?",
+            "0b38ee2f86": "취소",
+            "c337c9d75c": "닫기"
           }
         }
       },
@@ -4730,8 +4731,8 @@
         },
         "GeneralPane": {
           "d58fccfd84": "항해",
-          "5cb5475664": "Confirm before closing pinned tabs",
-          "36b2a5dc6d": "Show a confirmation dialog before a pinned tab is closed."
+          "5cb5475664": "고정된 탭을 닫기 전에 확인",
+          "36b2a5dc6d": "고정된 탭을 닫기 전에 확인 대화상자를 표시합니다."
         },
         "GeneralSupportSection": {
           "af7d9f4396": "지원해 주셔서 감사합니다!",
@@ -6886,8 +6887,8 @@
             "7baf524b04": "워크스페이스",
             "d0bc793689": "워크스페이스 폴더가 생성되는 루트 디렉터리입니다.",
             "4c95d08fa2": "워크스페이스 디렉토리",
-            "161a86a9da": "Confirm before closing pinned tabs",
-            "8e593f04fc": "Show a confirmation dialog before a pinned tab is closed."
+            "161a86a9da": "고정된 탭을 닫기 전에 확인",
+            "8e593f04fc": "고정된 탭을 닫기 전에 확인 대화상자를 표시합니다."
           }
         },
         "git": {

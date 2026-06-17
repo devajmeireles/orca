@@ -521,6 +521,7 @@
       },
       "useIpcEvents": {
         "0e3cf53060": "Browser tab {{value0}} not found",
+        "2f6637fe6c": "Browser tab {{value0}} is pinned",
         "a8d2bf8e9e": "No active browser tab to close",
         "291c8ed902": "Browser tabs are unavailable while a remote runtime is active",
         "f45fa2b03c": "Browser profiles are unavailable while a remote runtime is active",

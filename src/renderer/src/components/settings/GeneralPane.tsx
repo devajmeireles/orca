@@ -42,6 +42,8 @@ export {
 } from './GeneralNetworkSettingsSection'
 export { shouldCommitOpenInApplicationsDraft } from './OpenInMenuSetting'
 
+type GeneralSearchEntry = ReturnType<typeof getGeneralNavigationSearchEntries>[number]
+
 export function getDesktopPlatformFromUserAgent(userAgent: string): 'darwin' | 'win32' | 'other' {
   if (userAgent.includes('Mac')) {
     return 'darwin'
@@ -53,6 +55,19 @@ export function getDesktopPlatformFromUserAgent(userAgent: string): 'darwin' | '
 }
 
 export { getGeneralPaneSearchEntries }
+
+export function getTabOrderControlSearchKeywords(
+  navigationEntries: GeneralSearchEntry[] = getGeneralNavigationSearchEntries()
+): string[] {
+  const tabOrderSearchEntry = navigationEntries[0]
+  return tabOrderSearchEntry
+    ? [
+        tabOrderSearchEntry.title,
+        tabOrderSearchEntry.description ?? '',
+        ...(tabOrderSearchEntry.keywords ?? [])
+      ]
+    : []
+}
 
 type GeneralPaneProps = {
   settings: GlobalSettings
@@ -70,20 +85,18 @@ export function GeneralPane({
   wslCapabilitiesLoading
 }: GeneralPaneProps): React.JSX.Element {
   const searchQuery = useAppStore((s) => s.settingsSearchQuery)
+  const generalNavigationSearchEntries = getGeneralNavigationSearchEntries()
+  const tabOrderKeywords = getTabOrderControlSearchKeywords(generalNavigationSearchEntries)
 
   const visibleSections = [
-    matchesSettingsSearch(searchQuery, getGeneralNavigationSearchEntries()) ? (
+    matchesSettingsSearch(searchQuery, generalNavigationSearchEntries) ? (
       <section key="navigation" className="space-y-4">
         <SettingsSubsectionHeader
           title={translate('auto.components.settings.GeneralPane.d58fccfd84', 'Navigation')}
         />
         <RecentTabOrderControl
           ctrlTabOrderMode={settings.ctrlTabOrderMode ?? 'mru'}
-          keywords={getGeneralNavigationSearchEntries().flatMap((entry) => [
-            entry.title,
-            entry.description ?? '',
-            ...(entry.keywords ?? [])
-          ])}
+          keywords={tabOrderKeywords}
           updateSettings={updateSettings}
         />
         <SearchableSetting

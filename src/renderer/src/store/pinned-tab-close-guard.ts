@@ -1,8 +1,8 @@
 import { useAppStore } from '@/store'
+import { resolveUnifiedTabLabel } from '../../../shared/tab-title-resolution'
 import type { AppState } from './types'
 
-/** Resolves the display label of a pinned unified tab for the confirmation
- *  dialog. Mirrors the tab strip priority: customLabel ?? generatedLabel ?? label. */
+/** Resolves the displayed tab-strip label for the destructive confirmation. */
 export function resolvePinnedTabLabel(
   state: AppState,
   worktreeId: string,
@@ -11,7 +11,7 @@ export function resolvePinnedTabLabel(
   const tab = (state.unifiedTabsByWorktree?.[worktreeId] ?? []).find(
     (candidate) => candidate.id === visibleId || candidate.entityId === visibleId
   )
-  return tab?.customLabel ?? tab?.generatedLabel ?? tab?.label ?? ''
+  return resolveUnifiedTabLabel(tab, state.settings?.tabAutoGenerateTitle === true)
 }
 
 /** Whether the unified tab matching `tabId` (by id or entityId) in the given
@@ -31,8 +31,9 @@ export function guardPinnedTabClose(params: {
   isPinned: boolean
   tabLabel: string
   onClose: () => void
+  onCancel?: () => void
 }): void {
-  const { isPinned, tabLabel, onClose } = params
+  const { isPinned, tabLabel, onClose, onCancel } = params
   if (!isPinned) {
     onClose()
     return
@@ -45,5 +46,9 @@ export function guardPinnedTabClose(params: {
     return
   }
 
-  state.requestPinnedTabCloseConfirm({ tabLabel, onConfirm: onClose })
+  state.requestPinnedTabCloseConfirm({
+    tabLabel,
+    onConfirm: onClose,
+    ...(onCancel ? { onCancel } : {})
+  })
 }

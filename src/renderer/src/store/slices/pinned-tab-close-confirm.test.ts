@@ -74,4 +74,19 @@ describe('createPinnedTabCloseConfirmSlice', () => {
     expect(onConfirm).not.toHaveBeenCalled()
     expect(store.getState().pinnedTabCloseConfirm).toBeNull()
   })
+
+  it('runs onCancel and clears the request when dismissed', () => {
+    const store = makeStore()
+    const onCancel = vi.fn()
+    store.getState().requestPinnedTabCloseConfirm({
+      tabLabel: 'Docs',
+      onConfirm: vi.fn(),
+      onCancel
+    })
+
+    store.getState().dismissPinnedTabClose()
+
+    expect(onCancel).toHaveBeenCalledTimes(1)
+    expect(store.getState().pinnedTabCloseConfirm).toBeNull()
+  })
 })

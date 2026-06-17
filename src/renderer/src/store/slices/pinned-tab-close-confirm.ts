@@ -6,6 +6,7 @@ import type { AppState } from '../types'
 export type PinnedTabCloseConfirmRequest = {
   tabLabel: string
   onConfirm: () => void
+  onCancel?: () => void
 }
 
 export type PinnedTabCloseConfirmSlice = {
@@ -36,5 +37,13 @@ export const createPinnedTabCloseConfirmSlice: StateCreator<
     request.onConfirm()
   },
 
-  dismissPinnedTabClose: () => set({ pinnedTabCloseConfirm: null })
+  dismissPinnedTabClose: () => {
+    const request = get().pinnedTabCloseConfirm
+    if (!request) {
+      return
+    }
+    // Why: CLI close requests wait for a response even when the user cancels.
+    set({ pinnedTabCloseConfirm: null })
+    request.onCancel?.()
+  }
 })
