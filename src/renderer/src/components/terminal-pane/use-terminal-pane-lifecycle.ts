@@ -80,6 +80,7 @@ import {
 import { acquireWebviewsDragPassthrough } from '../browser-pane/webview-registry'
 import { recordCreatedTerminalPaneSplit } from './terminal-pane-split-completion'
 import { closeTerminalTab } from '../terminal/terminal-tab-actions'
+import { seedStartupSessionRestoredBanner } from './session-restored-banner-pane-state'
 
 export function recordRuntimeCreatedTerminalPaneSplit(
   createdPane: unknown,
@@ -116,10 +117,15 @@ type UseTerminalPaneLifecycleDeps = {
   cwd?: string
   startup?: {
     command: string
+    /** Renderer-delivered startup input for callers that need xterm paste
+     *  semantics before the submit Enter. */
+    delivery?: 'terminal-paste'
     env?: Record<string, string>
     /** Telemetry payload for `agent_started`. Forwarded to `pty:spawn`
      *  so main fires the event only after the spawn succeeds. */
     telemetry?: EventProps<'agent_started'>
+    /** Show the restored-session banner when this startup command mounts. */
+    showSessionRestoredBanner?: boolean
   } | null
   /** When present, the initial pane boots clean and a split pane is created
    *  (vertical or horizontal per the user setting) to run the setup command —
@@ -175,6 +181,7 @@ type UseTerminalPaneLifecycleDeps = {
   clearWorktreeUnread: (worktreeId: string) => void
   clearTerminalTabUnread: (tabId: string) => void
   clearTerminalPaneUnread: (paneKey: string) => void
+  onShowSessionRestoredBanner: (paneId: number) => void
   dispatchNotification: (event: {
     source: 'terminal-bell' | 'agent-task-complete'
     terminalTitle?: string
@@ -357,6 +364,7 @@ export function useTerminalPaneLifecycle({
   clearWorktreeUnread,
   clearTerminalTabUnread,
   clearTerminalPaneUnread,
+  onShowSessionRestoredBanner,
   dispatchNotification,
   setCacheTimerStartedAt,
   syncPanePtyLayoutBinding,
@@ -543,6 +551,7 @@ export function useTerminalPaneLifecycle({
       clearWorktreeUnread,
       clearTerminalTabUnread,
       clearTerminalPaneUnread,
+      onShowSessionRestoredBanner,
       dispatchNotification,
       setCacheTimerStartedAt,
       syncPanePtyLayoutBinding,
@@ -709,6 +718,7 @@ export function useTerminalPaneLifecycle({
           requestOpenLinksInAppPreference
         })
         httpLinkClickFallbackDisposables.set(pane.id, httpLinkClickFallbackDisposable)
+        seedStartupSessionRestoredBanner(ptyDeps.startup, pane.id, onShowSessionRestoredBanner)
         // Why: skip empty selections so clicking to deselect doesn't clobber
         // whatever the user last copied elsewhere.
         const selectionDisposable = pane.terminal.onSelectionChange(() => {

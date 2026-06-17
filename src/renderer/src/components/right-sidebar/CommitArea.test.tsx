@@ -228,6 +228,22 @@ describe('CommitArea', () => {
     expect(markup).toContain('commit-area-remote-error')
   })
 
+  it('formats pull policy errors with command options', () => {
+    const markup = renderCommitArea({
+      ...baseProps(),
+      remoteActionError:
+        'Pull needs a Git pull policy for divergent branches. Configure one for this repository or host, then try again: git config pull.rebase false (merge), git config pull.rebase true (rebase), or git config pull.ff only (fast-forward only).'
+    })
+
+    expect(markup).toContain('Pull needs a policy')
+    expect(markup).toContain('Diverged')
+    expect(markup).toContain('git config pull.rebase false')
+    expect(markup).toContain('git config pull.rebase true')
+    expect(markup).toContain('git config pull.ff only')
+    expect(markup).toContain('aria-label="Copy merge pull policy command"')
+    expect(markup).toContain('commit-area-remote-error')
+  })
+
   it('keeps generation errors separate from commit and remote errors', () => {
     const markup = renderCommitArea({
       ...baseProps(),
@@ -371,6 +387,7 @@ describe('CommitArea', () => {
 
     const stageAllButton = firstButton(markup)
     expect(stageAllButton).toContain('Stage All')
+    expect(stageAllButton).toContain('data-variant="outline"')
     expect(stageAllButton).not.toContain('disabled=""')
     expect(stageAllButton).toContain('lucide-plus')
     expect(stageAllButton).toContain('rounded-r-none')
@@ -403,6 +420,7 @@ describe('CommitArea', () => {
 
     const pushButton = firstButton(markup)
     expect(pushButton).toContain('Push')
+    expect(pushButton).toContain('data-variant="outline"')
     expect(pushButton).not.toContain('disabled=""')
     expect(pushButton).toContain('lucide-arrow-up')
     expect(pushButton).toContain('rounded-r-none')
