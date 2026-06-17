@@ -34,10 +34,10 @@ export type KeybindingActionId =
   | 'worktree.navigateDown'
   | 'app.settings'
   | 'app.forceReload'
-  | 'file.exportPdf'
   | 'workspace.create'
   | 'workspace.rename'
   | 'workspace.delete'
+  | 'workspace.openBoard'
   | 'voice.dictation'
   | 'view.tasks'
   | 'sidebar.left.toggle'
@@ -203,15 +203,6 @@ export const KEYBINDING_DEFINITIONS: readonly KeybindingDefinition[] = [
     conflictGroup: 'menu'
   },
   {
-    id: 'file.exportPdf',
-    title: 'Export as PDF',
-    group: 'Global',
-    scope: 'global',
-    searchKeywords: ['shortcut', 'export', 'pdf', 'markdown'],
-    defaultBindings: platformBindings(['Mod+Shift+E']),
-    conflictGroup: 'menu'
-  },
-  {
     id: 'worktree.palette',
     title: 'Switch worktree',
     group: 'Global',
@@ -280,6 +271,17 @@ export const KEYBINDING_DEFINITIONS: readonly KeybindingDefinition[] = [
     ],
     // Why: ship the command now without claiming a default chord; user
     // overrides still win automatically when a future default is assigned.
+    defaultBindings: platformBindings([]),
+    allowInTerminal: true
+  },
+  {
+    id: 'workspace.openBoard',
+    title: 'Open Workspace Board',
+    group: 'Global',
+    scope: 'global',
+    searchKeywords: ['shortcut', 'global', 'workspace', 'board', 'kanban', 'worktree'],
+    // Why: make the command configurable without taking a global chord from
+    // terminal/browser/editor users by default.
     defaultBindings: platformBindings([]),
     allowInTerminal: true
   },

@@ -26,7 +26,6 @@ export type WindowShortcutInput = {
 export type WindowShortcutAction =
   | { type: 'zoom'; direction: 'in' | 'out' | 'reset' }
   | { type: 'openSettings' }
-  | { type: 'exportPdf' }
   | { type: 'forceReload' }
   | { type: 'toggleWorktreePalette' }
   | { type: 'toggleFloatingTerminal' }
@@ -35,6 +34,7 @@ export type WindowShortcutAction =
   | { type: 'openQuickOpen' }
   | { type: 'openNewWorkspace' }
   | { type: 'deleteCurrentWorkspace' }
+  | { type: 'openWorkspaceBoard' }
   | { type: 'openTasks' }
   | { type: 'switchRecentTab' }
   | { type: 'jumpToWorktreeIndex'; index: number }
@@ -190,10 +190,6 @@ export function resolveWindowShortcutAction(
     return { type: 'openSettings' }
   }
 
-  if (actionMatches('file.exportPdf', input, platform, keybindings, options)) {
-    return { type: 'exportPdf' }
-  }
-
   if (actionMatches('app.forceReload', input, platform, keybindings, options)) {
     return { type: 'forceReload' }
   }
@@ -226,6 +222,10 @@ export function resolveWindowShortcutAction(
 
   if (actionMatches('workspace.delete', input, platform, keybindings, options)) {
     return { type: 'deleteCurrentWorkspace' }
+  }
+
+  if (actionMatches('workspace.openBoard', input, platform, keybindings, options)) {
+    return { type: 'openWorkspaceBoard' }
   }
 
   if (actionMatches('voice.dictation', input, platform, keybindings, options)) {
@@ -280,8 +280,6 @@ export function getWindowShortcutActionId(action: WindowShortcutAction): Keybind
           : 'zoom.reset'
     case 'openSettings':
       return 'app.settings'
-    case 'exportPdf':
-      return 'file.exportPdf'
     case 'forceReload':
       return 'app.forceReload'
     case 'toggleWorktreePalette':
@@ -298,6 +296,8 @@ export function getWindowShortcutActionId(action: WindowShortcutAction): Keybind
       return 'workspace.create'
     case 'deleteCurrentWorkspace':
       return 'workspace.delete'
+    case 'openWorkspaceBoard':
+      return 'workspace.openBoard'
     case 'openTasks':
       return 'view.tasks'
     case 'switchRecentTab':

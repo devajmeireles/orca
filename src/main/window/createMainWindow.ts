@@ -781,11 +781,6 @@ export function createMainWindow(
       return
     }
 
-    if (action.type === 'exportPdf') {
-      mainWindow.webContents.send('export:requestPdf')
-      return
-    }
-
     if (action.type === 'forceReload') {
       opts?.onBeforeReload?.({
         ignoreCache: true,
@@ -834,6 +829,11 @@ export function createMainWindow(
 
     if (action.type === 'deleteCurrentWorkspace') {
       mainWindow.webContents.send('ui:deleteCurrentWorkspace')
+      return
+    }
+
+    if (action.type === 'openWorkspaceBoard') {
+      mainWindow.webContents.send('ui:openWorkspaceBoard')
       return
     }
 

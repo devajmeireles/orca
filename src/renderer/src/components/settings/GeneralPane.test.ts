@@ -4,6 +4,7 @@ import {
   createHttpProxyBypassRulesDraftState,
   createHttpProxyUrlDraftState,
   getDesktopPlatformFromUserAgent,
+  getGeneralPaneSearchEntries,
   getTabOrderControlSearchKeywords,
   setHttpProxyUrlDraftErrorState,
   shouldCommitOpenInApplicationsDraft,
@@ -11,6 +12,7 @@ import {
   updateHttpProxyBypassRulesDraftState,
   updateHttpProxyUrlDraftState
 } from './GeneralPane'
+import { matchesSettingsSearch } from './settings-search'
 
 describe('GeneralPane auto-save delay drafts', () => {
   it('keeps a committed draft tied to the current persisted source while settings save is pending', () => {
@@ -141,5 +143,23 @@ describe('GeneralPane navigation search keywords', () => {
     expect(keywords).not.toContain('pinned')
     expect(keywords).not.toContain('confirm')
     expect(keywords).not.toContain('close')
+  })
+})
+
+describe('GeneralPane search entries', () => {
+  it('includes the default project runtime setting', () => {
+    const entries = getGeneralPaneSearchEntries()
+
+    expect(matchesSettingsSearch('default project runtime', entries)).toBe(true)
+    expect(matchesSettingsSearch('windows host', entries)).toBe(true)
+    expect(matchesSettingsSearch('wsl', entries)).toBe(true)
+  })
+
+  it('omits the default project runtime setting when Windows runtimes are unsupported', () => {
+    const entries = getGeneralPaneSearchEntries({ includeProjectRuntime: false })
+
+    expect(matchesSettingsSearch('default project runtime', entries)).toBe(false)
+    expect(matchesSettingsSearch('windows host', entries)).toBe(false)
+    expect(matchesSettingsSearch('wsl', entries)).toBe(false)
   })
 })
