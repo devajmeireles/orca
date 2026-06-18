@@ -85,7 +85,7 @@ export function deriveNotesSendAgentTargets(
     }
 
     const ptyId = layout.ptyIdsByLeafId?.[leafId] ?? null
-    if (!ptyId) {
+    if (!ptyId || !state.ptyIdsByTabId[tab.id]?.includes(ptyId)) {
       continue
     }
 

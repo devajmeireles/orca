@@ -71,16 +71,30 @@ function state(
     agentStatusByPaneKey: Record<string, AgentStatusEntry>
     tabsByWorktree: Record<string, TerminalTab[]>
     terminalLayoutsByTabId: Record<string, TerminalLayoutSnapshot>
+    ptyIdsByTabId: Record<string, string[]>
     runtimePaneTitlesByTabId: Record<string, Record<number, string>>
   }> = {}
 ): NotesSendAgentTargetState {
+  const terminalLayoutsByTabId = overrides.terminalLayoutsByTabId ?? {}
   return {
     agentStatusByPaneKey: {},
     tabsByWorktree: { [WORKTREE_ID]: [] },
-    terminalLayoutsByTabId: {},
+    terminalLayoutsByTabId,
+    ptyIdsByTabId: deriveLivePtyIdsByTabId(terminalLayoutsByTabId),
     runtimePaneTitlesByTabId: {},
     ...overrides
   } as NotesSendAgentTargetState
+}
+
+function deriveLivePtyIdsByTabId(
+  terminalLayoutsByTabId: Record<string, TerminalLayoutSnapshot>
+): Record<string, string[]> {
+  return Object.fromEntries(
+    Object.entries(terminalLayoutsByTabId).map(([tabId, layout]) => [
+      tabId,
+      Object.values(layout.ptyIdsByLeafId ?? {})
+    ])
+  )
 }
 
 describe('notes send agent targets', () => {
@@ -171,6 +185,23 @@ describe('notes send agent targets', () => {
           [WORKTREE_ID]: [tab(LAUNCH_TAB_ID, { title: 'Codex', launchAgent: 'codex' })]
         },
         terminalLayoutsByTabId: { [LAUNCH_TAB_ID]: leafLayout(LEAF_B, null) },
+        runtimePaneTitlesByTabId: { [LAUNCH_TAB_ID]: { 1: 'Codex' } }
+      }),
+      WORKTREE_ID,
+      NOW
+    )
+
+    expect(targets).toEqual([])
+  })
+
+  it('skips a launch-agent tab when only stale layout PTY state remains', () => {
+    const targets = deriveNotesSendAgentTargets(
+      state({
+        tabsByWorktree: {
+          [WORKTREE_ID]: [tab(LAUNCH_TAB_ID, { title: 'Codex', launchAgent: 'codex' })]
+        },
+        terminalLayoutsByTabId: { [LAUNCH_TAB_ID]: leafLayout(LEAF_B, 'pty-b') },
+        ptyIdsByTabId: { [LAUNCH_TAB_ID]: [] },
         runtimePaneTitlesByTabId: { [LAUNCH_TAB_ID]: { 1: 'Codex' } }
       }),
       WORKTREE_ID,
