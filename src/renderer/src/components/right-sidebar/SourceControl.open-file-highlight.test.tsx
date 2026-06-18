@@ -205,7 +205,9 @@ function row(path: string, area: GitStatusEntry['area']): HTMLDivElement | null 
 }
 
 function isHighlighted(element: HTMLElement | null): boolean {
-  if (!element) return false
+  if (!element) {
+    return false
+  }
   return (
     element.getAttribute('data-current') === 'true' &&
     element.classList.contains('bg-accent') &&
@@ -306,5 +308,78 @@ describe('SourceControl open-file highlight', () => {
     renderSourceControl()
 
     expect(isHighlighted(row('src/file.ts', 'unstaged'))).toBe(false)
+  })
+
+  it('does not highlight pending rows for branch compare tabs with the same path', () => {
+    resetState({
+      gitStatusByWorktree: {
+        [mocks.activeWorktree.id]: [gitEntry({ path: 'src/file.ts', area: 'unstaged' })]
+      },
+      openFiles: [
+        {
+          id: 'tab-1',
+          worktreeId: mocks.activeWorktree.id,
+          relativePath: 'src/file.ts',
+          diffSource: 'branch'
+        }
+      ],
+      activeFileIdByWorktree: { [mocks.activeWorktree.id]: 'tab-1' },
+      activeTabTypeByWorktree: { [mocks.activeWorktree.id]: 'editor' }
+    })
+    renderSourceControl()
+
+    expect(isHighlighted(row('src/file.ts', 'unstaged'))).toBe(false)
+  })
+
+  it('falls back to a staged-only row for an ordinary editor tab', () => {
+    resetState({
+      gitStatusByWorktree: {
+        [mocks.activeWorktree.id]: [gitEntry({ path: 'src/file.ts', area: 'staged' })]
+      },
+      openFiles: [
+        {
+          id: 'tab-1',
+          worktreeId: mocks.activeWorktree.id,
+          relativePath: 'src/file.ts'
+        }
+      ],
+      activeFileIdByWorktree: { [mocks.activeWorktree.id]: 'tab-1' },
+      activeTabTypeByWorktree: { [mocks.activeWorktree.id]: 'editor' }
+    })
+    renderSourceControl()
+
+    expect(isHighlighted(row('src/file.ts', 'staged'))).toBe(true)
+  })
+
+  it('falls back to the visible staged row when the working-tree section is collapsed', () => {
+    resetState({
+      gitStatusByWorktree: {
+        [mocks.activeWorktree.id]: [
+          gitEntry({ path: 'src/file.ts', area: 'staged' }),
+          gitEntry({ path: 'src/file.ts', area: 'unstaged' })
+        ]
+      },
+      openFiles: [
+        {
+          id: 'tab-1',
+          worktreeId: mocks.activeWorktree.id,
+          relativePath: 'src/file.ts'
+        }
+      ],
+      activeFileIdByWorktree: { [mocks.activeWorktree.id]: 'tab-1' },
+      activeTabTypeByWorktree: { [mocks.activeWorktree.id]: 'editor' }
+    })
+    renderSourceControl()
+
+    const changesHeader = Array.from(container.querySelectorAll('button')).find((button) =>
+      button.textContent?.includes('Changes')
+    )
+    expect(changesHeader).toBeTruthy()
+    act(() => {
+      changesHeader?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    })
+
+    expect(row('src/file.ts', 'unstaged')).toBeNull()
+    expect(isHighlighted(row('src/file.ts', 'staged'))).toBe(true)
   })
 })

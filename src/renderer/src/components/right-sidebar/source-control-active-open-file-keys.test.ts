@@ -33,10 +33,33 @@ describe('buildActiveOpenRowKeys', () => {
     )
   })
 
-  it('treats an untracked file (opened as an unstaged diff) and an edit tab like the working tree', () => {
+  it('treats an untracked file opened as an unstaged diff like the working tree', () => {
+    expect(buildActiveOpenRowKeys('unstaged::docs/readme.md')).toEqual(
+      new Set(['unstaged::docs/readme.md', 'untracked::docs/readme.md'])
+    )
+  })
+
+  it('matches edit tabs to working-tree rows before staged-only fallback', () => {
     expect(buildActiveOpenRowKeys('edit::docs/readme.md')).toEqual(
       new Set(['unstaged::docs/readme.md', 'untracked::docs/readme.md'])
     )
+    expect(
+      buildActiveOpenRowKeys(
+        'edit::docs/readme.md',
+        new Set(['staged::docs/readme.md', 'unstaged::docs/readme.md'])
+      )
+    ).toEqual(new Set(['unstaged::docs/readme.md']))
+    expect(
+      buildActiveOpenRowKeys('edit::docs/readme.md', new Set(['staged::docs/readme.md']))
+    ).toEqual(new Set(['staged::docs/readme.md']))
+  })
+
+  it('does not match compare or combined diff tabs to pending rows', () => {
+    expect(buildActiveOpenRowKeys('branch::src/file.ts').size).toBe(0)
+    expect(buildActiveOpenRowKeys('commit::src/file.ts').size).toBe(0)
+    expect(buildActiveOpenRowKeys('combined-uncommitted::src/file.ts').size).toBe(0)
+    expect(buildActiveOpenRowKeys('combined-branch::src/file.ts').size).toBe(0)
+    expect(buildActiveOpenRowKeys('combined-commit::src/file.ts').size).toBe(0)
   })
 
   it('returns an empty set when there is no active open file', () => {

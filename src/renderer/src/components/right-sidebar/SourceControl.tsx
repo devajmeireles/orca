@@ -3786,9 +3786,17 @@ function SourceControlInner(): React.JSX.Element {
     return buildActiveOpenFileSignature(activeFile.diffSource, activeFile.relativePath)
   })
 
+  const activeOpenAvailableRowKeys = useMemo(() => {
+    const keys = new Set<string>()
+    for (const entry of visibleSelectionEntries) {
+      keys.add(entry.key)
+    }
+    return keys
+  }, [visibleSelectionEntries])
+
   const activeOpenRowKeys = useMemo(
-    () => buildActiveOpenRowKeys(activeOpenFileSignature),
-    [activeOpenFileSignature]
+    () => buildActiveOpenRowKeys(activeOpenFileSignature, activeOpenAvailableRowKeys),
+    [activeOpenAvailableRowKeys, activeOpenFileSignature]
   )
 
   const handleOpenDiff = useCallback(
@@ -7427,8 +7435,9 @@ const UncommittedEntryRow = React.memo(function UncommittedEntryRow({
         // lighter bulk-selection tint so the open file always reads as active.
         data-current={isOpenFile ? 'true' : undefined}
         className={cn(
-          'group relative flex cursor-pointer items-center gap-1 pr-3 py-1 transition-colors hover:bg-accent/40',
-          isOpenFile ? 'bg-accent' : selected && 'bg-accent/60'
+          'group relative flex cursor-pointer items-center gap-1 pr-3 py-1 transition-colors',
+          isOpenFile ? 'bg-accent hover:bg-accent' : 'hover:bg-accent/40',
+          !isOpenFile && selected && 'bg-accent/60'
         )}
         style={{
           paddingLeft: `${depth * SOURCE_CONTROL_TREE_INDENT_PX + SOURCE_CONTROL_TREE_FILE_PADDING_PX}px`
