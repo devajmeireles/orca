@@ -527,6 +527,7 @@
       },
       "useIpcEvents": {
         "0e3cf53060": "브라우저 탭 {{value0}}을(를) 찾을 수 없습니다",
+        "2f6637fe6c": "브라우저 탭 {{value0}}이(가) 고정되어 있습니다",
         "a8d2bf8e9e": "닫을 활성 브라우저 탭이 없습니다.",
         "291c8ed902": "원격 런타임이 활성화된 동안에는 브라우저 탭을 사용할 수 없습니다.",
         "f45fa2b03c": "원격 런타임이 활성화된 동안에는 브라우저 프로필을 사용할 수 없습니다.",
@@ -912,7 +913,8 @@
         "16e9e3df89": "별표가 붙은",
         "0d0ace8861": "GitHub에서 별표 주기",
         "ec43b38ba7": "GitHub에 별표 표시됨",
-        "157bb5ecbb": "GitHub 열기"
+        "157bb5ecbb": "GitHub 열기",
+        "preflightDismiss": "Dismiss"
       },
       "LinearIssueMarkdownDescriptionEditor": {
         "d9c47069ef": "Markdown",
@@ -2247,11 +2249,18 @@
           },
           "MobileDriverOverlay": {
             "c6460cf584": "회수",
-            "c44659e09f": "모바일 원격 조작",
+            "c8f2e1a4b9": "이 터미널 다시 가져오기",
+            "c44659e09f": "휴대폰 조작 중",
             "7cffad954c": "접기",
             "3eed73394f": "키보드가 일시중지되었습니다.",
-            "faa367dc74": "이 terminal은 모바일 앱에 맞게 크기가 조정됩니다.",
-            "54f7d6f69d": "모든 terminal 크기 조정"
+            "faa367dc74": "휴대폰이 휴대폰 크기로 남겨 둠",
+            "54f7d6f69d": "모든 터미널 다시 가져오기",
+            "b3d8e1f42a": "이 터미널 복원",
+            "e8c4f2a91b": "모든 터미널 복원",
+            "f2a8b9c1d3": "휴대폰에서",
+            "c7e4a2b8f1": "휴대폰이 제어 중",
+            "d9f3c6e2a4": "데스크톱 키보드가 일시 중지되었습니다. 여기서 입력하려면 이 터미널을 다시 가져오거나, 휴대폰이 제어하는 모든 터미널을 다시 가져오거나, 계속 보려면 접으세요.",
+            "a6b1d8f3e2": "휴대폰 세션이 종료되었습니다. 이 터미널 또는 휴대폰이 휴대폰 크기로 남긴 모든 터미널을 데스크톱 크기로 복원하세요."
           },
           "TerminalAgentSessionForkDialog": {
             "17fc841e59": "컨텍스트 복사",
@@ -2353,6 +2362,13 @@
                 }
               }
             }
+          },
+          "PinnedTabCloseDialog": {
+            "6c190f295a": "고정된 탭을 닫을까요?",
+            "0d1963f4a6": "이 탭은 고정되어 있습니다. 정말 닫으시겠어요?",
+            "dont_ask_again": "고정된 탭에 대해 다시 묻지 않기",
+            "0b38ee2f86": "취소",
+            "c337c9d75c": "닫기"
           }
         }
       },
@@ -3657,7 +3673,9 @@
           "8ce44af9a8": "{{value0}} 이름 바꾸기",
           "395e541d5d": "상태",
           "34f03eb0de": "보드 설정",
-          "26cbc92150": "워크스페이스 보드 설정"
+          "26cbc92150": "워크스페이스 보드 설정",
+          "87d24a0c2f": "보드와 이슈 상태 동기화",
+          "4c2eaa78cc": "연결된 워크스페이스를 이동하면 일치하는 워크플로 상태가 있을 때 Linear 이슈 상태가 업데이트됩니다."
         },
         "WorkspaceKanbanStatusLane": {
           "8ad104642b": "비어 있는",
@@ -4129,6 +4147,19 @@
           "2d3e4f5a6b": "Check connection",
           "3c4d5e6f7a": "Manage host…",
           "6e7f8a9b0c": "Remove host…"
+        },
+        "WorkspaceKanbanDrawer": {
+          "1975a4e480": "작업 상태 동기화 실패",
+          "e02b0d92ff": "작업 상태 동기화 건너뜀",
+          "c1d2e3f4a5": "Linear 이슈 {{value0}}을(를) 읽을 수 없습니다.",
+          "d2e3f4a5b6": "{{value0}}에 일치하는 Linear 워크플로 상태가 없습니다.",
+          "e3f4a5b6c7": "{{value0}}에 일치하는 Linear 워크플로 상태가 여러 개입니다.",
+          "f4a5b6c7d8": "Linear 이슈 {{value0}}을(를) 업데이트할 수 없습니다.",
+          "a5b6c7d8e9": "Linear 이슈 {{value0}}을(를) 동기화할 수 없습니다.",
+          "b6c7d8e9f0": "작업 상태 동기화를 완료할 수 없습니다.",
+          "c7d8e9f0a1": "{{value0}}개 업데이트됨",
+          "d8e9f0a1b2": "{{value0}}개 건너뜀",
+          "e9f0a1b2c3": "{{value0}}개 실패"
         }
       },
       "shared": {
@@ -4251,7 +4282,9 @@
           "6627e75c92": "HTTP/1.1 호환성 설명",
           "e9506d3377": "HTTP/1.1 호환성",
           "8b7a8df299": "지원 문제 해결을 위한 낮은 수준의 해결 방법입니다.",
-          "8d8d8ac599": "호환성"
+          "8d8d8ac599": "호환성",
+          "network": "네트워크",
+          "networkDescription": "프록시 및 기업 환경을 위한 앱 수준 네트워크 라우팅."
         },
         "AgentLocationSetting": {
           "92f4238f1a": "WSL 기본값",
@@ -4662,9 +4695,9 @@
           "dac08ec03e": "작업 중..."
         },
         "ExperimentalPane": {
-          "9762364929": "생성된 작업 트리에 연결해야 하는 특정 폴더 또는 파일의 자동 심볼릭 링크를 허용합니다.",
-          "24416f42cd": "작업 트리의 심볼릭 링크",
-          "fb82ea1d7a": "구성된 파일이나 폴더를 새로 생성된 작업 트리에 자동으로 심볼릭 링크합니다.",
+          "9762364929": "가능하면 macOS에서 APFS clone-copy를 사용하고, 그렇지 않으면 구성된 폴더나 파일을 생성된 작업 트리에 심볼릭 링크합니다.",
+          "24416f42cd": "작업 트리의 공유 경로",
+          "fb82ea1d7a": "구성된 파일이나 폴더를 새로 생성된 작업 트리에 자동으로 배치합니다.",
           "a20d5ea365": "해당 패널과 상호 작용할 때까지 terminal 벨 또는 agent 완료 이벤트 후에 패널 수준 강조 표시를 유지합니다. 신호를 조정하는 동안 실험적입니다.",
           "ec897e8d89": "Terminal 주의",
           "88b7613afb": "terminal 벨 및 agent 완료 이벤트에 대한 지속적인 패널 강조 표시입니다.",
@@ -4703,7 +4736,7 @@
           "37df688d6f": "플로팅 워크스페이스를 활성화하고 새 탭이 시작되는 위치를 선택하세요.",
           "1f67f39384": "플로팅 워크스페이스"
         },
-        "GeneralCacheTimerSection": {
+        "AgentCacheTimerSection": {
           "05de84a104": "1시간",
           "54395ecd7c": "5분",
           "8b9e202e0a": "이를 공급자의 캐시 TTL과 일치시킵니다. 기본값은 5분입니다.",
@@ -4739,7 +4772,7 @@
           "d21136d9ef": "Orca가 파일 편집을 유지하는 방법을 구성합니다.",
           "45c6e85c4d": "편집자"
         },
-        "GeneralNetworkSettingsSection": {
+        "AdvancedNetworkSettingsSection": {
           "3e431564b5": "로컬호스트, 127.0.0.1, *.internal",
           "33ee3ca3af": "선택 사항. 쉼표, 세미콜론 또는 새 줄로 호스트를 구분합니다.",
           "f6d76cc8f4": "프록시 우회 규칙",
@@ -4750,10 +4783,13 @@
           "f00daf6324": "HTTP 프록시",
           "823e0f15b1": "Orca 네트워크 요청 및 로컬 terminal 하위 항목에 대한 프록시 URL입니다.",
           "d93c7cd531": "앱 수준 네트워크 라우팅을 구성합니다.",
-          "c46cdbbd4e": "회로망"
+          "c46cdbbd4e": "회로망",
+          "configureProxy": "프록시 구성"
         },
         "GeneralPane": {
           "d58fccfd84": "항해",
+          "5cb5475664": "고정된 탭을 닫기 전에 확인",
+          "36b2a5dc6d": "고정된 탭을 닫기 전에 확인 대화상자를 표시합니다.",
           "projectRuntime": "Project Runtime",
           "projectRuntimeDescription": "Default runtime for local Windows projects that do not override it."
         },
@@ -5083,7 +5119,7 @@
         },
         "MobilePane": {
           "dd3cd78d04": "Orca 모바일로 스캔",
-          "35100bca5d": "휴대폰에서 terminal을 사용하는 동안 Orca는 휴대폰 화면에 맞게 terminal을 축소합니다. 앱을 닫거나 다른 곳으로 전환하면 앱이 휴대폰 크기로 유지되는지(대화형 CLI 도구가 리플로우되지 않음) 또는 데스크탑으로 다시 크기가 조정되는지 여부가 제어됩니다. 언제든지 terminal 배너에서 복원을 클릭하여 수동으로 크기를 조정할 수 있습니다.",
+          "35100bca5d": "휴대폰에서 terminal을 사용하는 동안 Orca는 휴대폰 화면에 맞게 terminal을 축소합니다. 앱을 닫거나 다른 곳으로 전환하면 앱이 휴대폰 크기로 유지되는지(대화형 CLI 도구가 리플로우되지 않음) 또는 데스크탑으로 다시 크기가 조정되는지 여부가 제어됩니다. 배너에서 이 터미널 복원 또는 모든 터미널 복원을 사용해 언제든지 수동으로 크기를 조정할 수 있습니다.",
           "ee56f1c7e4": "모바일 앱을 나갈 때",
           "3939fd062c": "장치를 취소하면 즉시 연결이 끊어집니다.",
           "254a6d09e4": "페어링됨",
@@ -5724,7 +5760,8 @@
           "97dccee14e": "수정됨",
           "3b11ef3a43": "{{value0}} 바로가기",
           "f6579be67b": "바로가기 변경",
-          "6a7848fdac": "단축키 입력 대기 중"
+          "6a7848fdac": "단축키 입력 대기 중",
+          "a98d551407": "단축키를 누르거나 보조 키를 두 번 탭하세요(예: {{value0}}). Esc로 취소합니다."
         },
         "ShortcutFilterRail": {
           "28b63545bf": "상태",
@@ -6193,15 +6230,15 @@
         "WorktreeSymlinksSection": {
           "1c1e35b219": "{{value0}} 제거",
           "b814c618e2": "연결된 경로",
-          "31ebab5403": "이 저장소에 대해 구성된 심볼릭 링크 경로가 없습니다.",
+          "31ebab5403": "이 저장소에 구성된 공유 경로가 없습니다.",
           "ea06227efa": "추가됨",
           "b2429aeb31": "추가",
           "ab40b8a5f1": "일치하는 항목이 없습니다. 사용자 정의 경로를 추가하려면 계속 입력하세요.",
           "4cd2a4c077": "경로를 입력하세요(예: .env 또는 node_modules)…",
           "241325302c": "경로 추가",
-          "7ff265071d": "새 작업 트리가 생성되면 여기에 나열된 각 경로가 기본 체크아웃에서 심볼릭 링크됩니다.",
-          "4755f120b6": "작업 트리 심볼릭 링크",
-          "b07ef5a8b6": "기본 체크아웃에서 새로 생성된 작업 트리로의 심볼릭 링크 경로입니다.",
+          "7ff265071d": "새 작업 트리가 생성되면 여기에 나열된 각 경로는 가능한 경우 macOS에서 APFS clone-copy로 복사되고, 그렇지 않으면 기본 체크아웃에서 심볼릭 링크됩니다.",
+          "4755f120b6": "작업 트리 공유 경로",
+          "b07ef5a8b6": "기본 체크아웃에서 새로 생성된 작업 트리에 배치할 경로입니다.",
           "d72ba8dc68": "{{value0}} 경로",
           "9ea912d811": "경로 1개"
         },
@@ -6713,8 +6750,8 @@
             "10b52f79c1": "작업 트리",
             "d23ae13990": "작업 트리",
             "0d24759f14": "실험적인",
-            "603d29ed74": "구성된 파일 또는 폴더를 새로 생성된 작업 트리에 자동으로 심볼릭 링크하여 공유 상태(env, 캐시, 설치)가 연결된 상태를 유지합니다.",
-            "78c2a8dc74": "작업 트리의 심볼릭 링크",
+            "603d29ed74": "구성된 파일이나 폴더를 새로 생성된 작업 트리에 자동으로 배치합니다. 가능한 경우 macOS에서 APFS clone-copy를 사용하고, 그렇지 않으면 심볼릭 링크합니다.",
+            "78c2a8dc74": "작업 트리의 공유 경로",
             "7b79081695": "읽히지 않는",
             "f10d307468": "완성",
             "5f067ba0f9": "agent",
@@ -6923,6 +6960,8 @@
             "7baf524b04": "워크스페이스",
             "d0bc793689": "워크스페이스 폴더가 생성되는 루트 디렉터리입니다.",
             "4c95d08fa2": "워크스페이스 디렉토리",
+            "161a86a9da": "고정된 탭을 닫기 전에 확인",
+            "8e593f04fc": "고정된 탭을 닫기 전에 확인 대화상자를 표시합니다.",
             "defaultProjectRuntime": "Default Project Runtime",
             "defaultProjectRuntimeDescription": "Choose the runtime inherited by local Windows projects."
           }
@@ -7331,8 +7370,8 @@
             "f1c53f2820": "작업 트리",
             "7e228fc439": "심볼릭 링크",
             "c06adcf136": "심볼릭 링크",
-            "ed885e589f": "기본 체크아웃에서 새로 생성된 작업 트리로의 심볼릭 링크 경로입니다.",
-            "01b3377ebc": "작업 트리 심볼릭 링크",
+            "ed885e589f": "기본 체크아웃에서 새로 생성된 작업 트리에 배치할 경로입니다.",
+            "01b3377ebc": "작업 트리 공유 경로",
             "fff8834983": "프롬프트",
             "fa3131f223": "모델",
             "130d76dc16": "이름 변경",
@@ -7391,7 +7430,10 @@
             "keepForkUpToDate": "포크를 최신 상태로 유지",
             "keepForkUpToDateDescription": "이 포크를 upstream에서 안전하게 fast-forward합니다.",
             "projectRuntime": "Project Runtime",
-            "projectRuntimeDescription": "Choose whether this project runs on Windows or WSL."
+            "projectRuntimeDescription": "Choose whether this project runs on Windows or WSL.",
+            "copy": "copy",
+            "clone": "clone",
+            "apfs": "apfs"
           }
         },
         "runtime": {
@@ -11436,6 +11478,25 @@
         "sourceUnavailable": "{{value0}} source unavailable: {{value1}}",
         "someSourceHostsUnavailable": "Some {{value0}} source hosts unavailable: {{value1}}",
         "reconnectOrUpdateTitle": "Reconnect or update {{value0}} to load this source."
+      },
+      "ShortcutKeyCombo": {
+        "07eb4985a1": "Double-tap {{value0}}"
+      },
+      "star": {
+        "nag": {
+          "StarNagToastHost": {
+            "starredThanks": "Starred — thank you!",
+            "githubOpened": "GitHub opened",
+            "opening": "Opening…",
+            "starring": "Starring…",
+            "openGithub": "Open GitHub",
+            "starOnGithub": "Star on GitHub",
+            "onboardingCompleted": "Onboarding completed!",
+            "body": "If you’re enjoying Orca so far, a GitHub star helps other developers discover it.",
+            "dismiss": "Dismiss",
+            "later": "Later"
+          }
+        }
       }
     },
     "i18n": {

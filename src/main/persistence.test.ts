@@ -38,6 +38,7 @@ import {
 import { folderWorkspaceKey, worktreeWorkspaceKey } from '../shared/workspace-scope'
 import { toRuntimeExecutionHostId, toSshExecutionHostId } from '../shared/execution-host'
 import { SshConnectionStore } from './ssh/ssh-connection-store'
+import { setSourceControlActionDefault } from '../shared/source-control-ai-actions'
 
 // Shared mutable state so the electron mock can reference a per-test directory
 const testState = { dir: '' }
@@ -1909,6 +1910,48 @@ describe('Store', () => {
       commandInputTemplate: 'name this branch from {firstPrompt}'
     })
   })
+
+  it('keeps a cleared global commit-message recipe template after persistence re-read', async () => {
+    writeDataFile({
+      schemaVersion: 1,
+      repos: [],
+      worktreeMeta: {},
+      settings: {
+        commitMessageAi: {
+          enabled: true,
+          agentId: 'codex',
+          selectedModelByAgent: {},
+          selectedModelByAgentByHost: {},
+          discoveredModelsByAgent: {},
+          discoveredModelsByAgentByHost: {},
+          selectedThinkingByModel: {},
+          customPrompt: '모든 커밋 메시지는 한국어로 작성한다',
+          customAgentCommand: ''
+        }
+      },
+      ui: {},
+      githubCache: { pr: {}, issue: {} },
+      workspaceSession: {}
+    })
+
+    const store = await createStore()
+    const current = store.getSettings().sourceControlAi!
+    store.updateSettings({
+      sourceControlAi: {
+        ...current,
+        actions: setSourceControlActionDefault(current.actions, 'commitMessage', {
+          commandInputTemplate: '{basePrompt}'
+        })
+      }
+    })
+    store.flush()
+
+    const reopened = await createStore()
+    expect(reopened.getSettings().sourceControlAi?.actions?.commitMessage).toMatchObject({
+      commandInputTemplate: '{basePrompt}'
+    })
+    expect(reopened.getSettings().commitMessageAi?.customPrompt).toBe('')
+  }, 10_000)
 
   it('normalizes malformed visible task providers on load', async () => {
     writeDataFile({
@@ -4616,6 +4659,24 @@ describe('Store', () => {
 
     const store = await createStore()
     expect(store.getUI().sortBy).toBe('recent')
+  })
+
+  it('defaults workspace board task status sync off and normalizes persisted values', async () => {
+    writeDataFile({
+      schemaVersion: 1,
+      repos: [],
+      worktreeMeta: {},
+      settings: {},
+      ui: { syncTaskStatusFromWorkspaceBoard: 'yes' },
+      githubCache: { pr: {}, issue: {} },
+      workspaceSession: {}
+    })
+
+    const store = await createStore()
+    expect(store.getUI().syncTaskStatusFromWorkspaceBoard).toBe(false)
+
+    store.updateUI({ syncTaskStatusFromWorkspaceBoard: true })
+    expect(store.getUI().syncTaskStatusFromWorkspaceBoard).toBe(true)
   })
 
   it('repairs the known-bad reordered default workspace statuses once on load', async () => {

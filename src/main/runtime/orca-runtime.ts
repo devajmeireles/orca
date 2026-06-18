@@ -173,12 +173,14 @@ import {
   isPathInsideOrEqual,
   normalizeRuntimePathForComparison
 } from '../../shared/cross-platform-path'
+import { isWslUncPath } from '../../shared/wsl-paths'
 import {
   folderWorkspaceKey,
   isWorkspaceKey,
   parseWorkspaceKey,
   worktreeWorkspaceKey
 } from '../../shared/workspace-scope'
+import { folderWorkspaceToWorktree } from '../../shared/folder-workspace-worktree'
 import type {
   FolderWorkspacePathStatus,
   FolderWorkspacePathStatusRequest
@@ -546,7 +548,7 @@ import {
 } from '../hooks'
 import { DEFAULT_REPO_BADGE_COLOR, getDefaultVoiceSettings } from '../../shared/constants'
 import { listRepoWorktrees } from '../repo-worktrees'
-import { createWorktreeSymlinks } from '../ipc/worktree-symlinks'
+import { createWorktreeLinkedPaths, removeWorktreeLinkedPaths } from '../ipc/worktree-symlinks'
 import { deleteWorktreeHistoryDir } from '../terminal-history'
 import {
   cleanupUnusedWorktreePushTargetRemote,
@@ -900,6 +902,7 @@ type RuntimePtyController = {
     rows: number
     cwd?: string
     command?: string
+    startupCommandDelivery?: WorktreeStartupLaunch['startupCommandDelivery']
     env?: Record<string, string>
     envToDelete?: string[]
     telemetry?: WorktreeStartupLaunch['telemetry']
@@ -1534,6 +1537,7 @@ type TerminalWorkspaceLaunchScope = {
   id: string
   path: string
   connectionId: string | null
+  repo: Repo | null
   folderWorkspace: FolderWorkspace | null
 }
 
@@ -3158,6 +3162,7 @@ export class OrcaRuntimeService {
             true,
             undefined,
             undefined,
+            undefined,
             {
               tabId: tab.parentTabId,
               leafId: tab.leafId,
@@ -4164,6 +4169,16 @@ export class OrcaRuntimeService {
 
   getTerminalSize(ptyId: string): { cols: number; rows: number } | null {
     return this.ptyController?.getSize?.(ptyId) ?? null
+  }
+
+  // Why: a width reflow on a normal-buffer PTY must re-stream the full
+  // scrollback to mobile so it rewraps at the new cols, but alternate-screen
+  // TUIs (vim, Claude Code) own their repaint and have no scrollback — for
+  // those the mobile client just resizes xterm geometry and consumes the
+  // TUI's own redraw, so the resize re-stream must be skipped. Returns false
+  // when there is no headless emulator (resize falls back to geometry-only).
+  isTerminalAlternateScreen(ptyId: string): boolean {
+    return this.headlessTerminals.get(ptyId)?.emulator.isAlternateScreen ?? false
   }
 
   // Why: daemon-backed PTYs that the runtime adopted after an Orca relaunch
@@ -5422,11 +5437,11 @@ export class OrcaRuntimeService {
     ptyId: string,
     clientId: string,
     viewport: { cols: number; rows: number }
-  ): Promise<boolean> {
+  ): Promise<{ updated: boolean; applied: boolean }> {
     const inner = this.mobileSubscribers.get(ptyId)
     const sub = inner?.get(clientId)
     if (!sub) {
-      return false
+      return { updated: false, applied: false }
     }
     sub.viewport = viewport
     sub.lastActedAt = Date.now()
@@ -5434,12 +5449,12 @@ export class OrcaRuntimeService {
     const mode = this.getMobileDisplayMode(ptyId)
     if (mode === 'desktop') {
       // Watching at desktop dims — viewport is informational only.
-      return true
+      return { updated: true, applied: false }
     }
     // Drive PTY dims by the most-recent-actor (just updated to this client).
     const winner = this.pickMostRecentActor(inner!)
     if (!winner) {
-      return false
+      return { updated: false, applied: false }
     }
     const winnerSub = inner!.get(winner.clientId)
     const driveViewport = winnerSub?.viewport ?? viewport
@@ -5457,8 +5472,9 @@ export class OrcaRuntimeService {
     if (needsFreshSubscribeGuard) {
       this.freshSubscribeGuard.add(ptyId)
     }
+    let result: ApplyLayoutResult
     try {
-      await this.enqueueLayout(ptyId, {
+      result = await this.enqueueLayout(ptyId, {
         kind: 'phone',
         cols: clampedCols,
         rows: clampedRows,
@@ -5469,7 +5485,7 @@ export class OrcaRuntimeService {
         this.freshSubscribeGuard.delete(ptyId)
       }
     }
-    return true
+    return { updated: true, applied: result.ok }
   }
 
   // Why: remote desktop clients do not have the local `pty:resize` IPC path.
@@ -7017,9 +7033,14 @@ export class OrcaRuntimeService {
       const repo = repoById.get(worktree.repoId)
       let linkedPR: { number: number; state: string } | null = null
       const branch = worktree.branch.replace(/^refs\/heads\//, '')
-      if (repo?.path && branch && ghCache) {
-        const prCacheKey = `${repo.path}::${branch}`
-        const cached = ghCache.pr[prCacheKey]
+      if (branch && ghCache) {
+        // Why: the renderer keys the PR cache by `repoId::branch` (getGitHubPRCacheKey
+        // prefers repo.id over repo.path), so read by id first and fall back to path
+        // for legacy/path-keyed entries. Reading only by path missed every cached
+        // entry, leaving mobile's linked-PR badge stuck on the 'unknown' fallback.
+        const cached =
+          (repo?.id ? ghCache.pr[`${repo.id}::${branch}`] : undefined) ??
+          (repo?.path ? ghCache.pr[`${repo.path}::${branch}`] : undefined)
         if (cached?.data) {
           linkedPR = { number: cached.data.number, state: cached.data.state }
         }
@@ -7028,6 +7049,7 @@ export class OrcaRuntimeService {
         linkedPR = { number: meta.linkedPR, state: 'unknown' }
       }
       summaries.set(worktree.id, {
+        workspaceKind: 'git',
         worktreeId: worktree.id,
         repoId: worktree.repoId,
         repo: repo?.displayName ?? worktree.repoId,
@@ -7045,6 +7067,43 @@ export class OrcaRuntimeService {
         isPinned: meta?.isPinned ?? false,
         isActive: false,
         unread: meta?.isUnread ?? false,
+        liveTerminalCount: 0,
+        hasAttachedPty: false,
+        lastOutputAt: null,
+        preview: '',
+        status: 'inactive',
+        agents: []
+      })
+    }
+
+    const projectGroupById = new Map(
+      (this.store?.getProjectGroups?.() ?? []).map((group) => [group.id, group])
+    )
+    for (const folderWorkspace of this.store?.getFolderWorkspaces?.() ?? []) {
+      const projectGroup = projectGroupById.get(folderWorkspace.projectGroupId)
+      if (!projectGroup?.parentPath) {
+        continue
+      }
+      const worktree = folderWorkspaceToWorktree(folderWorkspace)
+      summaries.set(worktree.id, {
+        workspaceKind: 'folder-workspace',
+        worktreeId: worktree.id,
+        repoId: worktree.repoId,
+        repo: projectGroup.name,
+        path: worktree.path,
+        branch: worktree.branch,
+        parentWorktreeId: null,
+        childWorktreeIds: [],
+        displayName: worktree.displayName,
+        linkedIssue: worktree.linkedIssue ?? null,
+        linkedPR: null,
+        linkedLinearIssue: worktree.linkedLinearIssue ?? null,
+        linkedGitLabMR: worktree.linkedGitLabMR ?? null,
+        linkedGitLabIssue: worktree.linkedGitLabIssue ?? null,
+        comment: worktree.comment,
+        isPinned: worktree.isPinned,
+        isActive: false,
+        unread: worktree.isUnread,
         liveTerminalCount: 0,
         hasAttachedPty: false,
         lastOutputAt: null,
@@ -8286,6 +8345,16 @@ export class OrcaRuntimeService {
     return getAgentLaunchPlatformForRepo(repo, projectRuntime)
   }
 
+  private getAgentLaunchPlatformForWorkspace(scope: TerminalWorkspaceLaunchScope): NodeJS.Platform {
+    if (scope.repo) {
+      return this.getAgentLaunchPlatformForRepo(scope.repo)
+    }
+    if (scope.connectionId) {
+      return isWindowsAbsolutePathLike(scope.path) ? 'win32' : 'linux'
+    }
+    return isWslUncPath(scope.path) ? 'linux' : process.platform
+  }
+
   async getRepoSlug(repoSelector: string): Promise<{ owner: string; repo: string } | null> {
     const repo = await this.resolveRepoSelector(repoSelector)
     const options = this.getHostedReviewExecutionOptions(repo)
@@ -9191,7 +9260,6 @@ export class OrcaRuntimeService {
     reviewers: string[]
   ): Promise<Awaited<ReturnType<typeof removePRReviewers>>> {
     const repo = await this.resolveRepoSelector(repoSelector)
-    this.assertHostIntegrationRepoIsLocal(repo, 'repo_pr_reviewers')
     return removePRReviewers(
       repo.path,
       prNumber,
@@ -9857,6 +9925,9 @@ export class OrcaRuntimeService {
         agent,
         startup: {
           command: draftLaunchPlan.launchCommand,
+          ...(draftLaunchPlan.startupCommandDelivery
+            ? { startupCommandDelivery: draftLaunchPlan.startupCommandDelivery }
+            : {}),
           ...(draftLaunchPlan.env ? { env: draftLaunchPlan.env } : {})
         }
       }
@@ -9878,6 +9949,9 @@ export class OrcaRuntimeService {
       agent,
       startup: {
         command: startupPlan.launchCommand,
+        ...(startupPlan.startupCommandDelivery
+          ? { startupCommandDelivery: startupPlan.startupCommandDelivery }
+          : {}),
         ...(startupPlan.env ? { env: startupPlan.env } : {})
       },
       draftPaste: { agent, content }
@@ -9915,6 +9989,9 @@ export class OrcaRuntimeService {
       agent,
       startup: {
         command: startupPlan.launchCommand,
+        ...(startupPlan.startupCommandDelivery
+          ? { startupCommandDelivery: startupPlan.startupCommandDelivery }
+          : {}),
         ...(startupPlan.env ? { env: startupPlan.env } : {})
       },
       ...(startupPlan.followupPrompt
@@ -10334,6 +10411,7 @@ export class OrcaRuntimeService {
           const terminal = await this.createTerminal(`id:${worktree.id}`, {
             command: effectiveStartup.command,
             env: effectiveStartup.env,
+            startupCommandDelivery: effectiveStartup.startupCommandDelivery,
             telemetry: effectiveStartup.telemetry
           })
           if (effectiveDraftPaste) {
@@ -10826,7 +10904,7 @@ export class OrcaRuntimeService {
       repo.symlinkPaths &&
       repo.symlinkPaths.length > 0
     ) {
-      await createWorktreeSymlinks(repo.path, created.path, repo.symlinkPaths)
+      await createWorktreeLinkedPaths(repo.path, created.path, repo.symlinkPaths)
     }
 
     let setup: CreateWorktreeResult['setup']
@@ -10915,6 +10993,7 @@ export class OrcaRuntimeService {
         const terminal = await this.createTerminal(`id:${worktree.id}`, {
           command: effectiveStartup.command,
           env: effectiveStartup.env,
+          startupCommandDelivery: effectiveStartup.startupCommandDelivery,
           telemetry: effectiveStartup.telemetry
         })
         if (effectiveDraftPaste) {
@@ -11171,6 +11250,7 @@ export class OrcaRuntimeService {
         const terminal = await this.createTerminal(`path:${result.worktree.path}`, {
           command: args.startup.command,
           env: args.startup.env,
+          startupCommandDelivery: args.startup.startupCommandDelivery,
           telemetry: args.startup.telemetry
         })
         if (args.startupDraftPaste) {
@@ -12532,6 +12612,9 @@ export class OrcaRuntimeService {
       }
 
       let shouldTearDownPtys = true
+      if (repo.symlinkPaths && repo.symlinkPaths.length > 0) {
+        await removeWorktreeLinkedPaths(canonicalWorktreePath, repo.symlinkPaths)
+      }
       try {
         await (hasLocalWorktreeGitOptions
           ? assertWorktreeCleanForRemoval(canonicalWorktreePath, force, localWorktreeGitOptions)
@@ -12696,6 +12779,7 @@ export class OrcaRuntimeService {
     opts: {
       command?: string
       env?: Record<string, string>
+      startupCommandDelivery?: WorktreeStartupLaunch['startupCommandDelivery']
       telemetry?: WorktreeStartupLaunch['telemetry']
       title?: string
       focus?: boolean
@@ -12773,6 +12857,7 @@ export class OrcaRuntimeService {
         rows: 40,
         cwd: workspace.path,
         command: agentTeamsPlan?.command ?? opts.command,
+        startupCommandDelivery: opts.startupCommandDelivery,
         env,
         envToDelete: agentTeamsPlan?.envToDelete,
         telemetry: opts.telemetry,
@@ -12869,6 +12954,7 @@ export class OrcaRuntimeService {
         requestId,
         worktreeId,
         command: opts.command,
+        startupCommandDelivery: opts.startupCommandDelivery,
         title: opts.title,
         activate: opts.focus === true || opts.activate === true
       })
@@ -12905,6 +12991,7 @@ export class OrcaRuntimeService {
     return await this.createTerminal(`id:${worktree.id}`, {
       command: startup.startup.command,
       env: startup.startup.env,
+      startupCommandDelivery: startup.startup.startupCommandDelivery,
       telemetry: startup.startup.telemetry,
       title: opts.title
     })
@@ -12916,13 +13003,14 @@ export class OrcaRuntimeService {
       afterTabId?: string
       targetGroupId?: string
       command?: string
+      startupCommandDelivery?: WorktreeStartupLaunch['startupCommandDelivery']
       agent?: TuiAgent
       activate?: boolean
     } = {}
   ): Promise<RuntimeMobileSessionCreateTerminalResult> {
     this.assertGraphReady()
-    const worktree = await this.resolveWorktreeSelector(worktreeSelector)
-    const worktreeId = worktree.id
+    const workspace = await this.resolveTerminalWorkspaceLaunchScope(worktreeSelector)
+    const worktreeId = workspace.id
     this.hydrateHeadlessMobileSessionTabsFromWorkspaceSession(worktreeId)
     let afterDesktopTabId: string | undefined
     if (opts.afterTabId) {
@@ -12933,7 +13021,7 @@ export class OrcaRuntimeService {
       }
       afterDesktopTabId = anchor.type === 'terminal' ? anchor.parentTabId : anchor.id
     }
-    const command = await this.resolveMobileSessionTerminalCommand(worktree, opts)
+    const command = await this.resolveMobileSessionTerminalCommand(workspace, opts)
 
     const win = this.getAvailableAuthoritativeWindow()
     if (!win) {
@@ -12942,6 +13030,7 @@ export class OrcaRuntimeService {
         opts.activate !== false,
         opts.afterTabId,
         command,
+        opts.startupCommandDelivery,
         undefined,
         opts.agent
       )
@@ -12975,6 +13064,7 @@ export class OrcaRuntimeService {
         afterTabId: afterDesktopTabId,
         targetGroupId: opts.targetGroupId,
         command,
+        startupCommandDelivery: opts.startupCommandDelivery,
         activate: opts.activate
       })
     })
@@ -12986,7 +13076,7 @@ export class OrcaRuntimeService {
   }
 
   private async resolveMobileSessionTerminalCommand(
-    worktree: Worktree,
+    workspace: TerminalWorkspaceLaunchScope,
     opts: { command?: string; agent?: TuiAgent }
   ): Promise<string | undefined> {
     if (opts.command || !opts.agent) {
@@ -12999,10 +13089,9 @@ export class OrcaRuntimeService {
     if (!isTuiAgentEnabled(opts.agent, settings.disabledTuiAgents)) {
       throw new Error('Selected agent is disabled. Choose an enabled agent before creating.')
     }
-    const repo = this.store.getRepo(worktree.repoId)
     // Why: mobile may be running on iOS while the actual terminal shell is
     // Windows/macOS/Linux or an SSH Linux host; quote for the host shell.
-    const platform = repo ? this.getAgentLaunchPlatformForRepo(repo) : process.platform
+    const platform = this.getAgentLaunchPlatformForWorkspace(workspace)
     const startupPlan = buildAgentStartupPlan({
       agent: opts.agent,
       prompt: '',
@@ -13015,10 +13104,14 @@ export class OrcaRuntimeService {
     if (!startupPlan) {
       throw new Error(`Could not build launch command for ${opts.agent}.`)
     }
-    if (repo?.connectionId) {
-      await this.markRemoteWorkspaceTrustedForAgent(opts.agent, repo.connectionId, worktree.path)
+    if (workspace.connectionId) {
+      await this.markRemoteWorkspaceTrustedForAgent(
+        opts.agent,
+        workspace.connectionId,
+        workspace.path
+      )
     } else {
-      this.markLocalWorkspaceTrustedForAgent(opts.agent, worktree.path)
+      this.markLocalWorkspaceTrustedForAgent(opts.agent, workspace.path)
     }
     return startupPlan.launchCommand
   }
@@ -13028,18 +13121,19 @@ export class OrcaRuntimeService {
     activate: boolean,
     afterTabId?: string,
     command?: string,
+    startupCommandDelivery?: WorktreeStartupLaunch['startupCommandDelivery'],
     identity?: { tabId: string; leafId: string; sessionId?: string },
     launchAgent?: TuiAgent
   ): Promise<RuntimeMobileSessionCreateTerminalResult> {
-    const worktree = await this.resolveWorktreeSelector(`id:${worktreeId}`)
-    const repo = this.store?.getRepo(worktree.repoId)
+    const workspace = await this.resolveTerminalWorkspaceLaunchScope(`id:${worktreeId}`)
     // Why: SshPtyProvider treats sessionId as a relay reattach request. Only
     // synthesize local serve ids; SSH fresh terminals must call pty.spawn.
     const stableSessionId =
-      identity?.sessionId ?? (repo?.connectionId ? undefined : `serve-${randomUUID()}`)
+      identity?.sessionId ?? (workspace.connectionId ? undefined : `serve-${randomUUID()}`)
     const terminal = await this.createTerminal(`id:${worktreeId}`, {
       focus: false,
       command,
+      startupCommandDelivery,
       ...(identity
         ? {
             tabId: identity.tabId,
@@ -13815,6 +13909,7 @@ export class OrcaRuntimeService {
       id: folderWorkspaceKey(workspace.id),
       path: workspace.folderPath,
       connectionId: this.resolveFolderWorkspaceConnectionId(workspace),
+      repo: null,
       folderWorkspace: workspace
     }
   }
@@ -13836,6 +13931,7 @@ export class OrcaRuntimeService {
       id: worktree.id,
       path: worktree.path,
       connectionId: repo?.connectionId ?? null,
+      repo,
       folderWorkspace: null
     }
   }
@@ -14347,12 +14443,6 @@ export class OrcaRuntimeService {
       throw new Error('selector_ambiguous')
     }
     throw new Error('repo_not_found')
-  }
-
-  private assertHostIntegrationRepoIsLocal(repo: Repo, operation: string): void {
-    if (repo.connectionId) {
-      throw new Error(`${operation}_unsupported_for_ssh_repo`)
-    }
   }
 
   private requireStore(): Store {

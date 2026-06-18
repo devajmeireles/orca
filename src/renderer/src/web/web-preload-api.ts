@@ -434,6 +434,20 @@ function createWebPreloadApi(): Partial<PreloadApi> {
       pickFloatingMarkdownDocument: () => Promise.resolve(null),
       pickFloatingWorkspaceDirectory: () => Promise.resolve(null)
     },
+    starNag: {
+      onShow: () => noopUnsubscribe,
+      onHide: () => noopUnsubscribe,
+      dismiss: () => Promise.resolve(),
+      later: () => Promise.resolve(),
+      complete: () => Promise.resolve(),
+      disable: () => Promise.resolve(),
+      openWeb: () => Promise.resolve(),
+      starOrca: () => Promise.resolve(false),
+      forceShow: () => Promise.resolve(),
+      agentValueMoment: () => Promise.resolve({ status: 'skipped' }),
+      showAgentValueMoment: () => Promise.resolve(),
+      onboardingCompleted: () => Promise.resolve()
+    },
     platform: {
       get: () => ({
         platform: getBrowserPlatform(),
@@ -2146,6 +2160,7 @@ function createAgentHooksApi(): NonNullable<Partial<PreloadApi>['agentHooks']> {
       | 'grok'
       | 'copilot'
       | 'hermes'
+      | 'devin'
   ) =>
     Promise.resolve({
       agent,
@@ -2166,7 +2181,8 @@ function createAgentHooksApi(): NonNullable<Partial<PreloadApi>['agentHooks']> {
     commandCodeStatus: () => status('command-code'),
     grokStatus: () => status('grok'),
     copilotStatus: () => status('copilot'),
-    hermesStatus: () => status('hermes')
+    hermesStatus: () => status('hermes'),
+    devinStatus: () => status('devin')
   }
 }
 

@@ -527,6 +527,7 @@
       },
       "useIpcEvents": {
         "0e3cf53060": "未找到浏览器选项卡 {{value0}}",
+        "2f6637fe6c": "浏览器选项卡 {{value0}} 已固定",
         "a8d2bf8e9e": "没有可关闭的活动浏览器选项卡",
         "291c8ed902": "当远程运行时处于活动状态时，浏览器选项卡不可用",
         "f45fa2b03c": "当远程运行时处于活动状态时，浏览器配置文件不可用",
@@ -912,7 +913,8 @@
         "16e9e3df89": "已加星标",
         "0d0ace8861": "在 GitHub 上加星标",
         "ec43b38ba7": "已在 GitHub 上加星标",
-        "157bb5ecbb": "打开 GitHub"
+        "157bb5ecbb": "打开 GitHub",
+        "preflightDismiss": "Dismiss"
       },
       "LinearIssueMarkdownDescriptionEditor": {
         "d9c47069ef": "Markdown",
@@ -2247,11 +2249,18 @@
           },
           "MobileDriverOverlay": {
             "c6460cf584": "收回",
-            "c44659e09f": "手机驾驶",
+            "c8f2e1a4b9": "收回此终端",
+            "c44659e09f": "手机控制中",
             "7cffad954c": "折叠",
             "3eed73394f": "您的键盘已暂停",
-            "faa367dc74": "该 terminal 的尺寸适合您的手机应用程序",
-            "54f7d6f69d": "调整所有 terminal 尺寸"
+            "faa367dc74": "手机将此终端留在手机尺寸",
+            "54f7d6f69d": "收回所有终端",
+            "b3d8e1f42a": "恢复此终端",
+            "e8c4f2a91b": "恢复所有终端",
+            "f2a8b9c1d3": "来自手机",
+            "c7e4a2b8f1": "手机正在控制",
+            "d9f3c6e2a4": "桌面键盘已暂停。收回此终端以在此输入，收回手机控制的所有终端，或折叠以继续观看。",
+            "a6b1d8f3e2": "手机会话已结束。将此终端或手机留在手机尺寸的所有终端恢复为桌面尺寸。"
           },
           "TerminalAgentSessionForkDialog": {
             "17fc841e59": "复制上下文",
@@ -2353,6 +2362,13 @@
                 }
               }
             }
+          },
+          "PinnedTabCloseDialog": {
+            "6c190f295a": "关闭固定的标签页？",
+            "0d1963f4a6": "此标签页已固定。确定要关闭它吗？",
+            "dont_ask_again": "固定标签页不再询问",
+            "0b38ee2f86": "取消",
+            "c337c9d75c": "关闭"
           }
         }
       },
@@ -3657,7 +3673,9 @@
           "8ce44af9a8": "重命名 {{value0}}",
           "395e541d5d": "状态",
           "34f03eb0de": "董事会设置",
-          "26cbc92150": "工作区板设置"
+          "26cbc92150": "工作区板设置",
+          "87d24a0c2f": "同步看板和议题状态",
+          "4c2eaa78cc": "移动已关联的工作区时，如果存在匹配的工作流状态，将更新其 Linear 议题状态。"
         },
         "WorkspaceKanbanStatusLane": {
           "8ad104642b": "空的",
@@ -4129,6 +4147,19 @@
           "2d3e4f5a6b": "检查连接",
           "3c4d5e6f7a": "Manage host…",
           "6e7f8a9b0c": "删除主机..."
+        },
+        "WorkspaceKanbanDrawer": {
+          "1975a4e480": "任务状态同步失败",
+          "e02b0d92ff": "任务状态同步已跳过",
+          "c1d2e3f4a5": "无法读取 Linear 议题 {{value0}}。",
+          "d2e3f4a5b6": "没有与 {{value0}} 匹配的 Linear 工作流状态。",
+          "e3f4a5b6c7": "有多个 Linear 工作流状态与 {{value0}} 匹配。",
+          "f4a5b6c7d8": "无法更新 Linear 议题 {{value0}}。",
+          "a5b6c7d8e9": "无法同步 Linear 议题 {{value0}}。",
+          "b6c7d8e9f0": "无法完成任务状态同步。",
+          "c7d8e9f0a1": "已更新 {{value0}} 个",
+          "d8e9f0a1b2": "已跳过 {{value0}} 个",
+          "e9f0a1b2c3": "失败 {{value0}} 个"
         }
       },
       "shared": {
@@ -4251,7 +4282,9 @@
           "6627e75c92": "解释 HTTP/1.1 兼容性",
           "e9506d3377": "HTTP/1.1 兼容性",
           "8b7a8df299": "支持故障排除的低级解决方法。",
-          "8d8d8ac599": "兼容性"
+          "8d8d8ac599": "兼容性",
+          "network": "网络",
+          "networkDescription": "用于代理和企业环境的应用级网络路由。"
         },
         "AgentLocationSetting": {
           "92f4238f1a": "WSL 默认值",
@@ -4662,9 +4695,9 @@
           "dac08ec03e": "处理中..."
         },
         "ExperimentalPane": {
-          "9762364929": "允许自动符号链接必须连接到创建的工作树的某些文件夹或文件。",
-          "24416f42cd": "工作树上的符号链接",
-          "fb82ea1d7a": "自动将配置的文件或文件夹符号链接到新创建的工作树中。",
+          "9762364929": "在可能时在 macOS 上使用 APFS clone-copy；否则，将配置的文件夹或文件符号链接到创建的工作树中。",
+          "24416f42cd": "工作树上的共享路径",
+          "fb82ea1d7a": "自动将配置的文件或文件夹放入新创建的工作树中。",
           "a20d5ea365": "在 terminal 响铃或 Agent 完成事件后保持窗格级突出显示可见，直到您与该窗格交互。我们在调整信号时进行实验。",
           "ec897e8d89": "Terminal 关注",
           "88b7613afb": "terminal 响铃和 Agent 完成事件的持久窗格突出显示。",
@@ -4703,7 +4736,7 @@
           "37df688d6f": "启用浮动工作区并选择新选项卡的开始位置。",
           "1f67f39384": "浮动工作区"
         },
-        "GeneralCacheTimerSection": {
+        "AgentCacheTimerSection": {
           "05de84a104": "1小时",
           "54395ecd7c": "5分钟",
           "8b9e202e0a": "将此与您的提供商的缓存 TTL 相匹配。默认值为 5 分钟。",
@@ -4739,7 +4772,7 @@
           "d21136d9ef": "配置 Orca 如何保留文件编辑。",
           "45c6e85c4d": "编辑"
         },
-        "GeneralNetworkSettingsSection": {
+        "AdvancedNetworkSettingsSection": {
           "3e431564b5": "本地主机，127.0.0.1，*.internal",
           "33ee3ca3af": "可选。用逗号、分号或换行符分隔主机。",
           "f6d76cc8f4": "代理绕过规则",
@@ -4750,10 +4783,13 @@
           "f00daf6324": "HTTPAgent",
           "823e0f15b1": "Orca 网络请求和本地 terminal 子项的 Agent URL。",
           "d93c7cd531": "配置应用程序级网络路由。",
-          "c46cdbbd4e": "网络"
+          "c46cdbbd4e": "网络",
+          "configureProxy": "配置代理"
         },
         "GeneralPane": {
           "d58fccfd84": "导航",
+          "5cb5475664": "关闭固定标签页前确认",
+          "36b2a5dc6d": "关闭固定标签页前显示确认对话框。",
           "projectRuntime": "Project Runtime",
           "projectRuntimeDescription": "Default runtime for local Windows projects that do not override it."
         },
@@ -4843,7 +4879,7 @@
           "895d3f70b8": "gh",
           "32dca11189": "github",
           "c4f610d057": "当前 GitLab CLI REST 速率限制标头（如果可用）。",
-          "0de4ae556c": "亚搏体育appGitLab API预算",
+          "0de4ae556c": "GitLab API预算",
           "cdd793134e": "API预算",
           "b9c011fbc2": "速率限制",
           "3072428ac7": "光亮的",
@@ -5083,7 +5119,7 @@
         },
         "MobilePane": {
           "dd3cd78d04": "使用 Orca Mobile 扫描",
-          "35100bca5d": "当您在手机上使用 terminal 时，Orca 会将其缩小以适合您的手机屏幕。当您关闭应用程序或切换离开时，这可以控制它是保持手机大小（因此交互式 CLI 工具不会回流）还是将大小调整回桌面。您始终可以单击 terminal 横幅上的“恢复”来手动调整其大小。",
+          "35100bca5d": "当您在手机上使用 terminal 时，Orca 会将其缩小以适合您的手机屏幕。当您关闭应用程序或切换离开时，这可以控制它是保持手机大小（因此交互式 CLI 工具不会回流）还是将大小调整回桌面。您始终可以在横幅上使用“恢复此终端”或“恢复所有终端”来手动调整大小。",
           "ee56f1c7e4": "当您离开手机应用程序时",
           "3939fd062c": "撤销设备会立即断开连接。",
           "254a6d09e4": "配对",
@@ -5724,7 +5760,8 @@
           "97dccee14e": "修改的",
           "3b11ef3a43": "{{value0}} 快捷方式",
           "f6579be67b": "更改快捷方式",
-          "6a7848fdac": "正在录制快捷键"
+          "6a7848fdac": "正在录制快捷键",
+          "a98d551407": "按下快捷键，或双击一个修饰键（例如 {{value0}}）。按 Esc 取消。"
         },
         "ShortcutFilterRail": {
           "28b63545bf": "状态",
@@ -6193,15 +6230,15 @@
         "WorktreeSymlinksSection": {
           "1c1e35b219": "删除 {{value0}}",
           "b814c618e2": "链接路径",
-          "31ebab5403": "没有为此存储库配置符号链接路径。",
+          "31ebab5403": "此存储库未配置共享路径。",
           "ea06227efa": "额外",
           "b2429aeb31": "添加",
           "ab40b8a5f1": "没有匹配项。继续输入以添加自定义路径。",
           "4cd2a4c077": "输入路径（例如 .env 或 node_modules）...",
           "241325302c": "添加路径",
-          "7ff265071d": "创建新工作树时，此处列出的每个路径都将从主签出进行符号链接。",
-          "4755f120b6": "工作树符号链接",
-          "b07ef5a8b6": "从主要签出到新创建的工作树的符号链接路径。",
+          "7ff265071d": "创建新工作树时，此处列出的每个路径会在可能时通过 macOS 上的 APFS clone-copy 复制；否则，会从主签出创建符号链接。",
+          "4755f120b6": "工作树共享路径",
+          "b07ef5a8b6": "从主签出放入新创建工作树的路径。",
           "d72ba8dc68": "{{value0}} 路径",
           "9ea912d811": "1 条路径"
         },
@@ -6713,8 +6750,8 @@
             "10b52f79c1": "工作树",
             "d23ae13990": "工作树",
             "0d24759f14": "实验性",
-            "603d29ed74": "自动将配置的文件或文件夹符号链接到新创建的工作树中，以便共享状态（环境、缓存、安装）保持连接。",
-            "78c2a8dc74": "工作树上的符号链接",
+            "603d29ed74": "自动将配置的文件或文件夹放入新创建的工作树中；在可能时使用 macOS 上的 APFS clone-copy，否则使用符号链接。",
+            "78c2a8dc74": "工作树上的共享路径",
             "7b79081695": "未读",
             "f10d307468": "完成",
             "5f067ba0f9": "agent",
@@ -6923,6 +6960,8 @@
             "7baf524b04": "工作区",
             "d0bc793689": "创建工作区文件夹的根目录。",
             "4c95d08fa2": "工作区目录",
+            "161a86a9da": "关闭固定标签页前确认",
+            "8e593f04fc": "关闭固定标签页前显示确认对话框。",
             "defaultProjectRuntime": "Default Project Runtime",
             "defaultProjectRuntimeDescription": "Choose the runtime inherited by local Windows projects."
           }
@@ -6944,7 +6983,7 @@
             "ead733645f": "光亮的",
             "4808f065b3": "GitLab",
             "2b4a72885d": "当前 GitLab CLI REST 速率限制标头（如果可用）。",
-            "83ecb3f470": "亚搏体育appGitLab API预算",
+            "83ecb3f470": "GitLab API预算",
             "65b69d9f80": "Graqh QL",
             "1139f61512": "当前 GitHub CLI REST、搜索和 GraphQL 速率限制。",
             "ff86e354c4": "GitHub API 预算",
@@ -7331,8 +7370,8 @@
             "f1c53f2820": "工作树",
             "7e228fc439": "符号链接",
             "c06adcf136": "符号链接",
-            "ed885e589f": "从主要签出到新创建的工作树的符号链接路径。",
-            "01b3377ebc": "工作树符号链接",
+            "ed885e589f": "从主签出放入新创建工作树的路径。",
+            "01b3377ebc": "工作树共享路径",
             "fff8834983": "提示词",
             "fa3131f223": "模型",
             "130d76dc16": "重命名",
@@ -7391,7 +7430,10 @@
             "keepForkUpToDate": "保持 Fork 最新",
             "keepForkUpToDateDescription": "从 upstream 安全地快进此 Fork。",
             "projectRuntime": "Project Runtime",
-            "projectRuntimeDescription": "Choose whether this project runs on Windows or WSL."
+            "projectRuntimeDescription": "Choose whether this project runs on Windows or WSL.",
+            "copy": "copy",
+            "clone": "clone",
+            "apfs": "apfs"
           }
         },
         "runtime": {
@@ -9470,7 +9512,7 @@
                 "a2d3d1fdde": "GitLab API 预算不可用。",
                 "a2f68645ac": "刷新 GitLab API 预算",
                 "2f9c16d6c3": "Orca 通过 GitLab CLI 使用 REST。",
-                "14e144f7a7": "亚搏体育appGitLab API预算",
+                "14e144f7a7": "GitLab API预算",
                 "3e2c982cfa": "向左，重置于",
                 "ea8ad0bae8": "的",
                 "0a891e8935": "休息API",
@@ -11436,6 +11478,25 @@
         "sourceUnavailable": "{{value0}} source unavailable: {{value1}}",
         "someSourceHostsUnavailable": "Some {{value0}} source hosts unavailable: {{value1}}",
         "reconnectOrUpdateTitle": "Reconnect or update {{value0}} to load this source."
+      },
+      "ShortcutKeyCombo": {
+        "07eb4985a1": "Double-tap {{value0}}"
+      },
+      "star": {
+        "nag": {
+          "StarNagToastHost": {
+            "starredThanks": "Starred — thank you!",
+            "githubOpened": "GitHub opened",
+            "opening": "Opening…",
+            "starring": "Starring…",
+            "openGithub": "Open GitHub",
+            "starOnGithub": "Star on GitHub",
+            "onboardingCompleted": "Onboarding completed!",
+            "body": "If you’re enjoying Orca so far, a GitHub star helps other developers discover it.",
+            "dismiss": "Dismiss",
+            "later": "Later"
+          }
+        }
       }
     },
     "i18n": {

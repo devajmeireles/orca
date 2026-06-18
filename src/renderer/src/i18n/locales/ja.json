@@ -527,6 +527,7 @@
       },
       "useIpcEvents": {
         "0e3cf53060": "ブラウザタブ {{value0}} が見つかりません",
+        "2f6637fe6c": "ブラウザタブ {{value0}} はピン留めされています",
         "a8d2bf8e9e": "閉じるためのアクティブなブラウザ タブがありません",
         "291c8ed902": "リモート ランタイムがアクティブな間はブラウザ タブは使用できません",
         "f45fa2b03c": "リモート ランタイムがアクティブな間はブラウザ プロファイルを使用できません",
@@ -912,7 +913,8 @@
         "16e9e3df89": "星付き",
         "0d0ace8861": "GitHub でスターを付ける",
         "ec43b38ba7": "GitHub でスター済み",
-        "157bb5ecbb": "GitHub を開く"
+        "157bb5ecbb": "GitHub を開く",
+        "preflightDismiss": "Dismiss"
       },
       "LinearIssueMarkdownDescriptionEditor": {
         "d9c47069ef": "Markdown",
@@ -2247,11 +2249,18 @@
           },
           "MobileDriverOverlay": {
             "c6460cf584": "操作を取り戻す",
-            "c44659e09f": "モバイルで操作中",
+            "c8f2e1a4b9": "このターミナルを取り戻す",
+            "c44659e09f": "スマホ操作中",
             "7cffad954c": "折りたたむ",
             "3eed73394f": "キーボードが一時停止しています",
-            "faa367dc74": "この terminal はモバイル アプリに合わせたサイズになっています",
-            "54f7d6f69d": "すべての terminal のサイズを変更"
+            "faa367dc74": "スマホが携帯サイズのまま残しています",
+            "54f7d6f69d": "すべてのターミナルを取り戻す",
+            "b3d8e1f42a": "このターミナルを復元",
+            "e8c4f2a91b": "すべてのターミナルを復元",
+            "f2a8b9c1d3": "スマホから",
+            "c7e4a2b8f1": "スマホが操作中です",
+            "d9f3c6e2a4": "デスクトップのキーボードは一時停止中です。このターミナルを取り戻してここで入力するか、スマホが操作しているすべてのターミナルを取り戻すか、折りたたんで見続けてください。",
+            "a6b1d8f3e2": "スマホのセッションは終了しました。このターミナル、またはスマホが携帯サイズのまま残したすべてのターミナルをデスクトップサイズに復元してください。"
           },
           "TerminalAgentSessionForkDialog": {
             "17fc841e59": "コンテキストをコピーする",
@@ -2353,6 +2362,13 @@
                 }
               }
             }
+          },
+          "PinnedTabCloseDialog": {
+            "6c190f295a": "ピン留めしたタブを閉じますか？",
+            "0d1963f4a6": "このタブはピン留めされています。本当に閉じますか？",
+            "dont_ask_again": "ピン留めしたタブについて今後確認しない",
+            "0b38ee2f86": "キャンセル",
+            "c337c9d75c": "閉じる"
           }
         }
       },
@@ -3657,7 +3673,9 @@
           "8ce44af9a8": "{{value0}} の名前を変更",
           "395e541d5d": "ステータス",
           "34f03eb0de": "ボードの設定",
-          "26cbc92150": "ワークスペースボードの設定"
+          "26cbc92150": "ワークスペースボードの設定",
+          "87d24a0c2f": "ボードとイシューのステータスを同期",
+          "4c2eaa78cc": "リンク済みワークスペースを移動すると、一致するワークフロー状態がある場合に Linear イシューのステータスが更新されます。"
         },
         "WorkspaceKanbanStatusLane": {
           "8ad104642b": "空の",
@@ -4129,6 +4147,19 @@
           "2d3e4f5a6b": "Check connection",
           "3c4d5e6f7a": "Manage host…",
           "6e7f8a9b0c": "Remove host…"
+        },
+        "WorkspaceKanbanDrawer": {
+          "1975a4e480": "タスクステータスの同期に失敗しました",
+          "e02b0d92ff": "タスクステータスの同期をスキップしました",
+          "c1d2e3f4a5": "Linear イシュー {{value0}} を読み取れませんでした。",
+          "d2e3f4a5b6": "{{value0}} に一致する Linear ワークフロー状態がありません。",
+          "e3f4a5b6c7": "{{value0}} に一致する Linear ワークフロー状態が複数あります。",
+          "f4a5b6c7d8": "Linear イシュー {{value0}} を更新できませんでした。",
+          "a5b6c7d8e9": "Linear イシュー {{value0}} を同期できませんでした。",
+          "b6c7d8e9f0": "タスクステータスの同期を完了できませんでした。",
+          "c7d8e9f0a1": "{{value0}} 件更新",
+          "d8e9f0a1b2": "{{value0}} 件スキップ",
+          "e9f0a1b2c3": "{{value0}} 件失敗"
         }
       },
       "shared": {
@@ -4251,7 +4282,9 @@
           "6627e75c92": "HTTP/1.1の互換性について説明する",
           "e9506d3377": "HTTP/1.1 互換性",
           "8b7a8df299": "サポートのトラブルシューティングのための低レベルの回避策。",
-          "8d8d8ac599": "互換性"
+          "8d8d8ac599": "互換性",
+          "network": "ネットワーク",
+          "networkDescription": "プロキシや企業環境向けのアプリレベルのネットワークルーティング。"
         },
         "AgentLocationSetting": {
           "92f4238f1a": "WSL のデフォルト",
@@ -4662,9 +4695,9 @@
           "dac08ec03e": "処理中..."
         },
         "ExperimentalPane": {
-          "9762364929": "作成されたワークツリーに接続する必要がある特定のフォルダーまたはファイルの自動シンボリックリンクを許可します。",
-          "24416f42cd": "ワークツリー上のシンボリックリンク",
-          "fb82ea1d7a": "構成されたファイルまたはフォルダーを新しく作成されたワークツリーに自動的にシンボリックリンクします。",
+          "9762364929": "可能な場合は macOS で APFS clone-copy を使用し、それ以外の場合は設定済みのフォルダーまたはファイルを作成済みワークツリーへシンボリックリンクします。",
+          "24416f42cd": "ワークツリーの共有パス",
+          "fb82ea1d7a": "設定済みのファイルまたはフォルダーを新しく作成されたワークツリーに自動的に配置します。",
           "a20d5ea365": "terminal ベルまたは agent 完了イベントの後、そのペインを操作するまで、ペイン レベルのハイライトを表示したままにします。信号を調整しながら実験します。",
           "ec897e8d89": "Terminal アテンション",
           "88b7613afb": "terminal ベルおよび agent 完了イベントの永続的なペインのハイライト。",
@@ -4703,7 +4736,7 @@
           "37df688d6f": "フローティング ワークスペースを有効にして、新規タブの開始位置を選択します。",
           "1f67f39384": "フローティングワークスペース"
         },
-        "GeneralCacheTimerSection": {
+        "AgentCacheTimerSection": {
           "05de84a104": "1時間",
           "54395ecd7c": "5分",
           "8b9e202e0a": "これをプロバイダーのキャッシュ TTL と一致させます。デフォルトは 5 分です。",
@@ -4739,7 +4772,7 @@
           "d21136d9ef": "Orca がファイル編集を保持する方法を構成します。",
           "45c6e85c4d": "エディタ"
         },
-        "GeneralNetworkSettingsSection": {
+        "AdvancedNetworkSettingsSection": {
           "3e431564b5": "ローカルホスト、127.0.0.1、*.internal",
           "33ee3ca3af": "オプション。ホストはカンマ、セミコロン、または改行で区切ります。",
           "f6d76cc8f4": "プロキシ バイパス ルール",
@@ -4750,10 +4783,13 @@
           "f00daf6324": "HTTPプロキシ",
           "823e0f15b1": "Orca ネットワーク リクエストとローカル terminal の子のプロキシ URL。",
           "d93c7cd531": "アプリレベルのネットワークルーティングを構成します。",
-          "c46cdbbd4e": "ネットワーク"
+          "c46cdbbd4e": "ネットワーク",
+          "configureProxy": "プロキシを設定"
         },
         "GeneralPane": {
           "d58fccfd84": "ナビゲーション",
+          "5cb5475664": "ピン留めしたタブを閉じる前に確認",
+          "36b2a5dc6d": "ピン留めしたタブを閉じる前に確認ダイアログを表示します。",
           "projectRuntime": "Project Runtime",
           "projectRuntimeDescription": "Default runtime for local Windows projects that do not override it."
         },
@@ -5120,7 +5156,7 @@
         },
         "MobilePane": {
           "dd3cd78d04": "Orca モバイルでスキャン",
-          "35100bca5d": "スマートフォンで terminal を使用している間、Orca はスマートフォンの画面に合わせて terminal を縮小します。アプリを閉じるか別のアプリに切り替えるときに、アプリをスマートフォンサイズのままにするか (インタラクティブ CLI ツールがリフローしないように)、サイズを変更してデスクトップに戻るかを制御します。terminal バナーの [復元] をクリックすると、いつでも手動でサイズを変更できます。",
+          "35100bca5d": "スマートフォンで terminal を使用している間、Orca はスマートフォンの画面に合わせて terminal を縮小します。アプリを閉じるか別のアプリに切り替えるときに、アプリをスマートフォンサイズのままにするか (インタラクティブ CLI ツールがリフローしないように)、サイズを変更してデスクトップに戻るかを制御します。バナーの「このターミナルを復元」または「すべてのターミナルを復元」を使えば、いつでも手動でサイズを変更できます。",
           "ee56f1c7e4": "モバイルアプリを終了するとき",
           "3939fd062c": "デバイスを取り消すと、デバイスはすぐに切断されます。",
           "254a6d09e4": "ペアリング済み",
@@ -5761,7 +5797,8 @@
           "97dccee14e": "修正済み",
           "3b11ef3a43": "{{value0}} ショートカット",
           "f6579be67b": "ショートカットを変更する",
-          "6a7848fdac": "ショートカットを記録中"
+          "6a7848fdac": "ショートカットを記録中",
+          "a98d551407": "ショートカットを押すか、修飾キーをダブルタップしてください（例: {{value0}}）。Esc でキャンセルします。"
         },
         "ShortcutFilterRail": {
           "28b63545bf": "状態",
@@ -6230,15 +6267,15 @@
         "WorktreeSymlinksSection": {
           "1c1e35b219": "{{value0}} を削除",
           "b814c618e2": "リンクされたパス",
-          "31ebab5403": "この repos にはシンボリックリンク パスが設定されていません。",
+          "31ebab5403": "このリポジトリには共有パスが設定されていません。",
           "ea06227efa": "追加した",
           "b2429aeb31": "追加",
           "ab40b8a5f1": "一致はありません。入力を続けてカスタム パスを追加します。",
           "4cd2a4c077": "パスを入力します (例: .env または node_modules)…",
           "241325302c": "パスの追加",
-          "7ff265071d": "新規ワークツリーが作成されると、ここにリストされている各パスがプライマリ チェックアウトからシンボリックリンクされます。",
-          "4755f120b6": "ワークツリーのシンボリックリンク",
-          "b07ef5a8b6": "プライマリ チェックアウトから新しく作成されたワークツリーへのシンボリックリンクへのパス。",
+          "7ff265071d": "新しいワークツリーが作成されると、ここにリストされている各パスは、可能な場合は macOS で APFS clone-copy され、それ以外の場合はプライマリ チェックアウトからシンボリックリンクされます。",
+          "4755f120b6": "ワークツリー共有パス",
+          "b07ef5a8b6": "プライマリ チェックアウトから新しく作成されたワークツリーへ配置するパス。",
           "d72ba8dc68": "{{value0}} パス",
           "9ea912d811": "1パス"
         },
@@ -6750,8 +6787,8 @@
             "10b52f79c1": "ワークツリー",
             "d23ae13990": "ワークツリー",
             "0d24759f14": "実験的機能",
-            "603d29ed74": "構成されたファイルまたはフォルダーを新しく作成されたワークツリーに自動的にシンボリックリンクして、共有状態 (環境、キャッシュ、インストール) が接続された状態を維持します。",
-            "78c2a8dc74": "ワークツリー上のシンボリックリンク",
+            "603d29ed74": "設定済みのファイルまたはフォルダーを新しく作成されたワークツリーに自動的に配置します。可能な場合は macOS で APFS clone-copy を使用し、それ以外の場合はシンボリックリンクします。",
+            "78c2a8dc74": "ワークツリーの共有パス",
             "7b79081695": "未読",
             "f10d307468": "完了",
             "5f067ba0f9": "agent",
@@ -6960,6 +6997,8 @@
             "7baf524b04": "ワークスペース",
             "d0bc793689": "ワークスペースフォルダーが作成されるルートディレクトリ。",
             "4c95d08fa2": "ワークスペースディレクトリ",
+            "161a86a9da": "ピン留めしたタブを閉じる前に確認",
+            "8e593f04fc": "ピン留めしたタブを閉じる前に確認ダイアログを表示します。",
             "defaultProjectRuntime": "Default Project Runtime",
             "defaultProjectRuntimeDescription": "Choose the runtime inherited by local Windows projects."
           }
@@ -7368,8 +7407,8 @@
             "f1c53f2820": "ワークツリー",
             "7e228fc439": "シンボリックリンク",
             "c06adcf136": "シンボリックリンク",
-            "ed885e589f": "プライマリ チェックアウトから新しく作成されたワークツリーへのシンボリックリンクへのパス。",
-            "01b3377ebc": "ワークツリーのシンボリックリンク",
+            "ed885e589f": "プライマリ チェックアウトから新しく作成されたワークツリーへ配置するパス。",
+            "01b3377ebc": "ワークツリー共有パス",
             "fff8834983": "プロンプト",
             "fa3131f223": "モデル",
             "130d76dc16": "名前変更",
@@ -7428,7 +7467,10 @@
             "keepForkUpToDate": "フォークを最新に保つ",
             "keepForkUpToDateDescription": "このフォークを upstream から安全に fast-forward します。",
             "projectRuntime": "Project Runtime",
-            "projectRuntimeDescription": "Choose whether this project runs on Windows or WSL."
+            "projectRuntimeDescription": "Choose whether this project runs on Windows or WSL.",
+            "copy": "copy",
+            "clone": "clone",
+            "apfs": "apfs"
           }
         },
         "runtime": {
@@ -11436,6 +11478,25 @@
         "sourceUnavailable": "{{value0}} source unavailable: {{value1}}",
         "someSourceHostsUnavailable": "Some {{value0}} source hosts unavailable: {{value1}}",
         "reconnectOrUpdateTitle": "Reconnect or update {{value0}} to load this source."
+      },
+      "ShortcutKeyCombo": {
+        "07eb4985a1": "Double-tap {{value0}}"
+      },
+      "star": {
+        "nag": {
+          "StarNagToastHost": {
+            "starredThanks": "Starred — thank you!",
+            "githubOpened": "GitHub opened",
+            "opening": "Opening…",
+            "starring": "Starring…",
+            "openGithub": "Open GitHub",
+            "starOnGithub": "Star on GitHub",
+            "onboardingCompleted": "Onboarding completed!",
+            "body": "If you’re enjoying Orca so far, a GitHub star helps other developers discover it.",
+            "dismiss": "Dismiss",
+            "later": "Later"
+          }
+        }
       }
     },
     "i18n": {

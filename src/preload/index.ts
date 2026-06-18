@@ -10,6 +10,7 @@ import type { CliInstallStatus } from '../shared/cli-install-types'
 import type { AgentHookInstallStatus } from '../shared/agent-hook-types'
 import type { TerminalPaneSplitSource } from '../shared/feature-education-telemetry'
 import type { ProjectExecutionRuntimeResolution } from '../shared/project-execution-runtime'
+import type { StartupCommandDelivery } from '../shared/codex-startup-delivery'
 import type {
   BaseRefSearchResult,
   BaseRefDefaultResult,
@@ -694,6 +695,7 @@ const api = {
       cwd?: string
       env?: Record<string, string>
       command?: string
+      startupCommandDelivery?: StartupCommandDelivery
       connectionId?: string | null
       worktreeId?: string
       sessionId?: string
@@ -1526,13 +1528,20 @@ const api = {
   },
 
   starNag: {
-    onShow: (callback: (payload?: { mode?: 'gh' | 'web' }) => void): (() => void) => {
+    onShow: (
+      callback: (payload?: { mode?: 'gh' | 'web'; surface?: 'card' | 'toast' }) => void
+    ): (() => void) => {
       const listener = (
         _event: Electron.IpcRendererEvent,
-        payload?: { mode?: 'gh' | 'web' }
+        payload?: { mode?: 'gh' | 'web'; surface?: 'card' | 'toast' }
       ): void => callback(payload)
       ipcRenderer.on('star-nag:show', listener)
       return () => ipcRenderer.removeListener('star-nag:show', listener)
+    },
+    onHide: (callback: () => void): (() => void) => {
+      const listener = (): void => callback()
+      ipcRenderer.on('star-nag:hide', listener)
+      return () => ipcRenderer.removeListener('star-nag:hide', listener)
     },
     dismiss: (): Promise<void> => ipcRenderer.invoke('star-nag:dismiss'),
     later: (): Promise<void> => ipcRenderer.invoke('star-nag:later'),
@@ -1540,7 +1549,12 @@ const api = {
     disable: (): Promise<void> => ipcRenderer.invoke('star-nag:disable'),
     openWeb: (): Promise<void> => ipcRenderer.invoke('star-nag:openWeb'),
     starOrca: (): Promise<boolean> => ipcRenderer.invoke('star-nag:starOrca'),
-    forceShow: (): Promise<void> => ipcRenderer.invoke('star-nag:forceShow')
+    forceShow: (): Promise<void> => ipcRenderer.invoke('star-nag:forceShow'),
+    agentValueMoment: (): Promise<
+      { status: 'ready'; mode: 'gh' | 'web' } | { status: 'skipped' }
+    > => ipcRenderer.invoke('star-nag:agentValueMoment'),
+    showAgentValueMoment: (): Promise<void> => ipcRenderer.invoke('star-nag:showAgentValueMoment'),
+    onboardingCompleted: (): Promise<void> => ipcRenderer.invoke('star-nag:onboardingCompleted')
   },
 
   // Why: telemetry uses a loose untyped surface at the preload boundary on
@@ -1680,6 +1694,8 @@ const api = {
     commandCodeStatus: (): Promise<AgentHookInstallStatus> =>
       ipcRenderer.invoke('agentHooks:commandCodeStatus'),
     grokStatus: (): Promise<AgentHookInstallStatus> => ipcRenderer.invoke('agentHooks:grokStatus'),
+    devinStatus: (): Promise<AgentHookInstallStatus> =>
+      ipcRenderer.invoke('agentHooks:devinStatus'),
     copilotStatus: (): Promise<AgentHookInstallStatus> =>
       ipcRenderer.invoke('agentHooks:copilotStatus'),
     hermesStatus: (): Promise<AgentHookInstallStatus> =>
@@ -2988,6 +3004,7 @@ const api = {
         afterTabId?: string
         targetGroupId?: string
         command?: string
+        startupCommandDelivery?: StartupCommandDelivery
         title?: string
         activate?: boolean
       }) => void
@@ -3000,6 +3017,7 @@ const api = {
           afterTabId?: string
           targetGroupId?: string
           command?: string
+          startupCommandDelivery?: StartupCommandDelivery
           title?: string
           activate?: boolean
         }

@@ -25,6 +25,7 @@ const TITLE_AGENT_LABEL_TO_TYPE: Record<string, AgentType> = {
   'Gemini CLI': 'gemini',
   'GitHub Copilot': 'copilot',
   Grok: 'grok',
+  Devin: 'devin',
   Antigravity: 'antigravity',
   OpenCode: 'opencode',
   Aider: 'aider',
@@ -151,6 +152,7 @@ function buildTitleDerivedAgentRow(args: {
     entry,
     tab: args.tab,
     agentType,
+    rowSource: 'live',
     state: rowState,
     startedAt: 0
   }

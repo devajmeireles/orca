@@ -28,6 +28,7 @@ import type {
   RepoSourceControlAiOverrides,
   SourceControlAiSettings
 } from './source-control-ai-types'
+import type { StartupCommandDelivery } from './codex-startup-delivery'
 import type { AgentKind, LaunchSource, RequestKind } from './telemetry-events'
 import type { SleepingAgentSessionRecord } from './agent-session-resume'
 import type { ClaudeAgentTeamsMode } from './claude-agent-teams-tmux-compat'
@@ -1865,6 +1866,7 @@ export type WorktreeSetupLaunch = {
 export type WorktreeStartupLaunch = {
   command: string
   env?: Record<string, string>
+  startupCommandDelivery?: StartupCommandDelivery
   telemetry?: { agent_kind: AgentKind; launch_source: LaunchSource; request_kind: RequestKind }
 }
 
@@ -2605,6 +2607,10 @@ export type GlobalSettings = {
   /** Why: generated tab titles are semantic but subjective, so they stay opt-in
    *  and manual renames remain the stronger user intent. */
   tabAutoGenerateTitle: boolean
+  /** Why: pinned tabs can still be closed via the keyboard/native-menu close
+   *  path, so this gates that close behind a confirmation prompt to prevent
+   *  accidental loss. Defaults on. */
+  confirmClosePinnedTab: boolean
   /** When true, Orca requests local awake assertions while hook-reported agents are working. */
   keepComputerAwakeWhileAgentsRun: boolean
   /** Why: macOS terminals must choose between letting Option compose layout
@@ -3017,6 +3023,7 @@ export type PersistedUIState = {
   workspaceStatuses?: WorkspaceStatusDefinition[]
   workspaceBoardOpacity?: number
   workspaceBoardColumnWidth?: number
+  syncTaskStatusFromWorkspaceBoard?: boolean
   /** One-shot migration flag for a short-lived build that persisted the
    *  default workspace statuses in reverse workflow order. Once stamped,
    *  user-authored status ordering is never inferred from IDs/labels again. */
@@ -3137,6 +3144,9 @@ export type PersistedUIState = {
   /** Timestamp until which nonterminal dismissals suppress threshold prompts.
    *  Force-show bypasses this for dev/testing. */
   starNagDeferredUntil?: number | null
+  /** App version that already consumed the first successful-agent value-moment ask.
+   *  Main-owned so remote/web clients cannot spoof the once-per-version cap. */
+  starNagAgentValueMomentAppVersion?: string | null
   trustedOrcaHooks?: PersistedTrustedOrcaHooks
   setupScriptPromptDismissedRepoIds?: string[]
   /** Whether the experimental pet overlay is currently visible. Separate

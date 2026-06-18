@@ -527,6 +527,7 @@
       },
       "useIpcEvents": {
         "0e3cf53060": "Browser tab {{value0}} not found",
+        "2f6637fe6c": "Browser tab {{value0}} is pinned",
         "a8d2bf8e9e": "No active browser tab to close",
         "291c8ed902": "Browser tabs are unavailable while a remote runtime is active",
         "f45fa2b03c": "Browser profiles are unavailable while a remote runtime is active",
@@ -912,7 +913,8 @@
         "16e9e3df89": "starred",
         "0d0ace8861": "Star on GitHub",
         "ec43b38ba7": "Starred on GitHub",
-        "157bb5ecbb": "Open GitHub"
+        "157bb5ecbb": "Open GitHub",
+        "preflightDismiss": "Dismiss"
       },
       "LinearIssueMarkdownDescriptionEditor": {
         "d9c47069ef": "Markdown",
@@ -2247,11 +2249,18 @@
           },
           "MobileDriverOverlay": {
             "c6460cf584": "Take back",
-            "c44659e09f": "Mobile driving",
+            "c8f2e1a4b9": "Take back this terminal",
+            "c44659e09f": "Phone driving",
             "7cffad954c": "Collapse",
             "3eed73394f": "Your keyboard is paused",
-            "faa367dc74": "This terminal is sized for your mobile app",
-            "54f7d6f69d": "Resize all terminals"
+            "faa367dc74": "Your phone left this at phone size",
+            "54f7d6f69d": "Take back all terminals",
+            "b3d8e1f42a": "Restore this terminal",
+            "e8c4f2a91b": "Restore all terminals",
+            "f2a8b9c1d3": "From your phone",
+            "c7e4a2b8f1": "Your phone is in control",
+            "d9f3c6e2a4": "Desktop keyboard is paused. Take back this terminal to type here, take back all terminals your phone controls, or collapse to keep watching.",
+            "a6b1d8f3e2": "Your phone session ended. Restore to desktop size for this terminal, or for all terminals your phone left at phone size."
           },
           "TerminalAgentSessionForkDialog": {
             "17fc841e59": "Copy context",
@@ -2353,6 +2362,13 @@
                 }
               }
             }
+          },
+          "PinnedTabCloseDialog": {
+            "6c190f295a": "Close pinned tab?",
+            "0d1963f4a6": "This tab is pinned. Are you sure you want to close it?",
+            "dont_ask_again": "Don't ask again for pinned tabs",
+            "0b38ee2f86": "Cancel",
+            "c337c9d75c": "Close"
           }
         }
       },
@@ -3690,7 +3706,9 @@
           "8ce44af9a8": "Rename {{value0}}",
           "395e541d5d": "Statuses",
           "34f03eb0de": "Board settings",
-          "26cbc92150": "Workspace board settings"
+          "26cbc92150": "Workspace board settings",
+          "87d24a0c2f": "Sync board and issue status",
+          "4c2eaa78cc": "Moving a linked workspace updates its Linear issue status when a matching workflow state exists."
         },
         "WorkspaceKanbanStatusLane": {
           "8ad104642b": "Empty",
@@ -4129,6 +4147,19 @@
           "822ff300ad": "Dismiss",
           "b7e3a91c4f": "Drag project headers to reorder, or switch to",
           "e8c1f4a2b9": "in workspace options."
+        },
+        "WorkspaceKanbanDrawer": {
+          "1975a4e480": "Task status sync failed",
+          "e02b0d92ff": "Task status sync skipped",
+          "c1d2e3f4a5": "Linear issue {{value0}} could not be read.",
+          "d2e3f4a5b6": "No matching Linear workflow state for {{value0}}.",
+          "e3f4a5b6c7": "Multiple Linear workflow states match {{value0}}.",
+          "f4a5b6c7d8": "Could not update Linear issue {{value0}}.",
+          "a5b6c7d8e9": "Could not sync Linear issue {{value0}}.",
+          "b6c7d8e9f0": "Task status sync could not finish.",
+          "c7d8e9f0a1": "{{value0}} updated",
+          "d8e9f0a1b2": "{{value0}} skipped",
+          "e9f0a1b2c3": "{{value0}} failed"
         }
       },
       "shared": {
@@ -4266,7 +4297,9 @@
           "6627e75c92": "Explain HTTP/1.1 compatibility",
           "e9506d3377": "HTTP/1.1 Compatibility",
           "8b7a8df299": "Low-level workarounds for support troubleshooting.",
-          "8d8d8ac599": "Compatibility"
+          "8d8d8ac599": "Compatibility",
+          "network": "Network",
+          "networkDescription": "App-level network routing for proxies and corporate environments."
         },
         "AgentLocationSetting": {
           "92f4238f1a": "WSL default",
@@ -4677,9 +4710,9 @@
           "dac08ec03e": "Working..."
         },
         "ExperimentalPane": {
-          "9762364929": "Allows for automatic symlinks of certain folders or files that must be connected to created worktrees.",
-          "24416f42cd": "Symlinks on worktrees",
-          "fb82ea1d7a": "Automatically symlink configured files or folders into newly created worktrees.",
+          "9762364929": "Uses APFS clone-copy on macOS when possible, otherwise symlinks configured folders or files into created worktrees.",
+          "24416f42cd": "Shared paths on worktrees",
+          "fb82ea1d7a": "Automatically materialize configured files or folders into newly created worktrees.",
           "a20d5ea365": "Keeps a pane-level highlight visible after terminal bell or agent-completion events until you interact with that pane. Experimental while we tune the signal.",
           "ec897e8d89": "Terminal attention",
           "88b7613afb": "Persistent pane highlight for terminal bell and agent-completion events.",
@@ -4718,7 +4751,7 @@
           "37df688d6f": "Enable the floating workspace and choose where new tabs start.",
           "1f67f39384": "Floating Workspace"
         },
-        "GeneralCacheTimerSection": {
+        "AgentCacheTimerSection": {
           "05de84a104": "1 hour",
           "54395ecd7c": "5 minutes",
           "8b9e202e0a": "Match this to your provider's cache TTL. The default is 5 minutes.",
@@ -4754,7 +4787,7 @@
           "d21136d9ef": "Configure how Orca persists file edits.",
           "45c6e85c4d": "Editor"
         },
-        "GeneralNetworkSettingsSection": {
+        "AdvancedNetworkSettingsSection": {
           "3e431564b5": "localhost, 127.0.0.1, *.internal",
           "33ee3ca3af": "Optional. Separate hosts with commas, semicolons, or new lines.",
           "f6d76cc8f4": "Proxy Bypass Rules",
@@ -4765,10 +4798,13 @@
           "f00daf6324": "HTTP Proxy",
           "823e0f15b1": "Proxy URL for Orca network requests and local terminal children.",
           "d93c7cd531": "Configure app-level network routing.",
-          "c46cdbbd4e": "Network"
+          "c46cdbbd4e": "Network",
+          "configureProxy": "Configure proxy"
         },
         "GeneralPane": {
           "d58fccfd84": "Navigation",
+          "5cb5475664": "Confirm before closing pinned tabs",
+          "36b2a5dc6d": "Show a confirmation dialog before a pinned tab is closed.",
           "projectRuntime": "Project Runtime",
           "projectRuntimeDescription": "Default runtime for local Windows projects that do not override it."
         },
@@ -5135,7 +5171,7 @@
         },
         "MobilePane": {
           "dd3cd78d04": "Scan with Orca Mobile",
-          "35100bca5d": "While you're using a terminal on your phone, Orca shrinks it to fit your phone screen. When you close the app or switch away, this controls whether it stays at phone size (so interactive CLI tools don't reflow) or resizes back to your desktop. You can always click Restore on the terminal banner to resize it manually.",
+          "35100bca5d": "While you're using a terminal on your phone, Orca shrinks it to fit your phone screen. When you close the app or switch away, this controls whether it stays at phone size (so interactive CLI tools don't reflow) or resizes back to your desktop. You can always use Restore this terminal or Restore all terminals on the banner to resize manually.",
           "ee56f1c7e4": "When you leave the mobile app",
           "3939fd062c": "Revoking a device disconnects it immediately.",
           "254a6d09e4": "Paired",
@@ -5776,7 +5812,8 @@
           "97dccee14e": "Modified",
           "3b11ef3a43": "{{value0}} shortcut",
           "f6579be67b": "Change shortcut",
-          "6a7848fdac": "Listening for shortcut"
+          "6a7848fdac": "Listening for shortcut",
+          "a98d551407": "Press a shortcut, or double-tap a modifier (e.g. {{value0}}). Esc cancels."
         },
         "ShortcutFilterRail": {
           "28b63545bf": "Status",
@@ -6245,15 +6282,15 @@
         "WorktreeSymlinksSection": {
           "1c1e35b219": "Remove {{value0}}",
           "b814c618e2": "Linked paths",
-          "31ebab5403": "No symlink paths configured for this repository.",
+          "31ebab5403": "No shared paths configured for this repository.",
           "ea06227efa": "added",
           "b2429aeb31": "Add",
           "ab40b8a5f1": "No matches. Keep typing to add a custom path.",
           "4cd2a4c077": "Type a path (e.g. .env or node_modules)…",
           "241325302c": "Add Path",
-          "7ff265071d": "When a new worktree is created, each path listed here will be symlinked from the primary checkout.",
-          "4755f120b6": "Worktree Symlinks",
-          "b07ef5a8b6": "Paths to symlink from the primary checkout into newly created worktrees.",
+          "7ff265071d": "When a new worktree is created, each path listed here is APFS clone-copied on macOS when possible, otherwise symlinked from the primary checkout.",
+          "4755f120b6": "Worktree Shared Paths",
+          "b07ef5a8b6": "Paths to materialize from the primary checkout into newly created worktrees.",
           "d72ba8dc68": "{{value0}} paths",
           "9ea912d811": "1 path"
         },
@@ -6765,8 +6802,8 @@
             "10b52f79c1": "worktrees",
             "d23ae13990": "worktree",
             "0d24759f14": "experimental",
-            "603d29ed74": "Automatically symlink configured files or folders into newly created worktrees so shared state (envs, caches, installs) stays connected.",
-            "78c2a8dc74": "Symlinks on worktrees",
+            "603d29ed74": "Automatically materialize configured files or folders into newly created worktrees using APFS clone-copy on macOS when possible, otherwise symlinks.",
+            "78c2a8dc74": "Shared paths on worktrees",
             "7b79081695": "unread",
             "f10d307468": "completion",
             "5f067ba0f9": "agent",
@@ -6975,6 +7012,8 @@
             "7baf524b04": "workspace",
             "d0bc793689": "Root directory where workspace folders are created.",
             "4c95d08fa2": "Workspace Directory",
+            "161a86a9da": "Confirm before closing pinned tabs",
+            "8e593f04fc": "Show a confirmation dialog before a pinned tab is closed.",
             "defaultProjectRuntime": "Default Project Runtime",
             "defaultProjectRuntimeDescription": "Choose the runtime inherited by local Windows projects."
           }
@@ -7383,8 +7422,11 @@
             "f1c53f2820": "worktree",
             "7e228fc439": "symlinks",
             "c06adcf136": "symlink",
-            "ed885e589f": "Paths to symlink from the primary checkout into newly created worktrees.",
-            "01b3377ebc": "Worktree Symlinks",
+            "copy": "copy",
+            "clone": "clone",
+            "apfs": "apfs",
+            "ed885e589f": "Paths to materialize from the primary checkout into newly created worktrees.",
+            "01b3377ebc": "Worktree Shared Paths",
             "fff8834983": "prompt",
             "fa3131f223": "model",
             "130d76dc16": "rename",
@@ -11436,6 +11478,25 @@
         "sourceUnavailable": "{{value0}} source unavailable: {{value1}}",
         "someSourceHostsUnavailable": "Some {{value0}} source hosts unavailable: {{value1}}",
         "reconnectOrUpdateTitle": "Reconnect or update {{value0}} to load this source."
+      },
+      "ShortcutKeyCombo": {
+        "07eb4985a1": "Double-tap {{value0}}"
+      },
+      "star": {
+        "nag": {
+          "StarNagToastHost": {
+            "starredThanks": "Starred — thank you!",
+            "githubOpened": "GitHub opened",
+            "opening": "Opening…",
+            "starring": "Starring…",
+            "openGithub": "Open GitHub",
+            "starOnGithub": "Star on GitHub",
+            "onboardingCompleted": "Onboarding completed!",
+            "body": "If you’re enjoying Orca so far, a GitHub star helps other developers discover it.",
+            "dismiss": "Dismiss",
+            "later": "Later"
+          }
+        }
       }
     },
     "i18n": {

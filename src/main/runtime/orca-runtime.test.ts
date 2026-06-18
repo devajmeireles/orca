@@ -1,5 +1,5 @@
 /* eslint-disable max-lines -- Why: runtime behavior is stateful and cross-cutting, so these tests stay in one file to preserve the end-to-end invariants around handles, waits, and graph sync. */
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { EventEmitter } from 'events'
 import { randomUUID } from 'crypto'
 import { lstat, mkdir, mkdtemp, rm, writeFile } from 'fs/promises'
@@ -472,7 +472,7 @@ vi.mock('../git/repo', async (importOriginal) => {
   }
 })
 
-afterEach(() => {
+function resetRuntimeTestMocks(): void {
   resetPlatform()
   advertisedUrlWatcher.clear()
   electronMocks.BrowserWindow.fromId.mockReset()
@@ -659,7 +659,10 @@ afterEach(() => {
   updateGitLabMRReviewersMock.mockResolvedValue({ ok: true, reviewers: [] })
   getIssueMock.mockReset()
   getIssueMock.mockResolvedValue(null)
-})
+}
+
+beforeEach(resetRuntimeTestMocks)
+afterEach(resetRuntimeTestMocks)
 
 function syncSinglePty(
   runtime: OrcaRuntimeService,
@@ -3643,8 +3646,16 @@ describe('OrcaRuntimeService', () => {
     await expect(runtime.listRepoIssues('id:repo-1', 10)).resolves.toEqual([
       { number: 7, title: 'Remote issue list item' }
     ])
+    await expect(runtime.requestRepoPRReviewers('id:repo-1', 7, ['alex'])).resolves.toEqual({
+      ok: true
+    })
+    await expect(runtime.removeRepoPRReviewers('id:repo-1', 7, ['alex'])).resolves.toEqual({
+      ok: true
+    })
     expect(getIssueMock).toHaveBeenCalledWith('/remote/repo', 12, 'ssh-1')
     expect(listGitHubIssuesMock).toHaveBeenCalledWith('/remote/repo', 10, undefined, 'ssh-1')
+    expect(requestGitHubPRReviewersMock).toHaveBeenCalledWith('/remote/repo', 7, ['alex'], 'ssh-1')
+    expect(removeGitHubPRReviewersMock).toHaveBeenCalledWith('/remote/repo', 7, ['alex'], 'ssh-1')
   })
 
   it('routes runtime GitHub repo identity helpers through the selected WSL project runtime', async () => {
@@ -9929,6 +9940,45 @@ describe('OrcaRuntimeService', () => {
     ])
   })
 
+  it('creates mobile session terminals for folder workspaces in a headless runtime server', async () => {
+    const folderPath = await mkdtemp(join(tmpdir(), 'orca-mobile-folder-workspace-'))
+    const spawn = vi.fn().mockResolvedValue({ id: 'pty-mobile-folder' })
+    const folderWorkspace = makeFolderWorkspace({ folderPath })
+    const projectGroup = makeFolderProjectGroup({ parentPath: folderPath })
+    const runtime = new OrcaRuntimeService(
+      createFolderWorkspaceRuntimeStore(folderWorkspace, projectGroup) as never
+    )
+    runtime.setPtyController({
+      spawn,
+      write: () => true,
+      kill: () => true,
+      getForegroundProcess: async () => null
+    })
+    runtime.syncWindowGraph(0, { tabs: [], leaves: [] })
+
+    const result = await runtime.createMobileSessionTerminal(`id:${TEST_FOLDER_WORKSPACE_KEY}`)
+
+    const spawnCall = spawn.mock.calls[0]?.[0] as
+      | { cwd?: string; env?: Record<string, string>; worktreeId?: string }
+      | undefined
+    const spawnedEnv = spawnCall?.env ?? {}
+    expect(spawnCall).toMatchObject({
+      cwd: folderPath,
+      worktreeId: TEST_FOLDER_WORKSPACE_KEY,
+      persistHostSessionBinding: true
+    })
+    expectStablePaneKeyEnv(spawnedEnv)
+    expect(spawnedEnv.ORCA_WORKSPACE_ID).toBe(TEST_FOLDER_WORKSPACE_KEY)
+    expect(spawnedEnv.ORCA_PROJECT_GROUP_ID).toBe(TEST_FOLDER_PROJECT_GROUP_ID)
+    expect(spawnedEnv.ORCA_WORKSPACE_ROOT).toBe(folderPath)
+    expect(result.tab).toMatchObject({
+      type: 'terminal',
+      status: 'ready',
+      terminal: expect.stringMatching(/^term_/),
+      isActive: true
+    })
+  })
+
   it('spawns fresh headless SSH mobile session terminals instead of reattaching synthetic local ids', async () => {
     const remoteRepo = { ...store.getRepo(TEST_REPO_ID)!, connectionId: 'ssh-1' }
     const remoteStore = {
@@ -12197,6 +12247,7 @@ describe('OrcaRuntimeService', () => {
     expect(summaries).toEqual({
       worktrees: [
         {
+          workspaceKind: 'git',
           worktreeId: 'repo-1::/tmp/worktree-a',
           repoId: 'repo-1',
           repo: 'repo',
@@ -12224,6 +12275,80 @@ describe('OrcaRuntimeService', () => {
       ],
       totalCount: 1,
       truncated: false
+    })
+  })
+
+  it('reads the linked-PR state from the renderer repoId-keyed GitHub cache', async () => {
+    // Regression: the renderer keys the PR cache by `repoId::branch`, so reading
+    // only by `path::branch` missed every entry and left mobile's badge muted.
+    const runtimeStore = {
+      ...store,
+      getGitHubCache: () => ({
+        pr: {
+          [`${TEST_REPO_ID}::feature/foo`]: {
+            data: { number: 42, state: 'merged' },
+            fetchedAt: 1
+          }
+        },
+        issue: {}
+      })
+    }
+    const runtime = new OrcaRuntimeService(runtimeStore as never)
+
+    const { worktrees } = await runtime.getWorktreePs()
+    const summary = worktrees.find((w) => w.worktreeId === TEST_WORKTREE_ID)
+    expect(summary?.linkedPR).toEqual({ number: 42, state: 'merged' })
+  })
+
+  it('falls back to the path-keyed GitHub cache entry', async () => {
+    const runtimeStore = {
+      ...store,
+      getGitHubCache: () => ({
+        pr: {
+          [`${TEST_REPO_PATH}::feature/foo`]: {
+            data: { number: 7, state: 'open' },
+            fetchedAt: 1
+          }
+        },
+        issue: {}
+      })
+    }
+    const runtime = new OrcaRuntimeService(runtimeStore as never)
+
+    const { worktrees } = await runtime.getWorktreePs()
+    const summary = worktrees.find((w) => w.worktreeId === TEST_WORKTREE_ID)
+    expect(summary?.linkedPR).toEqual({ number: 7, state: 'open' })
+  })
+
+  it('includes folder workspaces in compact worktree summaries for mobile', async () => {
+    const folderWorkspace = makeFolderWorkspace({
+      name: 'GG',
+      comment: 'dujiao-next-eval'
+    })
+    const projectGroup = makeFolderProjectGroup({ name: 'Store' })
+    const runtime = new OrcaRuntimeService(
+      createFolderWorkspaceRuntimeStore(folderWorkspace, projectGroup) as never
+    )
+
+    const { worktrees } = await runtime.getWorktreePs()
+    const folderSummary = worktrees.find(
+      (worktree) => worktree.worktreeId === TEST_FOLDER_WORKSPACE_KEY
+    )
+
+    expect(folderSummary).toMatchObject({
+      workspaceKind: 'folder-workspace',
+      worktreeId: TEST_FOLDER_WORKSPACE_KEY,
+      repoId: `folder-workspace:${TEST_FOLDER_PROJECT_GROUP_ID}`,
+      repo: 'Store',
+      path: TEST_FOLDER_WORKSPACE_PATH,
+      branch: '',
+      displayName: 'GG',
+      comment: 'dujiao-next-eval',
+      isPinned: false,
+      unread: false,
+      liveTerminalCount: 0,
+      hasAttachedPty: false,
+      status: 'inactive'
     })
   })
 

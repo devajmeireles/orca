@@ -210,6 +210,10 @@ const WorktreeCardAgentsBody = React.memo(function WorktreeCardAgentsBody({
     },
     [worktreeId]
   )
+  const handleActivateRetainedAgent = useCallback(() => {
+    // Why: hibernation-retained rows are passive completion evidence. Activating
+    // the worktree would resume sleeping sessions, so the row itself is inert.
+  }, [])
 
   // Why: own one 30s tick per non-empty inline list. Cards with zero agents
   // never mount this component (see WorktreeCardAgents), so idle worktrees
@@ -292,7 +296,9 @@ const WorktreeCardAgentsBody = React.memo(function WorktreeCardAgentsBody({
         <DashboardAgentRow
           agent={agent}
           onDismiss={handleDismissAgent}
-          onActivate={handleActivateAgentTab}
+          onActivate={
+            agent.rowSource === 'retained' ? handleActivateRetainedAgent : handleActivateAgentTab
+          }
           now={now}
           // Why: bold an agent row until the user has visited its tab.
           // useAutoAckViewedAgent acks automatically when the user
@@ -364,7 +370,9 @@ const WorktreeCardAgentsBody = React.memo(function WorktreeCardAgentsBody({
         <CompactAgentRow
           agent={agent}
           now={now}
-          onActivate={handleActivateAgentTab}
+          onActivate={
+            agent.rowSource === 'retained' ? handleActivateRetainedAgent : handleActivateAgentTab
+          }
           sendTargetStatus={sendTarget?.status}
           sendTargetDisabledReason={sendTarget?.disabledReason}
           onSendTargetClick={isAgentSendTargetModeActive ? handleSendTargetClick : undefined}

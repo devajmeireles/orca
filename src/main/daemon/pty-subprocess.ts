@@ -33,6 +33,10 @@ import {
   recognizeAgentProcess,
   recognizeAgentProcessFromCommandLine
 } from '../../shared/agent-process-recognition'
+import {
+  shouldUseShellReadyStartupDelivery,
+  type StartupCommandDelivery
+} from '../../shared/codex-startup-delivery'
 import { isShellProcess } from '../../shared/shell-process-detection'
 import { parsePtySessionId } from './pty-session-id'
 import { getAgentForegroundContextPaths } from '../providers/agent-foreground-context-paths'
@@ -51,6 +55,7 @@ export type PtySubprocessOptions = {
   env?: Record<string, string>
   envToDelete?: string[]
   command?: string
+  startupCommandDelivery?: StartupCommandDelivery
   /** Explicit shell executable path/basename the renderer asked for.
    *  Overrides env.COMSPEC / env.SHELL resolution inside the daemon so a user
    *  who picks "New WSL terminal" from the "+" menu actually gets WSL. */
@@ -387,6 +392,8 @@ export function createPtySubprocess(opts: PtySubprocessOptions): SubprocessHandl
   let shellPath =
     cwdWslInfo || sessionWslContext ? 'wsl.exe' : opts.shellOverride || resolvePtyShellPath(env)
   let shellArgs: string[]
+  const startupAgentRecognition = recognizeAgentProcessFromCommandLine(opts.command)
+  const isCodexStartupCommand = startupAgentRecognition?.agent === 'codex'
   const requestedCwd = opts.cwd || getDefaultCwd()
   let spawnCwd = requestedCwd
   let validationCwd = spawnCwd
@@ -498,18 +505,31 @@ export function createPtySubprocess(opts: PtySubprocessOptions): SubprocessHandl
     if (opts.env?.TERM) {
       env.TERM = opts.env.TERM
     }
-    // Why: any Orca-injected overlay env that user rc files can clobber
-    // needs the wrapper so the post-rc restore line runs.
-    const shellLaunch = opts.command
-      ? getShellReadyLaunchConfig(shellPath)
-      : env.ORCA_ATTRIBUTION_SHIM_DIR ||
-          env.ORCA_OPENCODE_CONFIG_DIR ||
-          env.ORCA_PI_CODING_AGENT_DIR ||
-          env.ORCA_OMP_CODING_AGENT_DIR ||
-          env.ORCA_CODEX_HOME ||
-          env.ORCA_AGENT_TEAMS_SHIM_DIR
-        ? getAttributionShellLaunchConfig(shellPath)
-        : null
+    // Why: OpenCode/Codex path restoration and OMP's typed-command status
+    // wrapper need shell-ready code after user startup files run.
+    let shellLaunch: ReturnType<typeof getShellReadyLaunchConfig> | null = null
+    if (opts.command && isCodexStartupCommand) {
+      const shouldWaitForShellReady = shouldUseShellReadyStartupDelivery({
+        command: opts.command,
+        startupCommandDelivery: opts.startupCommandDelivery
+      })
+      // Why: payload-bearing Codex startup text can be dropped by rc-file noise;
+      // plain Codex stays markerless to preserve the startup-speed path.
+      shellLaunch = shouldWaitForShellReady
+        ? getShellReadyLaunchConfig(shellPath)
+        : getAttributionShellLaunchConfig(shellPath)
+    } else if (opts.command) {
+      shellLaunch = getShellReadyLaunchConfig(shellPath)
+    } else {
+      shellLaunch =
+        env.ORCA_ATTRIBUTION_SHIM_DIR ||
+        env.ORCA_OPENCODE_CONFIG_DIR ||
+        env.ORCA_OMP_STATUS_EXTENSION ||
+        env.ORCA_CODEX_HOME ||
+        env.ORCA_AGENT_TEAMS_SHIM_DIR
+          ? getAttributionShellLaunchConfig(shellPath)
+          : null
+    }
     if (shellLaunch) {
       Object.assign(env, shellLaunch.env)
     }
@@ -562,7 +582,6 @@ export function createPtySubprocess(opts: PtySubprocessOptions): SubprocessHandl
     cwd: opts.cwd,
     worktreeId: parsePtySessionId(opts.sessionId).worktreeId
   })
-  const startupAgentRecognition = recognizeAgentProcessFromCommandLine(opts.command)
   let startupAgentForeground: { processName: string; expiresAt: number } | null =
     startupAgentRecognition
       ? {
