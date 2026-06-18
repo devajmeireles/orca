@@ -205,7 +205,12 @@ function row(path: string, area: GitStatusEntry['area']): HTMLDivElement | null 
 }
 
 function isHighlighted(element: HTMLElement | null): boolean {
-  return element?.getAttribute('data-current') === 'true' && element.className.includes('bg-accent')
+  if (!element) return false
+  return (
+    element.getAttribute('data-current') === 'true' &&
+    element.classList.contains('bg-accent') &&
+    !element.classList.contains('bg-accent/60')
+  )
 }
 
 describe('SourceControl open-file highlight', () => {
