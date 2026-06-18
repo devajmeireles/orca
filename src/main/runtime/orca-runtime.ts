@@ -4166,6 +4166,16 @@ export class OrcaRuntimeService {
     return this.ptyController?.getSize?.(ptyId) ?? null
   }
 
+  // Why: a width reflow on a normal-buffer PTY must re-stream the full
+  // scrollback to mobile so it rewraps at the new cols, but alternate-screen
+  // TUIs (vim, Claude Code) own their repaint and have no scrollback — for
+  // those the mobile client just resizes xterm geometry and consumes the
+  // TUI's own redraw, so the resize re-stream must be skipped. Returns false
+  // when there is no headless emulator (resize falls back to geometry-only).
+  isTerminalAlternateScreen(ptyId: string): boolean {
+    return this.headlessTerminals.get(ptyId)?.emulator.isAlternateScreen ?? false
+  }
+
   // Why: daemon-backed PTYs that the runtime adopted after an Orca relaunch
   // start with a fresh headless emulator that has zero scrollback, even though
   // the daemon's on-disk checkpoint and the desktop xterm both contain the
@@ -5422,11 +5432,11 @@ export class OrcaRuntimeService {
     ptyId: string,
     clientId: string,
     viewport: { cols: number; rows: number }
-  ): Promise<boolean> {
+  ): Promise<{ updated: boolean; applied: boolean }> {
     const inner = this.mobileSubscribers.get(ptyId)
     const sub = inner?.get(clientId)
     if (!sub) {
-      return false
+      return { updated: false, applied: false }
     }
     sub.viewport = viewport
     sub.lastActedAt = Date.now()
@@ -5434,12 +5444,12 @@ export class OrcaRuntimeService {
     const mode = this.getMobileDisplayMode(ptyId)
     if (mode === 'desktop') {
       // Watching at desktop dims — viewport is informational only.
-      return true
+      return { updated: true, applied: false }
     }
     // Drive PTY dims by the most-recent-actor (just updated to this client).
     const winner = this.pickMostRecentActor(inner!)
     if (!winner) {
-      return false
+      return { updated: false, applied: false }
     }
     const winnerSub = inner!.get(winner.clientId)
     const driveViewport = winnerSub?.viewport ?? viewport
@@ -5457,8 +5467,9 @@ export class OrcaRuntimeService {
     if (needsFreshSubscribeGuard) {
       this.freshSubscribeGuard.add(ptyId)
     }
+    let result: ApplyLayoutResult
     try {
-      await this.enqueueLayout(ptyId, {
+      result = await this.enqueueLayout(ptyId, {
         kind: 'phone',
         cols: clampedCols,
         rows: clampedRows,
@@ -5469,7 +5480,7 @@ export class OrcaRuntimeService {
         this.freshSubscribeGuard.delete(ptyId)
       }
     }
-    return true
+    return { updated: true, applied: result.ok }
   }
 
   // Why: remote desktop clients do not have the local `pty:resize` IPC path.
@@ -7017,9 +7028,14 @@ export class OrcaRuntimeService {
       const repo = repoById.get(worktree.repoId)
       let linkedPR: { number: number; state: string } | null = null
       const branch = worktree.branch.replace(/^refs\/heads\//, '')
-      if (repo?.path && branch && ghCache) {
-        const prCacheKey = `${repo.path}::${branch}`
-        const cached = ghCache.pr[prCacheKey]
+      if (branch && ghCache) {
+        // Why: the renderer keys the PR cache by `repoId::branch` (getGitHubPRCacheKey
+        // prefers repo.id over repo.path), so read by id first and fall back to path
+        // for legacy/path-keyed entries. Reading only by path missed every cached
+        // entry, leaving mobile's linked-PR badge stuck on the 'unknown' fallback.
+        const cached =
+          (repo?.id ? ghCache.pr[`${repo.id}::${branch}`] : undefined) ??
+          (repo?.path ? ghCache.pr[`${repo.path}::${branch}`] : undefined)
         if (cached?.data) {
           linkedPR = { number: cached.data.number, state: cached.data.state }
         }
@@ -9191,7 +9207,6 @@ export class OrcaRuntimeService {
     reviewers: string[]
   ): Promise<Awaited<ReturnType<typeof removePRReviewers>>> {
     const repo = await this.resolveRepoSelector(repoSelector)
-    this.assertHostIntegrationRepoIsLocal(repo, 'repo_pr_reviewers')
     return removePRReviewers(
       repo.path,
       prNumber,
@@ -14350,12 +14365,6 @@ export class OrcaRuntimeService {
       throw new Error('selector_ambiguous')
     }
     throw new Error('repo_not_found')
-  }
-
-  private assertHostIntegrationRepoIsLocal(repo: Repo, operation: string): void {
-    if (repo.connectionId) {
-      throw new Error(`${operation}_unsupported_for_ssh_repo`)
-    }
   }
 
   private requireStore(): Store {
