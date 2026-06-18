@@ -63,7 +63,11 @@ vi.mock('@/store', () => ({
     selector({
       openAgentSendPopoverTargetMode: storeMocks.openAgentSendPopoverTargetMode,
       closeAgentSendPopoverTargetMode: storeMocks.closeAgentSendPopoverTargetMode,
-      agentSendPopoverTargetMode: storeMocks.state.agentSendPopoverTargetMode
+      agentSendPopoverTargetMode: storeMocks.state.agentSendPopoverTargetMode,
+      agentStatusByPaneKey: {},
+      tabsByWorktree: {},
+      terminalLayoutsByTabId: {},
+      runtimePaneTitlesByTabId: {}
     })
 }))
 

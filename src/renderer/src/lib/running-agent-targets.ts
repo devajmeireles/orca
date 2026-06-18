@@ -7,7 +7,7 @@ import type { TerminalTab } from '../../../shared/types'
 import { parsePaneKey } from '../../../shared/stable-pane-id'
 import { isExplicitAgentStatusFresh } from './agent-status'
 
-type RunningAgentTargetState = Pick<
+export type RunningAgentTargetState = Pick<
   AppState,
   'agentStatusByPaneKey' | 'tabsByWorktree' | 'terminalLayoutsByTabId'
 >
