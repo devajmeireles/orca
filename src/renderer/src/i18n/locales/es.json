@@ -2358,6 +2358,7 @@
           "PinnedTabCloseDialog": {
             "6c190f295a": "¿Cerrar pestaña fijada?",
             "0d1963f4a6": "Esta pestaña está fijada. ¿Seguro que quieres cerrarla?",
+            "dont_ask_again": "No volver a preguntar por pestañas fijadas",
             "0b38ee2f86": "Cancelar",
             "c337c9d75c": "Cerrar"
           }
