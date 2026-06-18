@@ -1,0 +1,51 @@
+import type { DiffSource } from '@/store/slices/editor'
+
+const EMPTY_OPEN_ROW_KEYS: ReadonlySet<string> = new Set()
+
+const SIGNATURE_SEPARATOR = '::'
+
+// Why: a plain edit/changes editor tab carries no diff source, so it is folded
+// into the working-tree rows just like an unstaged diff would be.
+export type ActiveOpenFileDiffSource = DiffSource | 'edit'
+
+/**
+ * Build the stable string that identifies the active editor file for highlight
+ * matching: `${diffSource}::${relativePath}`. Kept as a primitive so the zustand
+ * selector that produces it stays referentially stable across unrelated store
+ * updates.
+ */
+export function buildActiveOpenFileSignature(
+  diffSource: DiffSource | undefined,
+  relativePath: string
+): string {
+  return `${diffSource ?? 'edit'}${SIGNATURE_SEPARATOR}${relativePath}`
+}
+
+/**
+ * Expand an active-open-file signature into the `${area}::${path}` row keys used
+ * by the Source Control tree/list. Staged diffs match only the staged row;
+ * unstaged diffs, untracked files (which open as an unstaged diff), and plain
+ * edit/changes tabs all map to the working-tree (unstaged + untracked) rows.
+ */
+export function buildActiveOpenRowKeys(signature: string | null): ReadonlySet<string> {
+  if (!signature) {
+    return EMPTY_OPEN_ROW_KEYS
+  }
+
+  const separatorIndex = signature.indexOf(SIGNATURE_SEPARATOR)
+  if (separatorIndex === -1) {
+    return EMPTY_OPEN_ROW_KEYS
+  }
+
+  const diffSource = signature.slice(0, separatorIndex)
+  const path = signature.slice(separatorIndex + SIGNATURE_SEPARATOR.length)
+  if (path.length === 0) {
+    return EMPTY_OPEN_ROW_KEYS
+  }
+
+  if (diffSource === 'staged') {
+    return new Set([`staged::${path}`])
+  }
+
+  return new Set([`unstaged::${path}`, `untracked::${path}`])
+}
