@@ -118,6 +118,7 @@ export type WorktreeSlice = {
     worktreeId: string,
     args: { parentWorktreeId?: string; noParent?: boolean }
   ) => Promise<void>
+  assignWorktreeParent: (worktreeId: string, args: { parentWorktreeId: string }) => Promise<void>
   createWorktree: (
     repoId: string,
     name: string,
@@ -188,6 +189,7 @@ export type WorktreeSlice = {
     updates: Partial<WorktreeMeta>,
     options?: WorktreeMetaUpdateOptions
   ) => Promise<void>
+  ensureHostedReviewPushTarget: (worktreeId: string) => Promise<void>
   updateWorktreesMeta: (
     updatesByWorktreeId: ReadonlyMap<string, Partial<WorktreeMeta>>
   ) => Promise<void>

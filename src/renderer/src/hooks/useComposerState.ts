@@ -9,6 +9,7 @@ import { useShallow } from 'zustand/react/shallow'
 import { useAppStore } from '@/store'
 import { getAgentLaunchPlatformForRepo } from '@/lib/agent-launch-platform'
 import { getAgentCatalog } from '@/lib/agent-catalog'
+import { createBrowserUuid } from '@/lib/browser-uuid'
 import {
   parseGitHubIssueOrPRNumber,
   parseGitHubIssueOrPRLink,
@@ -157,6 +158,11 @@ import {
   resolveComposerBranchSelection,
   resolveComposerReuseOverride
 } from './composer-branch-selection'
+import { isCurrentComposerDropOwner } from './composer-drop-owner'
+import {
+  collectComposerDropUploadResult,
+  shouldReportComposerDropUploadFailure
+} from './composer-drop-upload-result'
 import { translate } from '@/i18n/i18n'
 
 export function canResolveFolderSmartGitHubSubmit({
@@ -1197,6 +1203,9 @@ export function useComposerState(options: UseComposerStateOptions): UseComposerS
   )
 
   const filteredLinkItems = useMemo(() => {
+    if (normalizedLinkQuery.tooLarge) {
+      return []
+    }
     if (normalizedLinkQuery.directNumber !== null) {
       return linkDirectItem ? [linkDirectItem] : []
     }
@@ -1220,7 +1229,13 @@ export function useComposerState(options: UseComposerStateOptions): UseComposerS
         .toLowerCase()
       return text.includes(query)
     })
-  }, [linkDirectItem, linkItems, normalizedLinkQuery.directNumber, normalizedLinkQuery.query])
+  }, [
+    linkDirectItem,
+    linkItems,
+    normalizedLinkQuery.directNumber,
+    normalizedLinkQuery.query,
+    normalizedLinkQuery.tooLarge
+  ])
 
   // Persist draft whenever relevant fields change (full-page only).
   useEffect(() => {
@@ -1971,18 +1986,21 @@ export function useComposerState(options: UseComposerStateOptions): UseComposerS
       sourcePaths: string[],
       targetSettings = selectedRepoSettings,
       targetConnectionId = connectionId,
-      targetRepoPath = selectedRepoPath
+      targetRepoPath = selectedRepoPath,
+      canReportFailure: () => boolean = () => true
     ): Promise<{ filePaths: string[]; folderPaths: string[] } | null> => {
       if (!targetSettings?.activeRuntimeEnvironmentId?.trim() && !targetConnectionId) {
         return null
       }
       if (!targetRepoPath) {
-        toast.error(
-          translate(
-            'auto.hooks.useComposerState.3db83fc58a',
-            'No project path is available on this host for attachments.'
+        if (canReportFailure()) {
+          toast.error(
+            translate(
+              'auto.hooks.useComposerState.3db83fc58a',
+              'No project path is available on this host for attachments.'
+            )
           )
-        )
+        }
         return { filePaths: [], folderPaths: [] }
       }
       const destinationDir = joinPath(targetRepoPath, '.orca/drops')
@@ -1997,21 +2015,8 @@ export function useComposerState(options: UseComposerStateOptions): UseComposerS
         destinationDir,
         { ensureDestinationDir: true }
       )
-      const filePaths: string[] = []
-      const folderPaths: string[] = []
-      let skippedOrFailed = 0
-      for (const result of results) {
-        if (result.status !== 'imported') {
-          skippedOrFailed += 1
-          continue
-        }
-        if (result.kind === 'directory') {
-          folderPaths.push(result.destPath)
-        } else {
-          filePaths.push(result.destPath)
-        }
-      }
-      if (skippedOrFailed > 0) {
+      const uploadResult = collectComposerDropUploadResult(results)
+      if (shouldReportComposerDropUploadFailure(uploadResult, canReportFailure)) {
         toast.error(
           translate(
             'auto.hooks.useComposerState.a9ff236145',
@@ -2019,7 +2024,7 @@ export function useComposerState(options: UseComposerStateOptions): UseComposerS
           )
         )
       }
-      return { filePaths, folderPaths }
+      return { filePaths: uploadResult.filePaths, folderPaths: uploadResult.folderPaths }
     },
     [connectionId, selectedRepoPath, selectedRepoSettings]
   )
@@ -2044,7 +2049,7 @@ export function useComposerState(options: UseComposerStateOptions): UseComposerS
   }, [addComposerAttachments, insertComposerFolderPaths, uploadComposerPaths])
 
   const applyLocalComposerDrop = useCallback(
-    async (paths: string[]): Promise<void> => {
+    async (paths: string[], canApply: () => boolean = () => true): Promise<void> => {
       const fileAttachments: string[] = []
       const folderPaths: string[] = []
       for (const filePath of paths) {
@@ -2061,6 +2066,9 @@ export function useComposerState(options: UseComposerStateOptions): UseComposerS
         }
       }
 
+      if (!canApply()) {
+        return
+      }
       addComposerAttachments(fileAttachments)
       insertComposerFolderPaths(folderPaths)
     },
@@ -2093,22 +2101,28 @@ export function useComposerState(options: UseComposerStateOptions): UseComposerS
       // drop. Earlier subscribers stay bound to keep their own cleanup tidy
       // but short-circuit so the event doesn't double-apply when page+modal
       // are both alive.
-      if (composerDropStack.at(-1) !== instanceId) {
+      if (!isCurrentComposerDropOwner(composerDropStack, instanceId)) {
         return
       }
       void (async () => {
+        const isStillDropOwner = (): boolean =>
+          isCurrentComposerDropOwner(composerDropStack, instanceId)
         const uploaded = await uploadComposerPathsRef.current(
           data.paths,
           selectedRepoSettingsRef.current,
           connectionIdRef.current,
-          selectedRepoPathRef.current
+          selectedRepoPathRef.current,
+          isStillDropOwner
         )
+        if (!isStillDropOwner()) {
+          return
+        }
         if (uploaded) {
           addComposerAttachmentsRef.current(uploaded.filePaths)
           insertComposerFolderPathsRef.current(uploaded.folderPaths)
           return
         }
-        await applyLocalComposerDropRef.current(data.paths)
+        await applyLocalComposerDropRef.current(data.paths, isStillDropOwner)
       })()
     })
     return () => {
@@ -3061,6 +3075,8 @@ export function useComposerState(options: UseComposerStateOptions): UseComposerS
           ? {
               command: startupPlan.launchCommand,
               ...(startupPlan.env ? { env: startupPlan.env } : {}),
+              launchConfig: startupPlan.launchConfig,
+              launchAgent: tuiAgent,
               ...(startupPlan.startupCommandDelivery
                 ? { startupCommandDelivery: startupPlan.startupCommandDelivery }
                 : {}),
@@ -3116,6 +3132,11 @@ export function useComposerState(options: UseComposerStateOptions): UseComposerS
             }
           : undefined
       const backendSpawnedStartup = result.startupTerminal?.spawned === true
+      if (startupPlan && !backendSpawnedStartup && !startupPlan.launchToken) {
+        // Why: delayed delivery must target the exact pane spawned from this
+        // queued startup, so both halves share one renderer-session token.
+        startupPlan.launchToken = createBrowserUuid()
+      }
       const activation = activateAndRevealWorktree(worktree.id, {
         sidebarRevealBehavior: 'auto',
         setup: result.setup,
@@ -3126,6 +3147,9 @@ export function useComposerState(options: UseComposerStateOptions): UseComposerS
               startup: {
                 command: startupPlan.launchCommand,
                 ...(startupPlan.env ? { env: startupPlan.env } : {}),
+                launchConfig: startupPlan.launchConfig,
+                ...(startupPlan.launchToken ? { launchToken: startupPlan.launchToken } : {}),
+                launchAgent: tuiAgent,
                 ...(startupPlan.startupCommandDelivery
                   ? { startupCommandDelivery: startupPlan.startupCommandDelivery }
                   : {}),
@@ -3440,6 +3464,7 @@ export function useComposerState(options: UseComposerStateOptions): UseComposerS
             launchCommand: draftLaunchPlan.launchCommand,
             expectedProcess: draftLaunchPlan.expectedProcess,
             followupPrompt: null,
+            launchConfig: draftLaunchPlan.launchConfig,
             ...(draftLaunchPlan.startupCommandDelivery
               ? { startupCommandDelivery: draftLaunchPlan.startupCommandDelivery }
               : {}),
@@ -3474,6 +3499,8 @@ export function useComposerState(options: UseComposerStateOptions): UseComposerS
             ? {
                 command: startupPlan.launchCommand,
                 ...(startupPlan.env ? { env: startupPlan.env } : {}),
+                launchConfig: startupPlan.launchConfig,
+                ...(agent ? { launchAgent: agent } : {}),
                 ...(startupPlan.startupCommandDelivery
                   ? { startupCommandDelivery: startupPlan.startupCommandDelivery }
                   : {}),

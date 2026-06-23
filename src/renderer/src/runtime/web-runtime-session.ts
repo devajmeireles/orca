@@ -11,6 +11,7 @@ import type {
 } from '../../../shared/runtime-types'
 import type { TerminalPaneSplitSource } from '../../../shared/feature-education-telemetry'
 import type { StartupCommandDelivery } from '../../../shared/codex-startup-delivery'
+import type { SleepingAgentLaunchConfig } from '../../../shared/agent-session-resume'
 import type { TerminalPaneLayoutNode, TuiAgent } from '../../../shared/types'
 import type { AppState } from '../store/types'
 import { getRuntimeEnvironmentIdForWorktree } from '../lib/worktree-runtime-owner'
@@ -48,8 +49,11 @@ export async function createWebRuntimeSessionTerminal(args: {
   afterTabId?: string
   targetGroupId?: string
   command?: string
+  env?: Record<string, string>
   startupCommandDelivery?: StartupCommandDelivery
+  launchConfig?: SleepingAgentLaunchConfig
   agent?: TuiAgent
+  launchAgent?: TuiAgent
   activate?: boolean
   selectWorktree?: boolean
 }): Promise<boolean> {
@@ -73,8 +77,11 @@ export async function createWebRuntimeSessionTerminal(args: {
         afterTabId: args.afterTabId ? toHostSessionTabId(args.afterTabId) : undefined,
         targetGroupId: args.targetGroupId,
         command: args.command,
+        ...(args.env ? { env: args.env } : {}),
         startupCommandDelivery: args.startupCommandDelivery,
+        ...(args.launchConfig ? { launchConfig: args.launchConfig } : {}),
         agent: args.agent,
+        ...(args.launchAgent ? { launchAgent: args.launchAgent } : {}),
         activate: args.activate !== false
       },
       timeoutMs: 15_000
@@ -680,20 +687,26 @@ export function setWebRuntimeTabProps(args: {
   if (!environmentId || !isWebRuntimeSessionActive(environmentId)) {
     return false
   }
-  const hostTabId = isWebTerminalSurfaceTabId(args.tabId)
-    ? toHostSessionTabId(args.tabId)
-    : args.tabId
-  void window.api.runtimeEnvironments
-    .call({
-      selector: environmentId,
-      method: 'session.tabs.setTabProps',
-      params: {
-        worktree: toRuntimeWorktreeSelector(args.worktreeId),
-        tabId: hostTabId,
-        ...(args.color !== undefined ? { color: args.color } : {}),
-        ...(args.isPinned !== undefined ? { isPinned: args.isPinned } : {})
-      },
-      timeoutMs: 15_000
+  const state = useAppStore.getState()
+  void import('./web-session-tabs-sync')
+    .then(({ resolveHostSessionTabIdForWebSessionTab }) => {
+      const hostTabId =
+        resolveHostSessionTabIdForWebSessionTab(state, {
+          environmentId,
+          worktreeId: args.worktreeId,
+          tabId: args.tabId
+        }) ?? (isWebTerminalSurfaceTabId(args.tabId) ? toHostSessionTabId(args.tabId) : args.tabId)
+      return window.api.runtimeEnvironments.call({
+        selector: environmentId,
+        method: 'session.tabs.setTabProps',
+        params: {
+          worktree: toRuntimeWorktreeSelector(args.worktreeId),
+          tabId: hostTabId,
+          ...(args.color !== undefined ? { color: args.color } : {}),
+          ...(args.isPinned !== undefined ? { isPinned: args.isPinned } : {})
+        },
+        timeoutMs: 15_000
+      })
     })
     .then((response) => {
       unwrapRuntimeRpcResult(response as RuntimeRpcResponse<{ updated: true }>)

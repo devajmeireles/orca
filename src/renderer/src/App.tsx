@@ -1,6 +1,5 @@
 /* eslint-disable max-lines */
 import {
-  lazy,
   Suspense,
   useCallback,
   useEffect,
@@ -10,6 +9,7 @@ import {
   useState,
   type SetStateAction
 } from 'react'
+import { lazyWithRetry as lazy } from '@/lib/lazy-with-retry'
 
 import {
   ArrowLeft,
@@ -86,6 +86,8 @@ import {
   resolvePrimarySelectionMiddleClickPaste,
   usePrimarySelectionPaste
 } from './hooks/usePrimarySelectionPaste'
+import { useAppMenuPaste } from './hooks/useAppMenuPaste'
+import { useLargeTextControlPaste } from './hooks/useLargeTextControlPaste'
 import {
   canSkipRuntimeMobileSessionSyncKeyBuild,
   getRuntimeMobileSessionSyncKey,
@@ -128,6 +130,7 @@ import {
   canGoForwardWorktreeHistory
 } from '@/store/slices/worktree-nav-history'
 import { selectFloatingVisibleTabCount } from './store/selectors'
+import { selectActiveTerminalChromeState } from './store/active-terminal-chrome-selector'
 import type { VirtualizedScrollAnchor } from './hooks/useVirtualizedScrollAnchor'
 import type { RemoteWorkspacePatchResult } from '../../shared/remote-workspace-types'
 import type { OnboardingState, UpdateStatus } from '../../shared/types'
@@ -385,8 +388,11 @@ function App(): React.JSX.Element {
     useShallow((s) => ({
       toggleSidebar: s.toggleSidebar,
       fetchRepos: s.fetchRepos,
+      fetchReposForAllHosts: s.fetchReposForAllHosts,
       fetchProjectGroups: s.fetchProjectGroups,
+      fetchProjectGroupsForAllHosts: s.fetchProjectGroupsForAllHosts,
       fetchFolderWorkspaces: s.fetchFolderWorkspaces,
+      fetchFolderWorkspacesForAllHosts: s.fetchFolderWorkspacesForAllHosts,
       fetchAllWorktrees: s.fetchAllWorktrees,
       fetchWorktreeLineage: s.fetchWorktreeLineage,
       fetchSettings: s.fetchSettings,
@@ -428,7 +434,13 @@ function App(): React.JSX.Element {
   const featureTipsSeenIds = useAppStore((s) => s.featureTipsSeenIds)
   const featureInteractions = useAppStore((s) => s.featureInteractions)
   const contextualToursAutoEligible = useAppStore((s) => s.contextualToursAutoEligible)
-  const activeWorktreeId = useAppStore((s) => s.activeWorktreeId)
+  const {
+    activeWorktreeId,
+    tabCount,
+    effectiveActiveTabId,
+    activeTabCanExpand,
+    effectiveActiveTabExpanded
+  } = useAppStore(useShallow(selectActiveTerminalChromeState))
   const activePendingCreationId = useAppStore((s) => s.activePendingCreationId)
   // Why: the creation surface owns the tab strip from the first pending frame.
   // Gating it on the delayed loader flag made the tab bar swap in mid-create.
@@ -442,11 +454,7 @@ function App(): React.JSX.Element {
   // that remount so the left workspace list doesn't restart at scrollTop 0.
   const worktreeSidebarScrollOffsetRef = useRef(0)
   const worktreeSidebarScrollAnchorRef = useRef<VirtualizedScrollAnchor>(null)
-  const tabsByWorktree = useAppStore((s) => s.tabsByWorktree)
   const floatingVisibleTabCount = useAppStore(selectFloatingVisibleTabCount)
-  const activeTabId = useAppStore((s) => s.activeTabId)
-  const expandedPaneByTabId = useAppStore((s) => s.expandedPaneByTabId)
-  const canExpandPaneByTabId = useAppStore((s) => s.canExpandPaneByTabId)
   const workspaceSessionReady = useAppStore((s) => s.workspaceSessionReady)
   const keybindings = useAppStore((s) => s.keybindings)
   const updateStatus = useAppStore((s) => s.updateStatus)
@@ -614,6 +622,8 @@ function App(): React.JSX.Element {
     settings?.primarySelectionMiddleClickPaste
   )
   usePrimarySelectionPaste(primarySelectionMiddleClickPaste)
+  useAppMenuPaste()
+  useLargeTextControlPaste()
   const petEnabled = useAppStore((s) => s.settings?.experimentalPet === true)
   const petVisible = useAppStore((s) => s.petVisible)
   const renderPetOverlay = shouldRenderPetOverlay({
@@ -833,9 +843,12 @@ function App(): React.JSX.Element {
         // Load settings first so a persisted remote runtime does not boot against
         // the local filesystem and then hydrate stale local workspace state.
         await actions.fetchSettings()
-        await actions.fetchRepos()
-        await actions.fetchProjectGroups()
-        await actions.fetchFolderWorkspaces()
+        // Why: load local + every configured runtime environment (not just the
+        // active one) so a cold start that restored a remote workspace doesn't
+        // hide local repos. The sidebar "All hosts" scope then shows them all.
+        await actions.fetchReposForAllHosts()
+        await actions.fetchProjectGroupsForAllHosts()
+        await actions.fetchFolderWorkspacesForAllHosts()
         await actions.fetchAllWorktrees()
         await actions.fetchWorktreeLineage()
         const persistedUI = await window.api.ui.get()
@@ -1341,15 +1354,7 @@ function App(): React.JSX.Element {
     return () => document.removeEventListener('visibilitychange', handler)
   }, [actions])
 
-  const tabs = activeWorktreeId ? (tabsByWorktree[activeWorktreeId] ?? []) : []
-  const hasTabBar = tabs.length >= 2
-  const effectiveActiveTabId = activeTabId ?? tabs[0]?.id ?? null
-  const activeTabCanExpand = effectiveActiveTabId
-    ? (canExpandPaneByTabId[effectiveActiveTabId] ?? false)
-    : false
-  const effectiveActiveTabExpanded = effectiveActiveTabId
-    ? (expandedPaneByTabId[effectiveActiveTabId] ?? false)
-    : false
+  const hasTabBar = tabCount >= 2
   const showTitlebarExpandButton = workspaceChromeActive && !hasTabBar && effectiveActiveTabExpanded
   // Why: Activity and Space are full-page navigation surfaces — same
   // treatment as Settings — so the worktree sidebar is removed for those views.
@@ -1386,10 +1391,50 @@ function App(): React.JSX.Element {
     )
   }
 
+  const globalShortcutStateRef = useRef({
+    activeView,
+    activeWorktreeId,
+    actions,
+    floatingTerminalOpen,
+    floatingVisibleTabCount,
+    keybindings,
+    terminalShortcutPolicy: settings?.terminalShortcutPolicy,
+    setFloatingTerminalOpenWithFocus,
+    workspaceChromeActive,
+    creationLayoutActive
+  })
+  // Why: window key listeners are global and long-lived; keep one registration
+  // while letting the handler read current shortcut state on each key event.
+  globalShortcutStateRef.current = {
+    activeView,
+    activeWorktreeId,
+    actions,
+    floatingTerminalOpen,
+    floatingVisibleTabCount,
+    keybindings,
+    terminalShortcutPolicy: settings?.terminalShortcutPolicy,
+    setFloatingTerminalOpenWithFocus,
+    workspaceChromeActive,
+    creationLayoutActive
+  }
+
   useEffect(() => {
     const doubleTapDetector = new ModifierDoubleTapDetector()
 
     const dispatchShortcutInput = (input: ShortcutDispatchInput): void => {
+      const {
+        activeView,
+        activeWorktreeId,
+        actions,
+        floatingTerminalOpen,
+        floatingVisibleTabCount,
+        keybindings,
+        terminalShortcutPolicy,
+        setFloatingTerminalOpenWithFocus,
+        workspaceChromeActive,
+        creationLayoutActive
+      } = globalShortcutStateRef.current
+
       // Why: child-component handlers (e.g. terminal search Cmd+G / Cmd+Shift+G)
       // register on the same window capture phase and fire first. If they already
       // called preventDefault, this handler must not also act on the event —
@@ -1415,13 +1460,10 @@ function App(): React.JSX.Element {
       const matchShortcut = (actionId: KeybindingActionId): boolean =>
         keybindingMatchesAction(actionId, input, shortcutPlatform, keybindings, {
           context,
-          terminalShortcutPolicy: settings?.terminalShortcutPolicy
+          terminalShortcutPolicy
         })
       const notifyTerminalCapture = (actionId: KeybindingActionId): void => {
-        if (
-          context !== 'terminal' ||
-          (settings?.terminalShortcutPolicy ?? 'orca-first') !== 'orca-first'
-        ) {
+        if (context !== 'terminal' || (terminalShortcutPolicy ?? 'orca-first') !== 'orca-first') {
           return
         }
         showTerminalShortcutCaptureNotification({
@@ -1525,7 +1567,7 @@ function App(): React.JSX.Element {
         if (
           isFloatingWorkspacePanelShortcut(input, shortcutPlatform, null, keybindings, {
             context,
-            terminalShortcutPolicy: settings?.terminalShortcutPolicy
+            terminalShortcutPolicy
           })
         ) {
           return
@@ -1727,18 +1769,7 @@ function App(): React.JSX.Element {
       window.removeEventListener('keyup', onKeyUp, { capture: true })
       window.removeEventListener('blur', onBlur)
     }
-  }, [
-    activeView,
-    activeWorktreeId,
-    actions,
-    floatingTerminalOpen,
-    floatingVisibleTabCount,
-    keybindings,
-    settings?.terminalShortcutPolicy,
-    setFloatingTerminalOpenWithFocus,
-    workspaceChromeActive,
-    creationLayoutActive
-  ])
+  }, [])
 
   useLayoutEffect(() => {
     const controls = titlebarLeftControlsRef.current

@@ -11,6 +11,7 @@ import type { AgentHookInstallStatus } from '../shared/agent-hook-types'
 import type { TerminalPaneSplitSource } from '../shared/feature-education-telemetry'
 import type { ProjectExecutionRuntimeResolution } from '../shared/project-execution-runtime'
 import type { StartupCommandDelivery } from '../shared/codex-startup-delivery'
+import type { SleepingAgentLaunchConfig } from '../shared/agent-session-resume'
 import type {
   BaseRefSearchResult,
   BaseRefDefaultResult,
@@ -44,6 +45,7 @@ import type {
   FloatingTerminalCwdRequest,
   MarkdownDocument,
   SearchResult,
+  TuiAgent,
   UpdateStatus,
   WorktreeBaseStatusEvent,
   WorktreeDefaultTabsLaunch,
@@ -161,9 +163,11 @@ import {
   ORCA_UPDATER_QUIT_AND_INSTALL_STARTED_EVENT
 } from '../shared/updater-renderer-events'
 import {
-  NATIVE_FILE_DROP_TARGET,
   ORCA_INTERNAL_FILE_DRAG_TYPE,
+  createNativeFileDropPayload,
+  createRejectedNativeFileDropPayload,
   hasNativeFileDragTypes,
+  NATIVE_FILE_DROP_MAX_PATHS,
   resolveNativeFileDropPath,
   type NativeDropResolution,
   type NativeFileDropPayload,
@@ -172,6 +176,7 @@ import {
 import { subscribeRuntimeEnvironmentFromPreload } from './runtime-environment-subscriptions'
 import type { RuntimeEnvironmentSubscriptionHandle } from './runtime-environment-subscriptions'
 import type { HostedReviewForBranchArgs } from '../shared/hosted-review'
+import type { ReadClipboardTextOptions } from '../shared/clipboard-text'
 import type {
   CrashReportBreadcrumbData,
   CrashReportSubmitArgs,
@@ -310,7 +315,8 @@ function resolveNativeFileDrop(event: DragEvent): NativeDropResolution | null {
       pathEntries.push({
         nativeFileDropTarget: entry.dataset.nativeFileDropTarget,
         nativeFileDropDir: entry.dataset.nativeFileDropDir,
-        terminalTabId: entry.dataset.terminalTabId
+        terminalTabId: entry.dataset.terminalTabId,
+        terminalPaneLeafId: entry.dataset.terminalPaneLeafId ?? entry.dataset.leafId
       })
     }
   }
@@ -354,6 +360,21 @@ document.addEventListener(
     }
     const resolution = resolveNativeFileDrop(e)
 
+    // Why: resolving native File objects to paths is synchronous in preload.
+    // Reject oversized gestures by count before touching every File object.
+    if (files.length > NATIVE_FILE_DROP_MAX_PATHS) {
+      ipcRenderer.send(
+        'terminal:file-dropped-from-preload',
+        createRejectedNativeFileDropPayload({
+          byteLength: 0,
+          pathCount: files.length,
+          reason: 'too-many-paths',
+          status: 'rejected'
+        })
+      )
+      return
+    }
+
     const paths: string[] = []
     for (let i = 0; i < files.length; i++) {
       // webUtils.getPathForFile is the Electron 28+ replacement for File.path
@@ -374,28 +395,14 @@ document.addEventListener(
       return
     }
 
-    // Why: preload must emit exactly one native-drop event per drop gesture.
-    // The preload layer already has the full FileList. Re-emitting one IPC
-    // message per path and asking the renderer to reconstruct the gesture via
-    // timing would be both fragile and slower under large drops.
-    if (resolution?.target === NATIVE_FILE_DROP_TARGET.fileExplorer) {
-      ipcRenderer.send('terminal:file-dropped-from-preload', {
-        paths,
-        target: NATIVE_FILE_DROP_TARGET.fileExplorer,
-        destinationDir: resolution.destinationDir
-      })
-    } else {
-      // Why: falls back to 'editor' so drops on surfaces without an explicit
-      // marker preserve the prior open-in-editor behavior instead of being
-      // silently discarded.
-      ipcRenderer.send('terminal:file-dropped-from-preload', {
-        paths,
-        target: resolution?.target ?? NATIVE_FILE_DROP_TARGET.editor,
-        ...(resolution?.target === NATIVE_FILE_DROP_TARGET.terminal && resolution.tabId
-          ? { tabId: resolution.tabId }
-          : {})
-      })
+    const payload = createNativeFileDropPayload(resolution, paths)
+    if (!payload) {
+      return
     }
+    // Why: preload must emit exactly one native-drop event per drop gesture.
+    // The shared planner also rejects large path payloads without including
+    // path contents in the failure event.
+    ipcRenderer.send('terminal:file-dropped-from-preload', payload)
   },
   true
 )
@@ -695,6 +702,9 @@ const api = {
       cwd?: string
       env?: Record<string, string>
       command?: string
+      launchConfig?: SleepingAgentLaunchConfig
+      launchToken?: string
+      launchAgent?: TuiAgent
       startupCommandDelivery?: StartupCommandDelivery
       connectionId?: string | null
       worktreeId?: string
@@ -715,6 +725,7 @@ const api = {
       telemetry?: { agent_kind: AgentKind; launch_source: LaunchSource; request_kind: RequestKind }
     }): Promise<{
       id: string
+      launchConfig?: SleepingAgentLaunchConfig
       snapshot?: string
       snapshotCols?: number
       snapshotRows?: number
@@ -938,6 +949,7 @@ const api = {
       branch: string
       linkedPRNumber?: number | null
       fallbackPRNumber?: number | null
+      acceptMergedFallbackPR?: boolean
     }): Promise<unknown> => ipcRenderer.invoke('gh:prForBranch', args),
 
     refreshPRNow: (args: { candidate: GitHubPRRefreshCandidate }): Promise<unknown> =>
@@ -1699,7 +1711,8 @@ const api = {
     copilotStatus: (): Promise<AgentHookInstallStatus> =>
       ipcRenderer.invoke('agentHooks:copilotStatus'),
     hermesStatus: (): Promise<AgentHookInstallStatus> =>
-      ipcRenderer.invoke('agentHooks:hermesStatus')
+      ipcRenderer.invoke('agentHooks:hermesStatus'),
+    kimiStatus: (): Promise<AgentHookInstallStatus> => ipcRenderer.invoke('agentHooks:kimiStatus')
   },
 
   agentTrust: {
@@ -1979,6 +1992,8 @@ const api = {
         filename: string
         totalBytes: number | null
         mimeType: string | null
+        savePath: string
+        status: 'downloading'
       }) => void
     ): (() => void) => {
       const listener = (
@@ -1990,6 +2005,8 @@ const api = {
           filename: string
           totalBytes: number | null
           mimeType: string | null
+          savePath: string
+          status: 'downloading'
         }
       ) => callback(data)
       ipcRenderer.on('browser:download-requested', listener)
@@ -1998,14 +2015,22 @@ const api = {
 
     onDownloadProgress: (
       callback: (event: {
+        browserPageId?: string
         downloadId: string
         receivedBytes: number
         totalBytes: number | null
+        state: 'progressing' | 'interrupted' | null
       }) => void
     ): (() => void) => {
       const listener = (
         _event: Electron.IpcRendererEvent,
-        data: { downloadId: string; receivedBytes: number; totalBytes: number | null }
+        data: {
+          browserPageId?: string
+          downloadId: string
+          receivedBytes: number
+          totalBytes: number | null
+          state: 'progressing' | 'interrupted' | null
+        }
       ) => callback(data)
       ipcRenderer.on('browser:download-progress', listener)
       return () => ipcRenderer.removeListener('browser:download-progress', listener)
@@ -2013,6 +2038,7 @@ const api = {
 
     onDownloadFinished: (
       callback: (event: {
+        browserPageId?: string
         downloadId: string
         status: 'completed' | 'canceled' | 'failed'
         savePath: string | null
@@ -2022,6 +2048,7 @@ const api = {
       const listener = (
         _event: Electron.IpcRendererEvent,
         data: {
+          browserPageId?: string
           downloadId: string
           status: 'completed' | 'canceled' | 'failed'
           savePath: string | null
@@ -2115,11 +2142,6 @@ const api = {
       ipcRenderer.on('browser:open-link-in-orca-tab', listener)
       return () => ipcRenderer.removeListener('browser:open-link-in-orca-tab', listener)
     },
-
-    acceptDownload: (args: {
-      downloadId: string
-    }): Promise<{ ok: true } | { ok: false; reason: string }> =>
-      ipcRenderer.invoke('browser:acceptDownload', args),
 
     cancelDownload: (args: { downloadId: string }): Promise<boolean> =>
       ipcRenderer.invoke('browser:cancelDownload', args),
@@ -2936,6 +2958,26 @@ const api = {
       ipcRenderer.on('ui:toggleStatusBar', listener)
       return () => ipcRenderer.removeListener('ui:toggleStatusBar', listener)
     },
+    onExportPdfRequested: (callback: () => void): (() => void) => {
+      const listener = (_event: Electron.IpcRendererEvent) => callback()
+      ipcRenderer.on('export:requestPdf', listener)
+      return () => ipcRenderer.removeListener('export:requestPdf', listener)
+    },
+    onAppMenuPaste: (callback: () => void): (() => void) => {
+      const listener = (_event: Electron.IpcRendererEvent) => callback()
+      ipcRenderer.on('ui:appMenuPaste', listener)
+      return () => ipcRenderer.removeListener('ui:appMenuPaste', listener)
+    },
+    onEditableContextPaste: (
+      callback: (data: { plainTextOnly: boolean }) => void
+    ): (() => void) => {
+      const listener = (
+        _event: Electron.IpcRendererEvent,
+        data: { plainTextOnly: boolean }
+      ): void => callback({ plainTextOnly: data?.plainTextOnly === true })
+      ipcRenderer.on('ui:editableContextPaste', listener)
+      return () => ipcRenderer.removeListener('ui:editableContextPaste', listener)
+    },
     onDictationKeyDown: (callback: () => void): (() => void) => {
       const listener = (_event: Electron.IpcRendererEvent) => callback()
       ipcRenderer.on('ui:dictationKeyDown', listener)
@@ -2968,6 +3010,10 @@ const api = {
         requestId?: string
         worktreeId: string
         command?: string
+        env?: Record<string, string>
+        launchConfig?: SleepingAgentLaunchConfig
+        launchToken?: string
+        launchAgent?: TuiAgent
         title?: string
         ptyId?: string
         activate?: boolean
@@ -2984,6 +3030,10 @@ const api = {
           requestId?: string
           worktreeId: string
           command?: string
+          env?: Record<string, string>
+          launchConfig?: SleepingAgentLaunchConfig
+          launchToken?: string
+          launchAgent?: TuiAgent
           title?: string
           ptyId?: string
           activate?: boolean
@@ -3004,6 +3054,10 @@ const api = {
         afterTabId?: string
         targetGroupId?: string
         command?: string
+        env?: Record<string, string>
+        launchConfig?: SleepingAgentLaunchConfig
+        launchToken?: string
+        launchAgent?: TuiAgent
         startupCommandDelivery?: StartupCommandDelivery
         title?: string
         activate?: boolean
@@ -3017,6 +3071,10 @@ const api = {
           afterTabId?: string
           targetGroupId?: string
           command?: string
+          env?: Record<string, string>
+          launchConfig?: SleepingAgentLaunchConfig
+          launchToken?: string
+          launchAgent?: TuiAgent
           startupCommandDelivery?: StartupCommandDelivery
           title?: string
           activate?: boolean
@@ -3194,9 +3252,10 @@ const api = {
       ipcRenderer.on('terminal:zoom', listener)
       return () => ipcRenderer.removeListener('terminal:zoom', listener)
     },
-    readClipboardText: (): Promise<string> => ipcRenderer.invoke('clipboard:readText'),
-    readSelectionClipboardText: (): Promise<string> =>
-      ipcRenderer.invoke('clipboard:readSelectionText'),
+    readClipboardText: (options?: ReadClipboardTextOptions): Promise<string> =>
+      ipcRenderer.invoke('clipboard:readText', options),
+    readSelectionClipboardText: (options?: ReadClipboardTextOptions): Promise<string> =>
+      ipcRenderer.invoke('clipboard:readSelectionText', options),
     saveClipboardImageAsTempFile: (args?: {
       connectionId?: string | null
     }): Promise<string | null> => ipcRenderer.invoke('clipboard:saveImageAsTempFile', args),
@@ -3206,6 +3265,19 @@ const api = {
       ipcRenderer.invoke('clipboard:writeSelectionText', text),
     writeClipboardImage: (dataUrl: string): Promise<void> =>
       ipcRenderer.invoke('clipboard:writeImage', dataUrl),
+    performNativePaste: (options?: { mode?: 'paste' | 'paste-and-match-style' }): void => {
+      ipcRenderer.send('ui:performNativePaste', {
+        mode: options?.mode === 'paste-and-match-style' ? 'paste-and-match-style' : 'paste'
+      })
+    },
+    writeClipboardFile: (
+      args:
+        | {
+            filePath: string
+            connectionId?: string | null
+          }
+        | string
+    ): Promise<{ ok: boolean; reason?: string }> => ipcRenderer.invoke('clipboard:writeFile', args),
     onFileDrop: (callback: (data: NativeFileDropPayload) => void): (() => void) =>
       subscribeNativeFileDrop(callback),
     getZoomLevel: (): number => webFrame.getZoomLevel(),
@@ -3774,6 +3846,11 @@ const api = {
      *  cannot resurrect it. Fire-and-forget; no response. */
     drop: (paneKey: string): void => {
       ipcRenderer.send('agentStatus:drop', paneKey)
+    },
+    /** Drop all cached hook statuses under one terminal tab prefix. Fired on
+     *  explicit tab close even when the renderer has no matching local row. */
+    dropByTabPrefix: (tabId: string): void => {
+      ipcRenderer.send('agentStatus:dropByTabPrefix', tabId)
     }
   },
 
