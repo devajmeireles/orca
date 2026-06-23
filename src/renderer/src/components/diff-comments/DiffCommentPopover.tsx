@@ -34,6 +34,10 @@ type Props = {
   onSubmit: (body: string) => Promise<void>
 }
 
+function hasDraftText(body: string): boolean {
+  return /\S/u.test(body)
+}
+
 export function DiffCommentPopover({
   lineNumber,
   startLine,
@@ -150,10 +154,9 @@ export function DiffCommentPopover({
       if (popoverRef.current.contains(ev.target as Node)) {
         return
       }
-      // Why: never discard an unsaved draft on outside-click. If the user has
-      // typed content, keep the popover open; only dismiss on outside-click when
-      // the draft is empty. Escape (onKeyDown) still cancels explicitly.
-      if (hasBoundedCommentBodyText(bodyRef.current)) {
+      // Why: outside-click is a soft dismiss, so preserve any non-whitespace
+      // draft even when submit's bounded scanner would reject it as too large.
+      if (hasDraftText(bodyRef.current)) {
         return
       }
       // Why: read the latest onCancel from the ref rather than closing over it
