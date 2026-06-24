@@ -4,6 +4,8 @@ type SeedWorktree = { id: string; repoId: string; isMainWorktree: boolean }
 
 const mocks = vi.hoisted(() => {
   const state = {
+    activeView: 'terminal',
+    activePendingCreationId: null as string | null,
     activeWorktreeId: null as string | null,
     worktreesByRepo: {} as Record<string, SeedWorktree[]>,
     lastVisitedAtByWorktreeId: {} as Record<string, number>,
@@ -62,6 +64,8 @@ function simulateDelete(worktreeId: string, nulledActive: boolean): void {
 
 describe('prepareActiveWorktreeFocusAfterDelete', () => {
   beforeEach(() => {
+    mocks.state.activeView = 'terminal'
+    mocks.state.activePendingCreationId = null
     mocks.state.activeWorktreeId = null
     mocks.state.worktreesByRepo = {}
     mocks.state.lastVisitedAtByWorktreeId = {}
@@ -128,6 +132,58 @@ describe('prepareActiveWorktreeFocusAfterDelete', () => {
     simulateDelete('wt-del', false)
     // Why: a concurrent activation moved focus before the delete settled.
     mocks.state.activeWorktreeId = 'wt-a'
+    commit()
+
+    expect(activateAndRevealWorktree).not.toHaveBeenCalled()
+  })
+
+  it('does not steal focus when the delete starts from a non-terminal view', () => {
+    seed([{ id: 'main', isMainWorktree: true }, { id: 'wt-del' }])
+    // Why: top-level views can retain the last terminal worktree id without
+    // meaning the user is currently looking at that workspace.
+    mocks.state.activeView = 'space'
+    mocks.state.activeWorktreeId = 'wt-del'
+
+    const commit = prepareActiveWorktreeFocusAfterDelete('wt-del')
+    simulateDelete('wt-del', true)
+    commit()
+
+    expect(activateAndRevealWorktree).not.toHaveBeenCalled()
+  })
+
+  it('does not reclaim focus when the user leaves terminal view during the delete', () => {
+    seed([{ id: 'main', isMainWorktree: true }, { id: 'wt-del' }])
+    mocks.state.activeWorktreeId = 'wt-del'
+
+    const commit = prepareActiveWorktreeFocusAfterDelete('wt-del')
+    simulateDelete('wt-del', true)
+    mocks.state.activeView = 'settings'
+    commit()
+
+    expect(activateAndRevealWorktree).not.toHaveBeenCalled()
+  })
+
+  it('does not steal focus when a pending creation panel is active before delete', () => {
+    seed([{ id: 'main', isMainWorktree: true }, { id: 'wt-del' }])
+    // Why: pending creation keeps the prior worktree id while the creation
+    // surface owns the content area, so it is not viewing the old workspace.
+    mocks.state.activePendingCreationId = 'creation-1'
+    mocks.state.activeWorktreeId = 'wt-del'
+
+    const commit = prepareActiveWorktreeFocusAfterDelete('wt-del')
+    simulateDelete('wt-del', true)
+    commit()
+
+    expect(activateAndRevealWorktree).not.toHaveBeenCalled()
+  })
+
+  it('does not reclaim focus when pending creation opens during the delete', () => {
+    seed([{ id: 'main', isMainWorktree: true }, { id: 'wt-del' }])
+    mocks.state.activeWorktreeId = 'wt-del'
+
+    const commit = prepareActiveWorktreeFocusAfterDelete('wt-del')
+    simulateDelete('wt-del', true)
+    mocks.state.activePendingCreationId = 'creation-1'
     commit()
 
     expect(activateAndRevealWorktree).not.toHaveBeenCalled()

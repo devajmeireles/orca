@@ -4,8 +4,8 @@ import { activateAndRevealWorktree } from '@/lib/worktree-activation'
 
 type AppStoreState = ReturnType<typeof useAppStore.getState>
 
-// Why: after deleting the workspace the user is currently viewing, dropping them
-// on the empty Landing screen loses their place. Pick the next workspace to focus
+// Why: after deleting the workspace the user is currently viewing, leaving the
+// active workspace empty loses their place. Pick the next workspace to focus
 // so a delete behaves like closing a tab — prefer another non-base/primary
 // workspace of the same project (most-recently-visited first), and fall back to
 // the project's base/primary workspace when no other workspace remains.
@@ -32,16 +32,19 @@ function pickNextWorktreeIdAfterDelete(
 function focusNextWorktreeAfterActiveDelete(
   deletedWorktreeId: string,
   repoId: string | null,
-  wasActiveBeforeDelete: boolean
+  wasViewingBeforeDelete: boolean
 ): void {
-  if (!wasActiveBeforeDelete || !repoId) {
+  if (!wasViewingBeforeDelete || !repoId) {
     return
   }
   const state = useAppStore.getState()
-  // Why: a concurrent activation may have already moved focus off the empty
-  // state between this delete starting and finishing — only reclaim focus when
-  // the deletion actually left the user on the Landing screen.
-  if (state.activeWorktreeId !== null) {
+  // Why: a concurrent activation may have already moved focus during the delete.
+  // Only hand off when deletion left the terminal workspace selection empty.
+  if (
+    state.activeView !== 'terminal' ||
+    state.activePendingCreationId !== null ||
+    state.activeWorktreeId !== null
+  ) {
     return
   }
   const nextWorktreeId = pickNextWorktreeIdAfterDelete(state, repoId, deletedWorktreeId)
@@ -61,7 +64,10 @@ function focusNextWorktreeAfterActiveDelete(
  */
 export function prepareActiveWorktreeFocusAfterDelete(worktreeId: string): () => void {
   const state = useAppStore.getState()
-  const wasActive = state.activeWorktreeId === worktreeId
+  const wasViewing =
+    state.activeView === 'terminal' &&
+    state.activePendingCreationId === null &&
+    state.activeWorktreeId === worktreeId
   const repoId = getWorktreeMapFromState(state).get(worktreeId)?.repoId ?? null
-  return () => focusNextWorktreeAfterActiveDelete(worktreeId, repoId, wasActive)
+  return () => focusNextWorktreeAfterActiveDelete(worktreeId, repoId, wasViewing)
 }
