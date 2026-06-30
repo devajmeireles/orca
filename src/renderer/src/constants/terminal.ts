@@ -51,6 +51,11 @@ export type PasteTerminalTextDetail = {
 export type RunTerminalCommandDetail = {
   tabId: string
   input: string
+  /** PTY whose idleness the reuse path probed. The receiver re-runs against the
+   *  pane that owns this PTY so the command lands in the exact pane that was
+   *  checked — never a different, possibly busy, split pane. Omitted = fall back
+   *  to the tab's active pane. */
+  ptyId?: string
 }
 
 export type SplitTerminalPaneDetail = {

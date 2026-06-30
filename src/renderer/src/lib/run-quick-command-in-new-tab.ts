@@ -69,7 +69,15 @@ async function reuseQuickCommandTerminalTab({
     // the web runtime, where this is stubbed null), a shell name = idle prompt,
     // anything else = a foreground process still running. Only an idle prompt is
     // safe to re-run in.
-    const foreground = await window.api.pty.getForegroundProcess(ptyId)
+    // Why: callers invoke runQuickCommandInNewTab with `void`, so a rejected IPC
+    // here would surface as an unhandled rejection and skip the new-tab fallback.
+    // Treat a failed probe as "not reusable" and move on to the next candidate.
+    let foreground: string | null
+    try {
+      foreground = await window.api.pty.getForegroundProcess(ptyId)
+    } catch {
+      continue
+    }
     if (!foreground || !isShellProcess(foreground)) {
       continue
     }
@@ -84,6 +92,9 @@ async function reuseQuickCommandTerminalTab({
       new CustomEvent<RunTerminalCommandDetail>(RUN_TERMINAL_COMMAND_EVENT, {
         detail: {
           tabId: candidate.id,
+          // Why: re-run against the exact PTY we just probed for idleness so the
+          // receiver lands the command in that pane, not a different split pane.
+          ptyId,
           // Force Enter: the split button is a "run" affordance regardless of the
           // command's Insert-mode `appendEnter` preference.
           input: buildTerminalQuickCommandInput({

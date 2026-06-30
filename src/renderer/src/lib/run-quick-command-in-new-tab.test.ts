@@ -277,7 +277,7 @@ describe('runQuickCommandInNewTab — tab reuse', () => {
     expect(dispatchEvent).toHaveBeenCalledTimes(1)
     const event = dispatchEvent.mock.calls[0][0] as CustomEvent
     expect(event.type).toBe('orca-run-terminal-command')
-    expect(event.detail).toEqual({ tabId: 'tab-dev', input: 'npm run dev\r' })
+    expect(event.detail).toEqual({ tabId: 'tab-dev', ptyId: 'pty-dev', input: 'npm run dev\r' })
     expect(mockState.setRecentQuickCommandForGroup).toHaveBeenCalledWith('group-1', 'dev')
   })
 
@@ -292,7 +292,25 @@ describe('runQuickCommandInNewTab — tab reuse', () => {
     })
 
     const event = dispatchEvent.mock.calls[0][0] as CustomEvent
-    expect(event.detail).toEqual({ tabId: 'tab-dev', input: 'npm run dev\r' })
+    expect(event.detail).toEqual({ tabId: 'tab-dev', ptyId: 'pty-dev', input: 'npm run dev\r' })
+  })
+
+  it('opens a new tab when the foreground-process probe rejects', async () => {
+    seedExistingDevTab()
+    getForegroundProcess.mockRejectedValue(new Error('ipc unavailable'))
+
+    const result = await runQuickCommandInNewTab({
+      command: reuseCommand,
+      worktreeId: 'wt-1',
+      groupId: 'group-1'
+    })
+
+    expect(result).toEqual({ tabId: 'tab-new' })
+    expect(mockState.createTab).toHaveBeenCalledWith('wt-1', 'group-1', undefined, {
+      quickCommandLabel: 'Dev',
+      quickCommandId: 'dev'
+    })
+    expect(dispatchEvent).not.toHaveBeenCalled()
   })
 
   it('opens a new stamped tab when the existing terminal is busy', async () => {

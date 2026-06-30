@@ -32,9 +32,10 @@ function makeManager(activePane: TestPane | null, panes: TestPane[]) {
   }
 }
 
-function makeTransport(sent = true) {
+function makeTransport(sent = true, ptyId = 'pty-1') {
   return {
-    sendInput: vi.fn<(data: string) => boolean>(() => sent)
+    sendInput: vi.fn<(data: string) => boolean>(() => sent),
+    getPtyId: vi.fn<() => string>(() => ptyId)
   }
 }
 
@@ -115,5 +116,44 @@ describe('handleTerminalProgrammaticCommandRun', () => {
     })
 
     expect(transport.sendInput).toHaveBeenCalledWith('ls\r')
+  })
+
+  it('targets the pane that owns the probed ptyId, not the active pane', () => {
+    const activePane = makePane({ id: 1, leafId: 'leaf-active' })
+    const targetPane = makePane({ id: 2, leafId: 'leaf-target' })
+    const activeTransport = makeTransport(true, 'pty-active')
+    const targetTransport = makeTransport(true, 'pty-target')
+
+    handleTerminalProgrammaticCommandRun({
+      detail: { tabId: 'tab-1', input: 'npm run dev\r', ptyId: 'pty-target' },
+      tabId: 'tab-1',
+      getManager: () => makeManager(activePane, [activePane, targetPane]) as never,
+      getPaneTransports: () =>
+        new Map([
+          [activePane.id, activeTransport],
+          [targetPane.id, targetTransport]
+        ]) as never
+    })
+
+    expect(targetTransport.sendInput).toHaveBeenCalledWith('npm run dev\r')
+    expect(activeTransport.sendInput).not.toHaveBeenCalled()
+    expect(mocks.recordTerminalUserInputForLeaf).toHaveBeenCalledWith('tab-1', 'leaf-target')
+    expect(targetPane.terminal.focus).toHaveBeenCalledOnce()
+  })
+
+  it('does nothing when no pane transport owns the probed ptyId', () => {
+    const pane = makePane()
+    const transport = makeTransport(true, 'pty-other')
+
+    handleTerminalProgrammaticCommandRun({
+      detail: { tabId: 'tab-1', input: 'npm run dev\r', ptyId: 'pty-missing' },
+      tabId: 'tab-1',
+      getManager: () => makeManager(pane, [pane]) as never,
+      getPaneTransports: () => new Map([[pane.id, transport]]) as never
+    })
+
+    expect(transport.sendInput).not.toHaveBeenCalled()
+    expect(mocks.recordTerminalUserInputForLeaf).not.toHaveBeenCalled()
+    expect(pane.terminal.focus).not.toHaveBeenCalled()
   })
 })
