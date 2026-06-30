@@ -57,6 +57,7 @@ export type TabsSlice = {
         | 'label'
         | 'generatedLabel'
         | 'quickCommandLabel'
+        | 'quickCommandId'
         | 'customLabel'
         | 'color'
         | 'isPreview'
@@ -83,6 +84,7 @@ export type TabsSlice = {
         | 'label'
         | 'generatedLabel'
         | 'quickCommandLabel'
+        | 'quickCommandId'
         | 'customLabel'
         | 'color'
         | 'isPreview'
@@ -160,6 +162,7 @@ export type TabsSlice = {
         | 'label'
         | 'generatedLabel'
         | 'quickCommandLabel'
+        | 'quickCommandId'
         | 'customLabel'
         | 'color'
         | 'isPinned'
@@ -650,6 +653,7 @@ export const createTabsSlice: StateCreator<AppState, [], [], TabsSlice> = (set, 
         ...(init?.quickCommandLabel !== undefined
           ? { quickCommandLabel: init.quickCommandLabel }
           : {}),
+        ...(init?.quickCommandId !== undefined ? { quickCommandId: init.quickCommandId } : {}),
         customLabel: init?.customLabel ?? null,
         color: init?.color ?? null,
         sortOrder: nextOrder.length,
@@ -722,6 +726,7 @@ export const createTabsSlice: StateCreator<AppState, [], [], TabsSlice> = (set, 
         ...(init?.quickCommandLabel !== undefined
           ? { quickCommandLabel: init.quickCommandLabel }
           : {}),
+        ...(init?.quickCommandId !== undefined ? { quickCommandId: init.quickCommandId } : {}),
         customLabel: init?.customLabel ?? null,
         color: init?.color ?? null,
         sortOrder: 0,
@@ -1748,6 +1753,7 @@ export const createTabsSlice: StateCreator<AppState, [], [], TabsSlice> = (set, 
       label: init?.label ?? tab.label,
       generatedLabel: init?.generatedLabel ?? tab.generatedLabel,
       quickCommandLabel: init?.quickCommandLabel ?? tab.quickCommandLabel,
+      quickCommandId: init?.quickCommandId ?? tab.quickCommandId,
       customLabel: init?.customLabel ?? tab.customLabel,
       color: init?.color ?? tab.color,
       isPinned: init?.isPinned ?? tab.isPinned,
@@ -1856,6 +1862,7 @@ export const createTabsSlice: StateCreator<AppState, [], [], TabsSlice> = (set, 
               ...(tab.quickCommandLabel?.trim()
                 ? { quickCommandLabel: tab.quickCommandLabel.trim() }
                 : {}),
+              ...(tab.quickCommandId?.trim() ? { quickCommandId: tab.quickCommandId.trim() } : {}),
               ...(tab.generatedTitle?.trim() ? { generatedLabel: tab.generatedTitle.trim() } : {}),
               customLabel: tab.customTitle,
               color: tab.color,

@@ -420,6 +420,10 @@ export type TerminalSlice = {
        *  bar can show the provider icon before the agent's first hook event. */
       launchAgent?: TuiAgent
       quickCommandLabel?: string | null
+      /** Internal id of the reuse-enabled Quick Command that spawned this tab,
+       *  stamped so a later run can find and refocus this terminal instead of
+       *  opening a new one. Omitted for commands without tab reuse. */
+      quickCommandId?: string | null
       /** Initial native-chat view mode for the unified tab. When the
        *  `openAgentTabsInChatByDefault` setting is on, agent launches pass
        *  `'chat'` so the tab opens in the native chat view; omitted otherwise
@@ -735,6 +739,7 @@ export const createTerminalSlice: StateCreator<AppState, [], [], TerminalSlice> 
       const nextOrdinal = getNextTerminalOrdinal(existing)
       const defaultTitle = `Terminal ${nextOrdinal}`
       const quickCommandLabel = options?.quickCommandLabel?.trim()
+      const quickCommandId = options?.quickCommandId?.trim()
       const remoteConnectionId = getRemoteConnectionIdForWorktree(s, worktreeId)
       const isRemoteWorktree = Boolean(remoteConnectionId)
       const isWslWorktree = worktreeUsesWslPath(s, worktreeId)
@@ -766,6 +771,7 @@ export const createTerminalSlice: StateCreator<AppState, [], [], TerminalSlice> 
         title: defaultTitle,
         defaultTitle,
         ...(quickCommandLabel ? { quickCommandLabel } : {}),
+        ...(quickCommandId ? { quickCommandId } : {}),
         customTitle: null,
         color: null,
         sortOrder: existing.length,
@@ -843,6 +849,7 @@ export const createTerminalSlice: StateCreator<AppState, [], [], TerminalSlice> 
         ...(tab.quickCommandLabel?.trim()
           ? { quickCommandLabel: tab.quickCommandLabel.trim() }
           : {}),
+        ...(tab.quickCommandId?.trim() ? { quickCommandId: tab.quickCommandId.trim() } : {}),
         customLabel: tab.customTitle,
         color: tab.color,
         sortOrder: cleanedGroupOrder.length,
@@ -2612,6 +2619,11 @@ export const createTerminalSlice: StateCreator<AppState, [], [], TerminalSlice> 
                 .filter((tab) => tab.contentType === 'terminal' && tab.quickCommandLabel?.trim())
                 .map((tab) => [tab.entityId, tab.quickCommandLabel!.trim()])
             )
+            const quickCommandIdByTerminalId = new Map(
+              (session.unifiedTabs?.[worktreeId] ?? [])
+                .filter((tab) => tab.contentType === 'terminal' && tab.quickCommandId?.trim())
+                .map((tab) => [tab.entityId, tab.quickCommandId!.trim()])
+            )
             return [
               worktreeId,
               [...tabs]
@@ -2624,9 +2636,12 @@ export const createTerminalSlice: StateCreator<AppState, [], [], TerminalSlice> 
                 .map((tab, index) => {
                   const quickCommandLabel =
                     tab.quickCommandLabel?.trim() || quickCommandLabelByTerminalId.get(tab.id)
+                  const quickCommandId =
+                    tab.quickCommandId?.trim() || quickCommandIdByTerminalId.get(tab.id)
                   return {
                     ...clearTransientTerminalState(tab, index),
                     ...(quickCommandLabel ? { quickCommandLabel } : {}),
+                    ...(quickCommandId ? { quickCommandId } : {}),
                     sortOrder: index,
                     pendingActivationSpawn: true
                   }

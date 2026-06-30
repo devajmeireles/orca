@@ -547,6 +547,10 @@ function buildMirroredTerminalTabs(
       activeSurface.quickCommandLabel?.trim() ||
       surfaces.find((surface) => surface.quickCommandLabel?.trim())?.quickCommandLabel?.trim() ||
       existing?.quickCommandLabel?.trim()
+    // Why: the host snapshot does not carry the internal quick-command id (web/mobile
+    // reuse is disabled — getForegroundProcess returns null there), so preserve the
+    // client's own record across reconciles instead of dropping it.
+    const quickCommandId = existing?.quickCommandId?.trim()
     // Why: tab color/pin echo back through host snapshots, so prefer the client's
     // own record (kept authoritative in tabsByWorktree by the pin/color setters)
     // and fall back to the host value only when this client has no prior tab —
@@ -570,6 +574,7 @@ function buildMirroredTerminalTabs(
         title,
         defaultTitle: existing?.defaultTitle ?? title,
         ...(quickCommandLabel ? { quickCommandLabel } : {}),
+        ...(quickCommandId ? { quickCommandId } : {}),
         customTitle: existing?.customTitle ?? null,
         color,
         isPinned,
@@ -723,6 +728,7 @@ function buildTerminalUnifiedTab(
     contentType: 'terminal',
     label: tab.title,
     ...(tab.quickCommandLabel?.trim() ? { quickCommandLabel: tab.quickCommandLabel.trim() } : {}),
+    ...(tab.quickCommandId?.trim() ? { quickCommandId: tab.quickCommandId.trim() } : {}),
     ...(tab.generatedTitle?.trim() ? { generatedLabel: tab.generatedTitle.trim() } : {}),
     customLabel: tab.customTitle,
     color: tab.color,
@@ -1386,6 +1392,7 @@ function terminalTabEqual(a: TerminalTab, b: TerminalTab): boolean {
     a.title === b.title &&
     a.defaultTitle === b.defaultTitle &&
     a.quickCommandLabel === b.quickCommandLabel &&
+    a.quickCommandId === b.quickCommandId &&
     a.generatedTitle === b.generatedTitle &&
     a.customTitle === b.customTitle &&
     a.color === b.color &&
